@@ -4,11 +4,16 @@
   "description": "Bootstrap a reusable AGENTS + skills + spec workflow for Codex projects.",
   "license": "MIT",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "project-engineering-workflow": "./bin/project-engineering-workflow.mjs",
     "pew": "./bin/project-engineering-workflow.mjs"
   },
   "files": [
+    "README.md",
+    "README.zh-CN.md",
     "SKILL.md",
     "agents",
     "assets",
@@ -18,7 +23,9 @@
   ],
   "scripts": {
     "doctor": "node ./bin/project-engineering-workflow.mjs doctor --output-dir ./assets/template-root",
-    "smoke": "node ./bin/project-engineering-workflow.mjs init --project-name Smoke --project-slug smoke --stack-name \"React + Node.js\" --app-path apps/web --test-command \"pnpm test\" --output-dir /private/tmp/project-engineering-workflow-smoke"
+    "smoke": "node ./bin/project-engineering-workflow.mjs init --project-name Smoke --project-slug smoke --stack-name \"React + Node.js\" --app-path apps/web --test-command \"pnpm test\" --output-dir /private/tmp/project-engineering-workflow-smoke",
+    "pack:dry-run": "npm pack --dry-run --package-lock=false --cache /private/tmp/npm-cache-workflow-skills",
+    "publish:public": "npm publish --access public"
   },
   "engines": {
     "node": ">=18"
