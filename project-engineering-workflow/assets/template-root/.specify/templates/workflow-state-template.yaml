@@ -1,0 +1,19 @@
+feature:
+  slug: "[FEATURE SLUG]"
+  name: "[FEATURE NAME]"
+  created_at: "[DATE]"
+  original_request: "[ORIGINAL REQUEST]"
+
+requirement_status: draft
+scope_status: unlocked
+active_milestone: null
+
+milestones: []
+
+capability_routes: []
+
+role_reviews: []
+
+validation_status: pending
+handoff_notes: []
+residual_risks: []

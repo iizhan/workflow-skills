@@ -1,0 +1,26 @@
+{
+  "name": "@workflow-skills/project-engineering-workflow",
+  "version": "0.1.0",
+  "description": "Bootstrap a reusable AGENTS + skills + spec workflow for Codex projects.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "project-engineering-workflow": "./bin/project-engineering-workflow.mjs",
+    "pew": "./bin/project-engineering-workflow.mjs"
+  },
+  "files": [
+    "SKILL.md",
+    "agents",
+    "assets",
+    "bin",
+    "references",
+    "scripts"
+  ],
+  "scripts": {
+    "doctor": "node ./bin/project-engineering-workflow.mjs doctor --output-dir ./assets/template-root",
+    "smoke": "node ./bin/project-engineering-workflow.mjs init --project-name Smoke --project-slug smoke --stack-name \"React + Node.js\" --app-path apps/web --test-command \"pnpm test\" --output-dir /private/tmp/project-engineering-workflow-smoke"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

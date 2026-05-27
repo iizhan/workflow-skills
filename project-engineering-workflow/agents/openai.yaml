@@ -1,0 +1,7 @@
+interface:
+  display_name: "Project Engineering Workflow"
+  short_description: "Bootstrap a reusable engineering flow for any repo"
+  default_prompt: "Use $project-engineering-workflow to bootstrap a reusable AGENTS + skills + spec workflow for this repository."
+
+policy:
+  allow_implicit_invocation: true
