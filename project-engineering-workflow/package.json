@@ -8,8 +8,8 @@
     "access": "public"
   },
   "bin": {
-    "project-engineering-workflow": "./bin/project-engineering-workflow.mjs",
-    "pew": "./bin/project-engineering-workflow.mjs"
+    "project-engineering-workflow": "bin/project-engineering-workflow.mjs",
+    "pew": "bin/project-engineering-workflow.mjs"
   },
   "files": [
     "README.md",
