@@ -7,6 +7,7 @@ Workflow Skills 是一套面向 AI 协作研发的企业级工程化工作流 st
 它把以下能力组合成一套可接入、可治理、可恢复、可验证的项目底座：
 
 - spec-kit 风格的规格与交付工件
+- 记忆策略、会话复盘与框架进化工件
 - Superpowers 风格的增强执行与验证纪律
 - GSD 风格的长任务编排与上下文续航
 - gstack 风格的角色化评审
@@ -36,6 +37,8 @@ Enterprise AI Framework
 - 项目级 AI 协作规则
 - 本地 skills
 - feature 级规格工件
+- 记忆治理
+- 框架进化
 - workflow 状态文件
 - Superpowers / GSD / gstack 路由
 - review 与测试收口
@@ -60,13 +63,17 @@ flowchart TD
   F --> G["Superpowers: 增强执行"]
   F --> H["GSD: 长任务编排"]
   F --> I["gstack: 角色评审"]
+  E --> R["Memory Router"]
+  E --> Q["Evolution Router"]
   G --> J["项目本地 Skills"]
   H --> J
   I --> J
+  Q --> J
+  R --> J
   J --> K["代码生成"]
   K --> L["代码审查"]
   L --> M["测试与交付报告"]
-  M --> N["specs / workflow-state / delivery report"]
+  M --> N["specs / workflow-state / memory candidates / rule change candidates / delivery report"]
 ```
 
 ## 组件映射
@@ -77,7 +84,7 @@ flowchart TD
 | 智能体治理 | 控制流程、范围、角色和交付门禁 | `AGENTS.md`、`constitution.md`、router skills |
 | 可复用技能 | 把原子能力封装为声明式模块 | `.agents/skills/*/SKILL.md` |
 | 测试驱动验证 | 用 review 和测试保护实现质量 | `project-code-review`、`project-test-and-report`、项目测试命令 |
-| 上下文工程 | 保存任务状态、交接信息和历史决策 | `workflow-state.yaml`、`specs`、`docs` |
+| 上下文工程 | 保存任务状态、交接信息、历史决策、记忆候选和规则变更提案 | `workflow-state.yaml`、`specs`、`docs`、`memory-policy.md`、`evolution-policy.md` |
 | LLMOps 预留层 | 为后续可观测性、评估、安全、成本控制预留结构 | 结构化报告、能力路由、角色评审、剩余风险 |
 
 ## 快速接入
@@ -128,11 +135,22 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 │       ├── plan.md
 │       ├── tasks.md
 │       ├── quickstart.md
+│       ├── delivery-summary.md
+│       ├── task-reflection.md
+│       ├── rule-change-proposal.md
+│       ├── memory-policy.md
+│       ├── evolution-policy.md
+│       ├── evolution-prefill-policy.md
+│       ├── evolution-draft-protocol.md
+│       ├── reflection-output-protocol.md
+│       ├── final-output-protocol.md
 │       ├── workflow-state.yaml
 │       └── checklists/
 └── docs/
     ├── Codex团队开发说明.md
-    └── AI协作架构.md
+    ├── AI协作架构.md
+    ├── AI能力地图.md
+    └── 升级兼容策略.md
 ```
 
 ## 核心工作流
@@ -144,9 +162,11 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 5. 能力路由：通过 `project-superpowers-router` 判断是否需要增强能力。
 6. 长任务编排：多轮、多天、跨模块任务启用 `project-gsd-router`。
 7. 角色评审：产品、设计、工程、QA、发布判断启用 `project-gstack-router`。
-8. 交付工件：在 `specs/<feature>/` 下生成 spec、plan、tasks、workflow state。
-9. 实现与复用：通过 project-local skills 做最小安全实现。
-10. 收口交付：完成 code review、测试报告、未覆盖项和剩余风险说明。
+8. 记忆路由：涉及记住、遗忘、偏好、团队知识、会话总结或自我提升时启用 `project-memory-router`。
+9. 进化路由：涉及 skill、模板、流程、宪法持续优化时启用 `project-evolution-router`。
+10. 交付工件：在 `specs/<feature>/` 下生成 spec、plan、tasks、workflow state、记忆候选和规则变更候选。
+11. 实现与复用：通过 project-local skills 做最小安全实现。
+12. 收口交付：完成 code review、测试报告、未覆盖项、剩余风险说明，以及记忆/规则候选确认。
 
 ## 路由矩阵
 
@@ -172,6 +192,8 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 | --- | --- |
 | 框架冲突与内耗 | `AGENTS.md` 和 `constitution.md` 作为唯一最高规则 |
 | 上下文爆炸 | 使用 GSD 原子任务和 `workflow-state.yaml` 控制上下文预算 |
+| 记忆漂移或隐私泄漏 | 把记忆拆成用户私有、团队共享、agent 自身和任务会话四类；长期更新前先确认 |
+| 自我进化失控 | 先形成规则提案，再确认、验证、保留回滚路径，不允许静默自改 |
 | 需求漂移 | 需求门禁、范围锁定、验收标准必须先于实现 |
 | AI 产出不可验证 | 所有任务必须以 review、测试报告和剩余风险收口 |
 | 外部副作用失控 | 发布、部署、远端数据、凭证、定时任务必须显式确认并记录回退方式 |

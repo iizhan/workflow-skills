@@ -1,6 +1,6 @@
 {
   "name": "@workflow-skills/project-engineering-workflow",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Bootstrap a reusable AGENTS + skills + spec workflow for Codex projects.",
   "license": "MIT",
   "type": "module",

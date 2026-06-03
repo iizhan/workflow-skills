@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Project Memory Record",
+  "type": "object",
+  "required": [
+    "id",
+    "scope",
+    "type",
+    "summary",
+    "content",
+    "source",
+    "confidence",
+    "status",
+    "created_at",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "scope": { "enum": ["user_private", "team_shared", "agent_self", "task_session"] },
+    "owner_id": { "type": ["string", "null"] },
+    "type": { "enum": ["fact", "preference", "behavior_pattern", "relationship", "decision", "session_summary"] },
+    "summary": { "type": "string" },
+    "content": { "type": "string" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "source": { "type": "string" },
+    "reason": { "type": ["string", "null"] },
+    "confidence": { "enum": ["low", "medium", "high"] },
+    "retention": { "type": ["string", "null"] },
+    "activation": { "type": ["string", "null"] },
+    "status": { "enum": ["pending_confirm", "active", "archived", "revoked"] },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" },
+    "expires_at": { "type": ["string", "null"] },
+    "version": { "type": "integer" },
+    "extra": { "type": "object" }
+  },
+  "additionalProperties": true
+}

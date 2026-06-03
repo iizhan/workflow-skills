@@ -1,6 +1,6 @@
 ---
 name: project-engineering-workflow
-description: Bootstrap a portable R&D workflow for any repository. Use when the user wants to quickly add AGENTS rules, local project skills, spec/plan/tasks artifacts, onboarding docs, implementation gates, code review, and delivery validation to an existing or new project. Also use when the user asks to standardize team collaboration, improve engineering process, or create a low-threshold project engineering starter.
+description: Bootstrap or upgrade the project-engineering-workflow framework for a repository. Use when the user explicitly wants to add AGENTS plus local skills plus spec artifacts to a repo, audit or upgrade an existing project-engineering-workflow installation, or set up this specific engineering workflow starter. Do not use for ordinary feature development, routine bug fixing, generic code review, or broad process advice that does not require installing or upgrading this framework.
 ---
 
 # Project Engineering Workflow
@@ -12,6 +12,8 @@ This skill combines:
 - portable `SKILL.md` packaging
 - project-level `AGENTS.md` orchestration
 - `spec / plan / tasks / checklist` delivery artifacts
+- scoped memory governance, session reflection, and workflow evolution
+- governed feature-branch and release flow
 - codebase onboarding and scope locking
 - implementation constraints, review, and testing closure
 
@@ -29,6 +31,12 @@ This skill combines:
 - For first-time setup, read `references/03-quickstart.md`
 - For stack-specific tuning, read `references/04-customization-guide.md`
 - For Superpowers + GSD + gstack routing, read `references/05-superpowers-upgrade-blueprint.md`
+- For a filled end-of-task example pack, read `references/06-real-task-example-pack/`
+- For the current release notes and release checklist pack, read `references/07-v0.2-release-pack/`
+- For backward-compatible upgrade guidance, read `references/08-upgrade-compatibility-pack/`
+- For an old-project migration path from `v0.1` to `v0.2.x`, read `references/08-upgrade-compatibility-pack/v0.1-to-v0.2-upgrade-manual.md`
+- For an old-project migration path from `v0.2.x` to `v0.3.x`, read `references/08-upgrade-compatibility-pack/v0.2-to-v0.3-upgrade-manual.md`
+- For the six-lane onboarding map, read the generated `docs/AI能力地图.md` in a bootstrapped project
 
 ## What This Skill Ships
 
@@ -36,11 +44,17 @@ This skill combines:
 - an npm CLI entry: `project-engineering-workflow init`
 - a bootstrap script: `scripts/bootstrap-project.sh`
 - a validation script: `scripts/doctor.sh`
+- a memory index rebuild command: `project-engineering-workflow memory-index --output-dir ...`
+- an upgrade command: `project-engineering-workflow upgrade --mode ... --dry-run`
+- feature-branch and release scripts under `.specify/scripts/bash/`
 - project-local skills for:
   - requirement gate
   - codebase onboarding
   - scope impact guard
   - tech solution
+  - memory router
+  - evolution router
+  - branch and release
   - superpowers router
   - GSD router
   - gstack router
@@ -102,6 +116,48 @@ Run:
 bash scripts/doctor.sh /absolute/path/to/target-repo
 ```
 
+Or use structured CLI output when an upper workflow needs machine-readable status:
+
+```bash
+npx @workflow-skills/project-engineering-workflow doctor \
+  --output-dir "/absolute/path/to/target-repo" \
+  --json \
+  --json-out "docs/workflow-doctor.json"
+```
+
+If the repository already uses `.specify/memory-store`, rebuild the lightweight retrieval index with:
+
+```bash
+npx @workflow-skills/project-engineering-workflow memory-index \
+  --output-dir "/absolute/path/to/target-repo" \
+  --json \
+  --json-out "docs/workflow-memory-index.json"
+```
+
+### 3.5. Upgrade Existing Projects Safely
+
+When an older generated project wants newer workflow capabilities, prefer:
+
+```bash
+npx @workflow-skills/project-engineering-workflow upgrade \
+  --output-dir "/absolute/path/to/target-repo" \
+  --mode capabilities \
+  --dry-run \
+  --write-report
+```
+
+Rules:
+
+- default to additive upgrade first
+- do not touch historical `specs/<feature>/` artifacts
+- generate a review report when the team needs explicit signoff
+- use `--json` when an upper workflow needs structured decision, actions, checks, and recommended commands
+- use `--json-out` when the structured result should be archived for memory, audit, or later automation
+- review the dry-run plan before using `--overwrite-existing`
+- use `--mode current` only when the project intentionally adopts the full current workflow line
+- use `memory-index` to rebuild `.specify/memory-store/index.json` without rewriting durable memory record bodies
+- treat branch/release capability as additive for old projects and default only for the `0.3.x` workflow line
+
 ### 4. Pilot With One Real Requirement
 
 In the target repository, the recommended sequence is:
@@ -113,11 +169,14 @@ In the target repository, the recommended sequence is:
 5. `$project-superpowers-router` when enhanced capabilities are useful
    - `$project-gsd-router` for long-running or context-heavy work
    - `$project-gstack-router` for role-specific product, design, engineering, QA, ship, or reflection judgment
-6. `bash .specify/scripts/bash/create-feature.sh <feature-slug> "<Feature Name>"`
-7. `$project-stack-standards`
-8. `$project-code-generation`
-9. `$project-code-review`
-10. `$project-test-and-report`
+6. `$project-memory-router` when remembering, forgetting, retrieving, sharing, session reflection, or agent self-improvement is involved
+7. `$project-evolution-router` when repeated learnings should upgrade skills, workflow rules, templates, or constitution
+8. `$project-branch-release` when tracked implementation should start from `feature/*`, or when release/tag/main-merge decisions are involved
+9. `bash .specify/scripts/bash/create-feature.sh <feature-slug> "<Feature Name>"`
+10. `$project-stack-standards`
+11. `$project-code-generation`
+12. `$project-code-review`
+13. `$project-test-and-report`
 
 ## Working Principles
 
@@ -125,6 +184,8 @@ In the target repository, the recommended sequence is:
 - Keep workflow assets and business assets layered
 - Require explicit scope awareness before editing
 - Use specs and plans as collaboration memory, not ceremony
+- Treat durable memory as scoped data that requires retention, retrieval, and confirmation rules
+- Treat framework evolution as proposal-driven and validated, not automatic self-editing
 - Keep the starter generic; move project-specific rules into project-local skills
 
 ## Adoption Guidance

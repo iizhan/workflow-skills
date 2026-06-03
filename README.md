@@ -7,6 +7,7 @@ Workflow Skills is an enterprise AI engineering framework starter.
 It helps teams bootstrap a project-level workflow layer that combines:
 
 - spec-kit style specification artifacts
+- memory policy, session reflection, and workflow evolution artifacts
 - Superpowers-style execution discipline
 - GSD-style long-running task orchestration
 - gstack-style role-based review
@@ -36,6 +37,8 @@ The current package focuses on the first practical layer:
 - structured project workflow
 - local skills
 - feature specs
+- memory governance
+- workflow evolution
 - workflow state
 - enhanced capability routing
 - review and test closure
@@ -60,13 +63,17 @@ flowchart TD
   F --> G["Superpowers: enhanced execution"]
   F --> H["GSD: long-task orchestration"]
   F --> I["gstack: role review"]
+  E --> R["Memory Router"]
+  E --> Q["Evolution Router"]
   G --> J["Project Skills"]
   H --> J
   I --> J
+  Q --> J
+  R --> J
   J --> K["Code Generation"]
   K --> L["Code Review"]
   L --> M["Test And Report"]
-  M --> N["specs / workflow-state / delivery report"]
+  M --> N["specs / workflow-state / memory candidates / rule change candidates / delivery report"]
 ```
 
 ## Component Mapping
@@ -77,7 +84,7 @@ flowchart TD
 | Agent governance | Control routing, scope, roles, and delivery gates | `AGENTS.md`, `constitution.md`, project router skills |
 | Reusable skills | Encapsulate project-local capabilities | `.agents/skills/*/SKILL.md` |
 | Test-driven verification | Keep implementation tied to validation | `project-code-review`, `project-test-and-report`, configured test command |
-| Context engineering | Preserve task state and handoff context | `workflow-state.yaml`, specs, docs |
+| Context engineering | Preserve task state, handoff context, memory candidates, and rule change proposals | `workflow-state.yaml`, specs, docs, memory and evolution policies |
 | LLMOps-ready harness | Prepare for future observability, safety, and evaluation | structured reports, risks, role reviews, capability routes |
 
 ## Quick Start
@@ -128,11 +135,22 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 │       ├── plan.md
 │       ├── tasks.md
 │       ├── quickstart.md
+│       ├── delivery-summary.md
+│       ├── task-reflection.md
+│       ├── rule-change-proposal.md
+│       ├── memory-policy.md
+│       ├── evolution-policy.md
+│       ├── evolution-prefill-policy.md
+│       ├── evolution-draft-protocol.md
+│       ├── reflection-output-protocol.md
+│       ├── final-output-protocol.md
 │       ├── workflow-state.yaml
 │       └── checklists/
 └── docs/
     ├── Codex团队开发说明.md
-    └── AI协作架构.md
+    ├── AI协作架构.md
+    ├── AI能力地图.md
+    └── 升级兼容策略.md
 ```
 
 ## Delivery Workflow
@@ -144,9 +162,11 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 5. Route enhanced capabilities through `project-superpowers-router`.
 6. Use `project-gsd-router` for long-running or context-heavy work.
 7. Use `project-gstack-router` for PM, design, engineering, QA, ship, or reflection review.
-8. Create feature artifacts under `specs/<feature>/`.
-9. Implement through project-local skills.
-10. Close with code review, test report, uncovered areas, and residual risks.
+8. Use `project-memory-router` for remembering, forgetting, retrieving, preferences, team knowledge, session summaries, or agent self-improvement.
+9. Use `project-evolution-router` when repeated learnings should upgrade workflow rules, skills, templates, or constitution.
+10. Create feature artifacts under `specs/<feature>/`.
+11. Implement through project-local skills.
+12. Close with code review, test report, uncovered areas, residual risks, and memory or rule-change candidates when useful.
 
 ## Implementation Roadmap
 
@@ -162,6 +182,8 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 | --- | --- |
 | Framework conflict | Keep `AGENTS.md` and `constitution.md` as the only top-level authority |
 | Context overload | Use GSD-style milestones and `workflow-state.yaml` instead of loading everything |
+| Memory drift or privacy leakage | Split memory into user-private, team-shared, agent-self, and task-session scopes; ask before durable updates |
+| Self-evolution drift | Turn repeated feedback into rule proposals first; validate and keep rollback paths for framework changes |
 | Scope drift | Require requirement, scope, and impact gates before implementation |
 | Unverified output | Close every task with review and test reporting |
 | Unsafe side effects | Route external effects through explicit confirmation and rollback notes |
