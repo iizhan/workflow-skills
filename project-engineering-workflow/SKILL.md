@@ -44,6 +44,7 @@ This skill combines:
 - an npm CLI entry: `project-engineering-workflow init`
 - a bootstrap script: `scripts/bootstrap-project.sh`
 - a validation script: `scripts/doctor.sh`
+- a release validation command: `project-engineering-workflow release-doctor --output-dir ...`
 - a memory index rebuild command: `project-engineering-workflow memory-index --output-dir ...`
 - an upgrade command: `project-engineering-workflow upgrade --mode ... --dry-run`
 - feature-branch and release scripts under `.specify/scripts/bash/`
@@ -123,6 +124,16 @@ npx @workflow-skills/project-engineering-workflow doctor \
   --output-dir "/absolute/path/to/target-repo" \
   --json \
   --json-out "docs/workflow-doctor.json"
+```
+
+If the repository already uses the governed branch/release lane, validate local release readiness before any remote action:
+
+```bash
+npx @workflow-skills/project-engineering-workflow release-doctor \
+  --output-dir "/absolute/path/to/target-repo" \
+  --release-version "0.3.1" \
+  --json \
+  --json-out "docs/workflow-release-doctor.json"
 ```
 
 If the repository already uses `.specify/memory-store`, rebuild the lightweight retrieval index with:

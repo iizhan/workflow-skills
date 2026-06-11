@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,6 +82,7 @@ const branchReleaseOptionalPaths = [
   ".specify/scripts/bash/create-feature-branch.sh",
   ".specify/scripts/bash/prepare-release.sh",
   ".specify/scripts/bash/finalize-release.sh",
+  ".specify/scripts/bash/release-doctor.sh",
   ".specify/templates/release-checklist-template.md",
   ".specify/templates/release-notes-template.md"
 ];
@@ -88,7 +90,8 @@ const branchReleaseOptionalPaths = [
 const workflowOptionalPathsByVersion = {
   "0.2.0": [...v020OptionalPaths],
   "0.2.1": [...v020OptionalPaths],
-  "0.3.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths]
+  "0.3.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths.filter((path) => path !== ".specify/scripts/bash/release-doctor.sh")],
+  "0.3.1": [...v020OptionalPaths, ...branchReleaseOptionalPaths]
 };
 
 const upgradeOptionalPaths = [...v020OptionalPaths, ...branchReleaseOptionalPaths];
@@ -118,6 +121,7 @@ const upgradeModePaths = {
     ".specify/scripts/bash/create-feature-branch.sh",
     ".specify/scripts/bash/prepare-release.sh",
     ".specify/scripts/bash/finalize-release.sh",
+    ".specify/scripts/bash/release-doctor.sh",
     ".specify/templates/workflow-state-template.yaml",
     ".specify/templates/reflection-template.md",
     ".specify/templates/rule-change-template.md",
@@ -144,6 +148,12 @@ function usage() {
   project-engineering-workflow doctor --output-dir "/absolute/path/to/target-repo" [--json]
     [--json-out "docs/workflow-doctor.json"]
 
+  project-engineering-workflow release-doctor --output-dir "/absolute/path/to/target-repo"
+    [--release-version "0.3.1"]
+    [--main-branch "main"]
+    [--json]
+    [--json-out "docs/workflow-release-doctor.json"]
+
   project-engineering-workflow memory-index --output-dir "/absolute/path/to/target-repo"
     [--json]
     [--json-out "docs/workflow-memory-index.json"]
@@ -161,6 +171,7 @@ function usage() {
 Aliases:
   pew init ...
   pew doctor ...
+  pew release-doctor ...
   pew memory-index ...
   pew upgrade ...
 `);
@@ -304,6 +315,74 @@ function resolveRequiredOutputDir(options) {
   return resolve(rawOutputDir);
 }
 
+function runCommand(command, args, cwd) {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8"
+  });
+
+  return {
+    ok: result.status === 0,
+    status: result.status ?? 1,
+    stdout: result.stdout?.trim() ?? "",
+    stderr: result.stderr?.trim() ?? ""
+  };
+}
+
+function evaluateWorkflowState(outputDir) {
+  const declaredWorkflowVersion = readDeclaredWorkflowVersion(outputDir);
+  const missingCore = coreRequiredPaths.filter((path) => !existsSync(join(outputDir, path)));
+  const expectedCurrentPaths = declaredWorkflowVersion ? optionalPathsForWorkflowVersion(declaredWorkflowVersion) : [];
+  const currentMissing = expectedCurrentPaths.filter((path) => !existsSync(join(outputDir, path)));
+  const upgradeAvailable = upgradeOptionalPaths.filter((path) => !existsSync(join(outputDir, path)));
+
+  return {
+    declaredWorkflowVersion,
+    missingCore,
+    currentMissing,
+    upgradeAvailable
+  };
+}
+
+function inspectGitState(targetDir, mainBranch) {
+  const repoCheck = runCommand("git", ["rev-parse", "--show-toplevel"], targetDir);
+  if (!repoCheck.ok) {
+    return {
+      isRepository: false,
+      repoRoot: null,
+      currentBranch: null,
+      worktreeClean: null,
+      mainBranchExists: null,
+      remotes: [],
+      tagNames: []
+    };
+  }
+
+  const currentBranch = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], targetDir);
+  const worktreeStatus = runCommand("git", ["status", "--porcelain"], targetDir);
+  const mainBranchExists = runCommand("git", ["rev-parse", "--verify", mainBranch], targetDir);
+  const remotes = runCommand("git", ["remote"], targetDir);
+  const tagNames = runCommand("git", ["tag", "--list"], targetDir);
+
+  return {
+    isRepository: true,
+    repoRoot: repoCheck.stdout,
+    currentBranch: currentBranch.ok ? currentBranch.stdout : null,
+    worktreeClean: worktreeStatus.ok ? worktreeStatus.stdout.length === 0 : null,
+    mainBranchExists: mainBranchExists.ok,
+    remotes: remotes.ok && remotes.stdout.length > 0 ? remotes.stdout.split(/\r?\n/).filter(Boolean) : [],
+    tagNames: tagNames.ok && tagNames.stdout.length > 0 ? tagNames.stdout.split(/\r?\n/).filter(Boolean) : []
+  };
+}
+
+function hasForbiddenRemoteAction(scriptPath) {
+  if (!existsSync(scriptPath)) {
+    return false;
+  }
+  const text = readText(scriptPath);
+  return /\bgit\s+push\b|\bnpm\s+publish\b/.test(text);
+}
+
 function init(options) {
   requireOptions(options, ["project-name", "project-slug", "stack-name", "app-path", "test-command", "output-dir"]);
 
@@ -337,14 +416,13 @@ function doctor(options) {
   const outputDir = resolveRequiredOutputDir(options);
   const jsonMode = options.json === true;
   const jsonOut = options["json-out"] ?? null;
-  const declaredWorkflowVersion = readDeclaredWorkflowVersion(outputDir);
+  const workflowState = evaluateWorkflowState(outputDir);
 
-  const missing = coreRequiredPaths.filter((path) => !existsSync(join(outputDir, path)));
-  if (missing.length > 0) {
+  if (workflowState.missingCore.length > 0) {
     const result = {
       command: "doctor",
       target: outputDir,
-      declaredWorkflowVersion,
+      declaredWorkflowVersion: workflowState.declaredWorkflowVersion,
       status: "failed",
       decision: {
         code: "baseline-missing",
@@ -352,11 +430,11 @@ function doctor(options) {
         reason: "项目缺少 baseline workflow 必需文件，尚不能进入升级建议或当前线校验。"
       },
       summary: {
-        missingCore: missing.length,
+        missingCore: workflowState.missingCore.length,
         missingCurrent: 0,
         upgradeAvailable: 0
       },
-      missing,
+      missing: workflowState.missingCore,
       currentMissing: [],
       upgradeAvailable: []
     };
@@ -367,40 +445,32 @@ function doctor(options) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       process.exit(1);
     } else {
-      for (const path of missing) {
+      for (const path of workflowState.missingCore) {
         console.error(`Missing: ${path}`);
       }
     }
     throw new Error("Doctor failed. Add the missing files and rerun.");
   }
 
-  if (declaredWorkflowVersion) {
-    const currentMissing = [];
-    const expectedCurrentPaths = optionalPathsForWorkflowVersion(declaredWorkflowVersion);
-    for (const path of expectedCurrentPaths) {
-      if (!existsSync(join(outputDir, path))) {
-        currentMissing.push(path);
-      }
-    }
-
-    if (currentMissing.length > 0) {
+  if (workflowState.declaredWorkflowVersion) {
+    if (workflowState.currentMissing.length > 0) {
       const result = {
         command: "doctor",
         target: outputDir,
-        declaredWorkflowVersion,
+        declaredWorkflowVersion: workflowState.declaredWorkflowVersion,
         status: "failed",
         decision: {
           code: "current-incomplete",
           label: "当前线不完整",
-          reason: `项目声明了 ${declaredWorkflowVersion} workflow 线，但缺少该版本所需文件。`
+          reason: `项目声明了 ${workflowState.declaredWorkflowVersion} workflow 线，但缺少该版本所需文件。`
         },
         summary: {
           missingCore: 0,
-          missingCurrent: currentMissing.length,
+          missingCurrent: workflowState.currentMissing.length,
           upgradeAvailable: 0
         },
         missing: [],
-        currentMissing,
+        currentMissing: workflowState.currentMissing,
         upgradeAvailable: []
       };
       if (jsonOut) {
@@ -410,24 +480,23 @@ function doctor(options) {
         process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
         process.exit(1);
       } else {
-        for (const path of currentMissing) {
+        for (const path of workflowState.currentMissing) {
           console.error(`Missing current file: ${path}`);
         }
       }
       throw new Error(
-        `Doctor failed. This project appears to use workflow line ${declaredWorkflowVersion}, but is missing required current-version files.\n` +
+        `Doctor failed. This project appears to use workflow line ${workflowState.declaredWorkflowVersion}, but is missing required current-version files.\n` +
         `Projects without ${currentVersionMarker} may adopt newer optional files gradually.\n` +
         "If this is meant to be a current-version project, complete the upgrade and rerun doctor."
       );
     }
   }
 
-  const upgradeMissing = upgradeOptionalPaths.filter((path) => !existsSync(join(outputDir, path)));
-  if (upgradeMissing.length > 0) {
+  if (workflowState.upgradeAvailable.length > 0) {
     const result = {
       command: "doctor",
       target: outputDir,
-      declaredWorkflowVersion,
+      declaredWorkflowVersion: workflowState.declaredWorkflowVersion,
       status: "passed-with-suggestions",
       decision: {
         code: "upgrade-available",
@@ -437,11 +506,11 @@ function doctor(options) {
       summary: {
         missingCore: 0,
         missingCurrent: 0,
-        upgradeAvailable: upgradeMissing.length
+        upgradeAvailable: workflowState.upgradeAvailable.length
       },
       missing: [],
       currentMissing: [],
-      upgradeAvailable: upgradeMissing
+      upgradeAvailable: workflowState.upgradeAvailable
     };
     if (jsonOut) {
       result.jsonOutPath = writeJsonArtifact(outputDir, jsonOut, result);
@@ -451,7 +520,7 @@ function doctor(options) {
     } else {
       console.log("Doctor passed with upgrade suggestions.");
       console.log("The project is compatible with the workflow baseline, but is missing optional newer workflow files:");
-      for (const path of upgradeMissing) {
+      for (const path of workflowState.upgradeAvailable) {
         console.log(`Upgrade available: ${path}`);
       }
       console.log("");
@@ -463,7 +532,7 @@ function doctor(options) {
   const result = {
     command: "doctor",
     target: outputDir,
-    declaredWorkflowVersion,
+    declaredWorkflowVersion: workflowState.declaredWorkflowVersion,
     status: "passed",
     decision: {
       code: "current-complete",
@@ -487,6 +556,190 @@ function doctor(options) {
   } else {
     console.log("Doctor passed.");
     console.log("The project engineering workflow starter looks complete.");
+  }
+}
+
+function releaseDoctor(options) {
+  const outputDir = resolveRequiredOutputDir(options);
+  if (!existsSync(outputDir)) {
+    throw new Error(`Target repo does not exist: ${outputDir}`);
+  }
+
+  const jsonMode = options.json === true;
+  const jsonOut = options["json-out"] ?? null;
+  const releaseVersion = options["release-version"] ?? null;
+  const mainBranch = options["main-branch"] ?? "main";
+  const workflowState = evaluateWorkflowState(outputDir);
+  const branchReleaseMissing = branchReleaseOptionalPaths.filter((path) => !existsSync(join(outputDir, path)));
+  const gitState = inspectGitState(outputDir, mainBranch);
+
+  const blockers = [];
+  const warnings = [];
+
+  if (workflowState.missingCore.length > 0) {
+    blockers.push(...workflowState.missingCore.map((path) => `Missing core workflow file: ${path}`));
+  }
+
+  if (workflowState.declaredWorkflowVersion && workflowState.currentMissing.length > 0) {
+    blockers.push(...workflowState.currentMissing.map((path) => `Missing current-version workflow file: ${path}`));
+  }
+
+  if (branchReleaseMissing.length > 0) {
+    blockers.push(...branchReleaseMissing.map((path) => `Missing branch/release asset: ${path}`));
+  }
+
+  if (!gitState.isRepository) {
+    blockers.push("Target repo is not inside a git repository.");
+  } else {
+    if (!gitState.mainBranchExists) {
+      blockers.push(`Main branch does not exist: ${mainBranch}`);
+    }
+    if (gitState.worktreeClean === false) {
+      blockers.push("Worktree is dirty. Release prepare/finalize should run on a clean repository.");
+    }
+    if ((gitState.remotes ?? []).length === 0) {
+      warnings.push("No git remote is configured. Release tagging can proceed locally, but remote publication is still manual.");
+    }
+  }
+
+  const releaseBranch = releaseVersion ? `release/${releaseVersion}` : null;
+  const releaseDir = releaseVersion ? join(outputDir, "specs", "releases", releaseVersion) : null;
+  const releaseChecklistPath = releaseDir ? join(releaseDir, "release-checklist.md") : null;
+  const releaseNotesPath = releaseDir ? join(releaseDir, "release-notes.md") : null;
+  const tagName = releaseVersion ? `v${releaseVersion}` : null;
+
+  if (gitState.isRepository && gitState.currentBranch === mainBranch) {
+    warnings.push(`Current branch is ${mainBranch}. Release preparation should start from a validated feature branch.`);
+  }
+
+  if (releaseVersion) {
+    if (!releaseDir || !existsSync(releaseDir)) {
+      blockers.push(`Missing release artifact directory: specs/releases/${releaseVersion}`);
+    }
+    if (releaseChecklistPath && !existsSync(releaseChecklistPath)) {
+      blockers.push(`Missing release checklist: specs/releases/${releaseVersion}/release-checklist.md`);
+    }
+    if (releaseNotesPath && !existsSync(releaseNotesPath)) {
+      blockers.push(`Missing release notes: specs/releases/${releaseVersion}/release-notes.md`);
+    }
+    if (gitState.isRepository && releaseBranch) {
+      const releaseBranchExists = runCommand("git", ["rev-parse", "--verify", releaseBranch], outputDir).ok;
+      if (!releaseBranchExists) {
+        blockers.push(`Missing release branch: ${releaseBranch}`);
+      }
+      const tagExists = runCommand("git", ["rev-parse", "--verify", tagName], outputDir).ok;
+      if (tagExists) {
+        warnings.push(`Tag already exists: ${tagName}`);
+      }
+    }
+  }
+
+  const prepareScript = join(outputDir, ".specify", "scripts", "bash", "prepare-release.sh");
+  const finalizeScript = join(outputDir, ".specify", "scripts", "bash", "finalize-release.sh");
+  const guardHealthy = !hasForbiddenRemoteAction(prepareScript) && !hasForbiddenRemoteAction(finalizeScript);
+  if (!guardHealthy) {
+    blockers.push("Release scripts contain direct remote push or npm publish commands. Remote actions must stay manual.");
+  }
+
+  let decision;
+  let status;
+  if (blockers.length > 0) {
+    status = "failed";
+    decision = {
+      code: "release-not-ready",
+      label: "发布未就绪",
+      reason: "当前 release 分支、工件、git 状态或远端动作防护仍有阻断项。"
+    };
+  } else if (warnings.length > 0) {
+    status = "passed-with-warnings";
+    decision = {
+      code: "release-ready-with-warnings",
+      label: "可继续但需留意",
+      reason: "release 资产基本健康，但仍有需要人工确认的上下文提示。"
+    };
+  } else {
+    status = "passed";
+    decision = {
+      code: "release-ready",
+      label: "发布就绪",
+      reason: "release 分支、工件、git 状态与远端动作防护都已通过检查。"
+    };
+  }
+
+  const result = {
+    command: "release-doctor",
+    target: outputDir,
+    releaseVersion,
+    mainBranch,
+    declaredWorkflowVersion: workflowState.declaredWorkflowVersion,
+    status,
+    decision,
+    summary: {
+      missingCore: workflowState.missingCore.length,
+      missingBranchRelease: branchReleaseMissing.length,
+      blockers: blockers.length,
+      warnings: warnings.length
+    },
+    blockers,
+    warnings,
+    git: {
+      isRepository: gitState.isRepository,
+      repoRoot: gitState.repoRoot,
+      currentBranch: gitState.currentBranch,
+      mainBranchExists: gitState.mainBranchExists,
+      worktreeClean: gitState.worktreeClean,
+      remotes: gitState.remotes
+    },
+    artifacts: {
+      releaseBranch,
+      releaseDir,
+      releaseChecklistPath,
+      releaseNotesPath,
+      tagName
+    },
+    guard: {
+      remoteActionsManualOnly: guardHealthy
+    }
+  };
+
+  if (jsonOut) {
+    result.jsonOutPath = writeJsonArtifact(outputDir, jsonOut, result);
+  }
+
+  if (jsonMode) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    if (status === "failed") {
+      process.exit(1);
+    }
+    return;
+  }
+
+  console.log(`Release doctor for: ${outputDir}`);
+  console.log(`Decision: ${decision.label} (${decision.code})`);
+  console.log(`Reason: ${decision.reason}`);
+  console.log(`Remote push/publish guard: ${guardHealthy ? "manual-only confirmed" : "FAILED"}`);
+  if (releaseVersion) {
+    console.log(`Release version: ${releaseVersion}`);
+  }
+
+  if (blockers.length > 0) {
+    console.log("");
+    console.log("Blockers:");
+    for (const blocker of blockers) {
+      console.log(`- ${blocker}`);
+    }
+  }
+
+  if (warnings.length > 0) {
+    console.log("");
+    console.log("Warnings:");
+    for (const warning of warnings) {
+      console.log(`- ${warning}`);
+    }
+  }
+
+  if (status === "failed") {
+    throw new Error("Release doctor failed. Fix the blockers and rerun.");
   }
 }
 
@@ -1450,6 +1703,8 @@ try {
     init(options);
   } else if (command === "doctor") {
     doctor(options);
+  } else if (command === "release-doctor") {
+    releaseDoctor(options);
   } else if (command === "memory-index" || command === "rebuild-memory-index") {
     memoryIndex(options);
   } else if (command === "upgrade") {

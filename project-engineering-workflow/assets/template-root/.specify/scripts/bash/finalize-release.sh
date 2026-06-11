@@ -4,6 +4,12 @@ set -euo pipefail
 RELEASE_VERSION="${1:-}"
 MAIN_BRANCH="${2:-main}"
 
+if [[ $# -gt 2 ]]; then
+  echo "Remote push or publish flags are intentionally unsupported here." >&2
+  echo "This script only creates the local tag and merge. Review and approve remote actions separately." >&2
+  exit 1
+fi
+
 if [[ -z "$RELEASE_VERSION" ]]; then
   echo "Usage: bash .specify/scripts/bash/finalize-release.sh <version> [main-branch]" >&2
   exit 1
@@ -53,4 +59,5 @@ git merge --no-ff "$RELEASE_BRANCH" -m "merge $RELEASE_BRANCH into $MAIN_BRANCH"
 echo "Release finalized."
 echo "Tag created: $TAG_NAME"
 echo "Merged into: $MAIN_BRANCH"
+echo "Guard: no remote push or package publish was performed."
 echo "Next step: push '$MAIN_BRANCH' and '$TAG_NAME' when remote publish is approved."

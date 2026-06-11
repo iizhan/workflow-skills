@@ -24,6 +24,7 @@
 - 未完成测试报告，不得进入 release 分支
 - worktree 不干净，不得打 tag 或合并 `main`
 - 发布说明未更新，不得视为 release ready
+- 远端 push、npm publish 或任何外部发布动作，必须额外显式批准；默认 release 脚本不会自动执行这些动作
 
 ## 允许的例外
 

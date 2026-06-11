@@ -31,6 +31,8 @@ Use this skill when the request affects branch flow, release readiness, tagging,
   - `bash .specify/scripts/bash/create-feature-branch.sh <feature-slug>`
 - Prepare a release branch and release artifacts:
   - `bash .specify/scripts/bash/prepare-release.sh <version>`
+- Validate release readiness before remote actions:
+  - `bash .specify/scripts/bash/release-doctor.sh <version>`
 - Finalize tag + merge to main:
   - `bash .specify/scripts/bash/finalize-release.sh <version>`
 

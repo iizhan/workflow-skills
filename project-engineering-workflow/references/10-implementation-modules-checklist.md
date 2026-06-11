@@ -15,7 +15,7 @@
 | Core Workflow Module | 已有 | `AGENTS.md` + 基础 skills + templates | requirement -> scope -> solution -> implement -> review -> test | 补最小验收路径示例 |
 | Memory Governance Module | 已有运行基础版 | `project-memory-router` + `memory-policy.md` + `.specify/memory-store/*` + `memory-index` | 记忆分域、生命周期、索引优先、durable memory 分层 | 补 candidate 写入器和归档器 |
 | Evolution Governance Module | 已有基础版 | `project-evolution-router` + evolution policy + rule proposal | 经验 -> 提案 -> 验证 -> 回滚 | 补提案状态机和 evidence schema |
-| Branch And Release Governance Module | 已有基础版 | `project-branch-release` + `.specify/release/*` + branch/release scripts | `feature/* -> release/* -> tag -> merge main` | 补发布 doctor 和 remote push guard |
+| Branch And Release Governance Module | 已有运行版 | `project-branch-release` + `.specify/release/*` + branch/release scripts + `release-doctor` | `feature/* -> release/* -> tag -> merge main` | 补 hotfix branch contract |
 | Execution Augmentation Module | 已有 | superpowers / GSD / gstack routers | 增强执行不绕过项目规则 | 补能力调用回收约束 |
 | Compatibility And Migration Module | 已有基础版 | `doctor` / `upgrade` / `json` / `report` | 旧项目兼容、dry-run、审批、可选升级 | 补 memory-store migration helper |
 | Capability Surfaces Layer | 部分具备 | 单一 skill 内部多入口 | bootstrap / doctor / upgrade / memory / evolution 语义边界 | 形成正式 surface 清单 |
@@ -169,15 +169,13 @@
 
 #### 当前缺口
 
-- 没有 remote push guard
-- 没有 release-specific doctor
 - 没有 hotfix 流补充规则
 
 #### 下一步
 
-1. `release-doctor`
-2. remote push / publish guard
-3. hotfix branch contract
+1. hotfix branch contract
+2. release artifact diff report
+3. package-registry specific publish checklist
 
 ### 6. Compatibility And Migration Module
 

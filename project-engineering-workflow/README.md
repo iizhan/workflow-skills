@@ -23,6 +23,16 @@ npx @workflow-skills/project-engineering-workflow doctor \
   --json-out "docs/workflow-doctor.json"
 ```
 
+Validate branch/release readiness before any remote push or publish:
+
+```bash
+npx @workflow-skills/project-engineering-workflow release-doctor \
+  --output-dir "/absolute/path/to/your-repo" \
+  --release-version "0.3.1" \
+  --json \
+  --json-out "docs/workflow-release-doctor.json"
+```
+
 Rebuild the lightweight memory index without rewriting durable memory record bodies:
 
 ```bash
@@ -55,9 +65,11 @@ Upgrade plans also emit an explicit decision level: `ready`, `pilot-recommended`
 If you want machine-readable output for wrappers, skills, or UI orchestration, add `--json`.
 If you also want an auditable artifact on disk, add `--json-out`.
 `doctor --json` returns structured compatibility status for baseline-missing, upgrade-available, current-incomplete, or current-complete states.
+`release-doctor --json` returns structured branch/release readiness, git-state blockers, release-artifact checks, and remote-action guard status.
 `memory-index` only scans the configured JSONL durable-memory sources, rebuilds `.specify/memory-store/index.json`, and fails closed when records are malformed or IDs collide.
 If a project has not adopted `.specify/memory-store` yet, upgrade it with `--mode capabilities` first.
 `0.3.x` also introduces a governed git flow: default tracked work should move through `feature/* -> release/* -> v<version> -> merge main`.
+Remote push and npm publish are still explicit manual steps; the shipped release scripts now refuse extra push/publish flags and keep remote actions outside local release preparation.
 
 The generated workflow combines `AGENTS.md`, project-local skills, spec-kit style artifacts, memory governance, workflow evolution, branch/release governance, Superpowers routing, GSD state, gstack role review, code review, and test reporting.
 

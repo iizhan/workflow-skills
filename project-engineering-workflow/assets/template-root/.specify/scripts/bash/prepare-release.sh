@@ -4,6 +4,12 @@ set -euo pipefail
 RELEASE_VERSION="${1:-}"
 MAIN_BRANCH="${2:-main}"
 
+if [[ $# -gt 2 ]]; then
+  echo "Remote push or publish flags are intentionally unsupported here." >&2
+  echo "This script only prepares local release state. Review and approve remote actions separately." >&2
+  exit 1
+fi
+
 if [[ -z "$RELEASE_VERSION" ]]; then
   echo "Usage: bash .specify/scripts/bash/prepare-release.sh <version> [main-branch]" >&2
   exit 1
@@ -101,3 +107,4 @@ PY
 echo "Release branch ready: $RELEASE_BRANCH"
 echo "Release artifacts: $RELEASE_DIR"
 echo "Source branch: $CURRENT_BRANCH"
+echo "Guard: no remote push or package publish was performed."

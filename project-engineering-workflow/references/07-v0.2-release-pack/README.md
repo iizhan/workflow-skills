@@ -1,6 +1,6 @@
 # Release Pack
 
-This pack summarizes release milestones for `project-engineering-workflow`, currently centered on the `0.2.x` and `0.3.0` workflow lines.
+This pack summarizes release milestones for `project-engineering-workflow`, currently centered on the `0.2.x` and `0.3.x` workflow lines.
 
 It is intentionally a release-preparation pack, not an automatic version bump.
 
@@ -18,6 +18,10 @@ It is intentionally a release-preparation pack, not an automatic version bump.
   A patch release note for `0.2.1`.
 - `v0.3.0-release-notes.md`
   A minor release note for `0.3.0`.
+- `v0.3.1-release-checklist.md`
+  A patch release checklist for `0.3.1`.
+- `v0.3.1-release-notes.md`
+  A patch release note for `0.3.1`.
 
 ## Intended Use
 
@@ -35,6 +39,7 @@ The current pack focuses on workflow-layer evolution, especially:
 - scoped memory governance
 - workflow evolution governance
 - governed branch and release flow
+- release-doctor and remote-action guard
 - structured reflection artifacts
 - final Chinese delivery output schema
 - onboarding and example-pack documentation

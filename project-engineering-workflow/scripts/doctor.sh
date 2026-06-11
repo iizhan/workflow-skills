@@ -65,6 +65,7 @@ branch_release_optional_paths=(
   ".specify/scripts/bash/create-feature-branch.sh"
   ".specify/scripts/bash/prepare-release.sh"
   ".specify/scripts/bash/finalize-release.sh"
+  ".specify/scripts/bash/release-doctor.sh"
   ".specify/templates/release-checklist-template.md"
   ".specify/templates/release-notes-template.md"
 )
@@ -82,7 +83,7 @@ if [[ -n "$declared_workflow_version" ]]; then
     0.2.0|0.2.1)
       current_required_optional_paths=("${v020_optional_paths[@]}")
       ;;
-    0.3.0)
+    0.3.0|0.3.1)
       current_required_optional_paths=("${upgrade_optional_paths[@]}")
       ;;
     *)

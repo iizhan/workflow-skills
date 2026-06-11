@@ -20,10 +20,12 @@
 - [ ] delivery summary 已更新
 - [ ] release notes 已更新
 - [ ] 打包或发布前验证已通过
+- [ ] 远端 push / npm publish 已获得显式批准（如适用）
 
 ## 发布动作
 
 - [ ] 创建 `release/[RELEASE VERSION]`
+- [ ] 运行 `bash .specify/scripts/bash/release-doctor.sh [RELEASE VERSION]`
 - [ ] 复核版本号与发布说明
 - [ ] 创建标签 `[TAG NAME]`
 - [ ] 合并到 `[MAIN BRANCH]`
