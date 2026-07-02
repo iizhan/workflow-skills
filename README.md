@@ -248,3 +248,7 @@ npm pack --dry-run --package-lock=false --cache /private/tmp/npm-cache-workflow-
 ```text
 @workflow-skills/project-engineering-workflow
 ```
+
+
+## 鸣谢
+感谢 https://vsllm.com 支持
