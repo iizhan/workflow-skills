@@ -2,7 +2,38 @@
 
 English | [中文](README.zh-CN.md)
 
-Workflow Skills is an enterprise AI engineering framework starter.
+Workflow Skills is a Skill product system with two core pillars:
+
+1. a complete `Workflow + Skill Framework`
+2. a visual `Skill Management & Analysis Tool`
+
+It is not just an MCP manager, and it is not just a prompt library. The primary product object is always the `skill`, while `MCP` is only one possible capability source inside the skill ecosystem.
+
+## Dual-Core Positioning
+
+### Core 1: Workflow + Skill Framework
+
+This is the production layer.
+
+Its job is to turn scattered prompts, scripts, agent conventions, MCP calls, and engineering rules into a reusable, governable, collaborative, packageable, and publishable skill framework.
+
+### Core 2: Visual Skill Management & Analysis Tool
+
+This is the governance layer.
+
+Its job is to make local and remote skills visible so users can understand:
+
+- where skills live
+- what role a skill plays
+- how skills compose together
+- which skills are duplicated
+- which skills are valuable
+- which skills are costly, slow, unhealthy, or worth optimizing
+
+Every future product adjustment should be measured against two questions:
+
+1. Does it strengthen the `Workflow + Skill Framework`?
+2. Does it strengthen `visual skill management and analysis`?
 
 It helps teams bootstrap a project-level workflow layer that combines:
 
@@ -14,11 +45,11 @@ It helps teams bootstrap a project-level workflow layer that combines:
 - project-local `SKILL.md` capabilities
 - review, testing, and delivery reporting gates
 
-The purpose is not to stack frameworks side by side. The purpose is to route them through one project constitution so AI-assisted development becomes scoped, reviewable, recoverable, and repeatable.
+The purpose is not to stack frameworks side by side. The purpose is to route workflow, skills, governance, and analysis through one coherent Skill product system.
 
 ## Positioning
 
-This repository defines and ships a lightweight version of an enterprise AI development operating system.
+This repository defines and ships a lightweight Skill operating system with workflow production on one side and visual skill governance on the other.
 
 Core formula:
 
@@ -32,16 +63,10 @@ Enterprise AI Framework
 + LLMOps Harness
 ```
 
-The current package focuses on the first practical layer:
+The current repository focuses on two practical anchors:
 
-- structured project workflow
-- local skills
-- feature specs
-- memory governance
-- workflow evolution
-- workflow state
-- enhanced capability routing
-- review and test closure
+- a complete workflow + skill framework
+- a local-first visual skill management and analysis tool
 
 ## Goals
 

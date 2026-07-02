@@ -23,6 +23,30 @@ If the host cannot identify the user, do not mix `user_private` memories across 
 - Do not remember secrets, credentials, sensitive personal data, third-party private data, or unsupported speculation.
 - Never write durable `user_private`, `team_shared`, or `agent_self` memory without first showing the candidate and asking for confirmation.
 
+## Data Role Classification
+
+Classify every memory candidate with a `data_role` before deciding retention:
+
+| Data Role | Examples | Default Space | Default Retention |
+| --- | --- | --- | --- |
+| `identity_context` | user name, team role, collaboration identity | `user_private` or `team_shared` with owner/source | short unless approved |
+| `user_preference` | tone, language, UI density, workflow preference | `user_private` | `7d` or `30d` |
+| `account_reference` | account name, non-secret account id, login target label | `user_private` or `task_session` | short; never store passwords/tokens |
+| `infrastructure_reference` | server name, server path, local path, environment label, non-secret URL | `team_shared` for project-owned info, `user_private` for personal machines, `task_session` for temporary paths | `30d` or persistent only when source-owned |
+| `development_workflow` | preferred harness, test loop, branch habit, review pattern | `agent_self` or `team_shared` | persistent after confirmation |
+| `project_fact` | product fact, architecture fact, team convention | `team_shared` | persistent until superseded |
+| `governance_decision` | accepted/rejected option, scope decision, release gate | `team_shared` or `task_session` | persistent or until feature closes |
+| `verification_evidence` | command result, screenshot path, UI report path, residual risk | `task_session` | until feature closes |
+| `blocked_sensitive` | secret, token, password, private third-party data, unsupported sensitive detail | do not persist | n/a |
+
+Rules:
+
+- Store account references only as labels or non-secret identifiers. Never store passwords, tokens, API keys, OTPs, cookies, or credential material.
+- Store server paths and server metadata only when they help future work and the owner/source is clear.
+- Prefer `task_session` for temporary local paths, transient logs, one-off screenshots, and current debugging state.
+- Prefer `development_workflow` for reusable engineering preferences such as Superpowers usage, TDD loops, visual QA, and release habits.
+- Mark uncertain or sensitive candidates as `blocked_sensitive` and report why they should not become durable memory.
+
 ## Memory Candidate Schema
 
 Use this shape when proposing memory updates:
@@ -30,6 +54,7 @@ Use this shape when proposing memory updates:
 ```yaml
 memory_candidates:
   - space: user_private | team_shared | agent_self | task_session
+    data_role: identity_context | user_preference | account_reference | infrastructure_reference | development_workflow | project_fact | governance_decision | verification_evidence | blocked_sensitive
     type: fact | preference | behavior_pattern | relationship | decision | session_summary
     content: ""
     source: ""

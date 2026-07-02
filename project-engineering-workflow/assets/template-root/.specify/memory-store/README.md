@@ -33,6 +33,18 @@
 
 禁止默认全量扫描 `users/`、`shared/`、`agent/` 下全部正文。
 
+## 数据角色
+
+Memory record 可以带 `data_role` 字段，用来区分信息性质和默认治理策略：
+
+- `account_reference`: 账号标签或非密钥 ID，不得包含密码、Token、OTP、Cookie 或 API Key
+- `infrastructure_reference`: 服务器名、服务器路径、本地路径、环境标签或非密钥 URL
+- `development_workflow`: 开发习惯、测试循环、首选 harness、视觉 QA 或发布习惯
+- `verification_evidence`: 命令结果、截图路径、UI 报告路径或剩余风险，通常只保留在任务会话
+- `blocked_sensitive`: 不应持久化的敏感信息，只记录阻止原因
+
+完整枚举见 `.specify/memory/memory-policy.md` 和 `memory-record.schema.json`。
+
 ## 索引重建
 
 当 durable memory 有新增、归档、撤销或人工修复后，使用：

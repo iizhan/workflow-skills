@@ -15,6 +15,7 @@
           "id": { "type": "string" },
           "scope": { "type": "string" },
           "owner_id": { "type": ["string", "null"] },
+          "data_role": { "type": ["string", "null"] },
           "type": { "type": "string" },
           "summary": { "type": "string" },
           "tags": {

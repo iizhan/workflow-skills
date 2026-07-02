@@ -2,7 +2,38 @@
 
 [English](README.md) | 中文
 
-Workflow Skills 是一套面向 AI 协作研发的企业级工程化工作流 starter。
+Workflow Skills 是一个由两个核心组成的 Skill 产品体系：
+
+1. 一套完整的 `Workflow + Skill Framework`
+2. 一个可视化的 `Skill 管理分析工具`
+
+它不是单纯的 MCP 管理器，也不是普通的提示词库。它的核心对象始终是 `skill`，而 `MCP` 只是 skill 生态中的一种能力来源。
+
+## 双核心定位
+
+### 核心一：Workflow + Skill Framework
+
+这是生产层。
+
+目标是把零散的 prompt、脚本、Agent 约定、MCP 调用和工程规则，组织成一套可复用、可治理、可协作、可打包、可发布的 skill framework。
+
+### 核心二：可视化 Skill 管理分析工具
+
+这是治理层。
+
+目标是把本地与远程的 skill 可视化，让用户能看清：
+
+- skill 在哪里
+- skill 是什么角色
+- skill 如何组合
+- skill 是否重复
+- skill 是否有价值
+- skill 的成本、性能、健康度和优化空间
+
+以后所有功能调整都应优先回答两个问题：
+
+1. 这个改动是否增强了 `Workflow + Skill Framework`
+2. 这个改动是否增强了 `Skill 的可视化管理与分析`
 
 它把以下能力组合成一套可接入、可治理、可恢复、可验证的项目底座：
 
@@ -14,11 +45,11 @@ Workflow Skills 是一套面向 AI 协作研发的企业级工程化工作流 st
 - 基于 `SKILL.md` 的项目本地 skills
 - code review、测试报告、剩余风险说明等交付门禁
 
-这不是把多个框架简单堆在一起，而是用 project-local skills 把它们路由进同一套项目工程宪法。
+这不是把多个框架简单堆在一起，而是把 workflow、skill、治理规则和可视化分析路由进同一套 Skill 产品体系。
 
 ## 文档定位
 
-本项目旨在定义并落地一套轻量版的“企业级 AI 研发操作系统”。
+本项目旨在定义并落地一套以 `workflow + skill` 为生产核心、以 `visual analysis` 为治理核心的 Skill 操作系统。
 
 核心公式：
 
@@ -32,16 +63,10 @@ Enterprise AI Framework
 + LLMOps Harness
 ```
 
-当前仓库先聚焦最小可行闭环：
+当前仓库先聚焦两个可落地核心：
 
-- 项目级 AI 协作规则
-- 本地 skills
-- feature 级规格工件
-- 记忆治理
-- 框架进化
-- workflow 状态文件
-- Superpowers / GSD / gstack 路由
-- review 与测试收口
+- 一套完整的 workflow + skill framework
+- 一个本地优先的可视化 skill 管理分析工具
 
 ## 核心目标
 

@@ -40,6 +40,28 @@ Prefer durable memory only when information is likely to be useful again:
 
 Do not remember secrets, credentials, sensitive personal data, private third-party data, speculation, or temporary facts unless the user explicitly asks and the retention is short.
 
+## Data Role Decision
+
+Before proposing a memory candidate, classify the information with `data_role`:
+
+- `identity_context`: names, team role, stable collaboration identity
+- `user_preference`: tone, language, UI density, workflow preference
+- `account_reference`: account labels or non-secret IDs only; never passwords, tokens, OTPs, cookies, or API keys
+- `infrastructure_reference`: server names, server paths, local paths, environment labels, and non-secret URLs
+- `development_workflow`: reusable engineering workflow, harness preference, test loop, visual QA, branch/release habit
+- `project_fact`: product, architecture, domain, or team convention
+- `governance_decision`: accepted/rejected option, rationale, scope or release decision
+- `verification_evidence`: command result, screenshot path, UI report path, residual risk
+- `blocked_sensitive`: information that should not become durable memory
+
+Routing rules:
+
+- Account references default to `user_private` or `task_session`; store only non-secret labels and short retention unless the user confirms otherwise.
+- Project-owned server paths or environment labels may be `team_shared` when the source or owner is clear; personal machine paths should remain `user_private` or `task_session`.
+- Development workflow learnings should usually be `agent_self` or `team_shared`, and only persistent after user confirmation.
+- Verification evidence should usually remain `task_session` and be summarized in the delivery report instead of durable memory.
+- `blocked_sensitive` candidates should be reported under `不应记忆` with the reason.
+
 ## Retention Defaults
 
 - private identity, address, environment, availability, or location context: short-lived unless explicitly marked persistent

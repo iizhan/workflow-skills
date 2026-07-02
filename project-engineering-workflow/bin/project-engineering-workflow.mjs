@@ -48,6 +48,17 @@ const validMemoryTypes = new Set([
   "decision",
   "session_summary"
 ]);
+const validMemoryDataRoles = new Set([
+  "identity_context",
+  "user_preference",
+  "account_reference",
+  "infrastructure_reference",
+  "development_workflow",
+  "project_fact",
+  "governance_decision",
+  "verification_evidence",
+  "blocked_sensitive"
+]);
 const validMemoryStatuses = new Set([
   "pending_confirm",
   "active",
@@ -95,6 +106,71 @@ const workflowOptionalPathsByVersion = {
 };
 
 const upgradeOptionalPaths = [...v020OptionalPaths, ...branchReleaseOptionalPaths];
+
+const workflowContentContracts = [
+  {
+    path: ".agents/skills/project-superpowers-router/SKILL.md",
+    label: "Superpowers router UI interaction contract",
+    requiredSnippets: [
+      "Frontend / UI Interaction Contract",
+      "problem collection",
+      "Do not report a full UI pass from static checks alone"
+    ]
+  },
+  {
+    path: ".agents/skills/project-test-and-report/SKILL.md",
+    label: "Test report UI verification contract",
+    requiredSnippets: [
+      "UI / Interaction Reporting Rules",
+      "界面/交互验证",
+      "Record any blocked automation as a verification risk"
+    ]
+  },
+  {
+    path: "AGENTS.md",
+    label: "AGENTS visible-interface verification rule",
+    requiredSnippets: [
+      "interactive automation path",
+      "Do not mark a UI path as fully verified"
+    ]
+  },
+  {
+    path: ".specify/templates/delivery-summary-template.md",
+    label: "Delivery summary UI evidence fields",
+    requiredSnippets: [
+      "界面/交互验证",
+      "截图或 UI 报告"
+    ]
+  },
+  {
+    path: ".specify/memory/memory-policy.md",
+    label: "Memory data role policy",
+    requiredSnippets: [
+      "Data Role Classification",
+      "account_reference",
+      "development_workflow",
+      "blocked_sensitive"
+    ]
+  },
+  {
+    path: ".agents/skills/project-memory-router/SKILL.md",
+    label: "Memory router data role decision",
+    requiredSnippets: [
+      "Data Role Decision",
+      "infrastructure_reference",
+      "blocked_sensitive"
+    ]
+  },
+  {
+    path: ".specify/memory-store/memory-record.schema.json",
+    label: "Memory record data_role schema",
+    requiredSnippets: [
+      "\"data_role\"",
+      "\"account_reference\"",
+      "\"development_workflow\""
+    ]
+  }
+];
 
 const upgradeModePaths = {
   governance: [
@@ -335,13 +411,39 @@ function evaluateWorkflowState(outputDir) {
   const expectedCurrentPaths = declaredWorkflowVersion ? optionalPathsForWorkflowVersion(declaredWorkflowVersion) : [];
   const currentMissing = expectedCurrentPaths.filter((path) => !existsSync(join(outputDir, path)));
   const upgradeAvailable = upgradeOptionalPaths.filter((path) => !existsSync(join(outputDir, path)));
+  const contractIssues = declaredWorkflowVersion ? evaluateWorkflowContentContracts(outputDir) : [];
 
   return {
     declaredWorkflowVersion,
     missingCore,
     currentMissing,
-    upgradeAvailable
+    upgradeAvailable,
+    contractIssues
   };
+}
+
+function evaluateWorkflowContentContracts(outputDir) {
+  const issues = [];
+
+  for (const contract of workflowContentContracts) {
+    const absolutePath = join(outputDir, contract.path);
+    if (!existsSync(absolutePath)) {
+      continue;
+    }
+
+    const text = readText(absolutePath);
+    for (const snippet of contract.requiredSnippets) {
+      if (!text.includes(snippet)) {
+        issues.push({
+          path: contract.path,
+          label: contract.label,
+          missing: snippet
+        });
+      }
+    }
+  }
+
+  return issues;
 }
 
 function inspectGitState(targetDir, mainBranch) {
@@ -432,11 +534,13 @@ function doctor(options) {
       summary: {
         missingCore: workflowState.missingCore.length,
         missingCurrent: 0,
-        upgradeAvailable: 0
+        upgradeAvailable: 0,
+        contractIssues: 0
       },
       missing: workflowState.missingCore,
       currentMissing: [],
-      upgradeAvailable: []
+      upgradeAvailable: [],
+      contractIssues: []
     };
     if (jsonOut) {
       result.jsonOutPath = writeJsonArtifact(outputDir, jsonOut, result);
@@ -467,11 +571,13 @@ function doctor(options) {
         summary: {
           missingCore: 0,
           missingCurrent: workflowState.currentMissing.length,
-          upgradeAvailable: 0
+          upgradeAvailable: 0,
+          contractIssues: 0
         },
         missing: [],
         currentMissing: workflowState.currentMissing,
-        upgradeAvailable: []
+        upgradeAvailable: [],
+        contractIssues: []
       };
       if (jsonOut) {
         result.jsonOutPath = writeJsonArtifact(outputDir, jsonOut, result);
@@ -492,6 +598,42 @@ function doctor(options) {
     }
   }
 
+  if (workflowState.contractIssues.length > 0) {
+    const result = {
+      command: "doctor",
+      target: outputDir,
+      declaredWorkflowVersion: workflowState.declaredWorkflowVersion,
+      status: "failed",
+      decision: {
+        code: "workflow-contract-drift",
+        label: "契约漂移",
+        reason: "项目声明了 workflow 线，但关键流程契约内容缺失。请通过 upgrade 或手动同步模板后重跑 doctor。"
+      },
+      summary: {
+        missingCore: 0,
+        missingCurrent: 0,
+        upgradeAvailable: 0,
+        contractIssues: workflowState.contractIssues.length
+      },
+      missing: [],
+      currentMissing: [],
+      upgradeAvailable: [],
+      contractIssues: workflowState.contractIssues
+    };
+    if (jsonOut) {
+      result.jsonOutPath = writeJsonArtifact(outputDir, jsonOut, result);
+    }
+    if (jsonMode) {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      process.exit(1);
+    } else {
+      for (const issue of workflowState.contractIssues) {
+        console.error(`Contract drift: ${issue.path} missing "${issue.missing}" (${issue.label})`);
+      }
+    }
+    throw new Error("Doctor failed. Restore the missing workflow contract snippets and rerun.");
+  }
+
   if (workflowState.upgradeAvailable.length > 0) {
     const result = {
       command: "doctor",
@@ -506,11 +648,13 @@ function doctor(options) {
       summary: {
         missingCore: 0,
         missingCurrent: 0,
-        upgradeAvailable: workflowState.upgradeAvailable.length
+        upgradeAvailable: workflowState.upgradeAvailable.length,
+        contractIssues: 0
       },
       missing: [],
       currentMissing: [],
-      upgradeAvailable: workflowState.upgradeAvailable
+      upgradeAvailable: workflowState.upgradeAvailable,
+      contractIssues: []
     };
     if (jsonOut) {
       result.jsonOutPath = writeJsonArtifact(outputDir, jsonOut, result);
@@ -542,11 +686,13 @@ function doctor(options) {
     summary: {
       missingCore: 0,
       missingCurrent: 0,
-      upgradeAvailable: 0
+      upgradeAvailable: 0,
+      contractIssues: 0
     },
     missing: [],
     currentMissing: [],
-    upgradeAvailable: []
+    upgradeAvailable: [],
+    contractIssues: []
   };
   if (jsonOut) {
     result.jsonOutPath = writeJsonArtifact(outputDir, jsonOut, result);
@@ -918,6 +1064,16 @@ function validateMemoryIndexEntry(source, record, lineNumber) {
     };
   }
 
+  if (record.data_role != null && !validMemoryDataRoles.has(record.data_role)) {
+    return {
+      error: {
+        path: source.relPath,
+        line: lineNumber,
+        message: `Invalid memory data_role "${record.data_role}".`
+      }
+    };
+  }
+
   if (!isNonEmptyString(record.summary)) {
     return {
       error: {
@@ -996,6 +1152,7 @@ function validateMemoryIndexEntry(source, record, lineNumber) {
       id: record.id,
       scope: record.scope,
       owner_id: ownerId,
+      data_role: record.data_role ?? null,
       type: record.type,
       summary: record.summary.trim(),
       tags: record.tags ?? [],

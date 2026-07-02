@@ -19,6 +19,7 @@ For any request that may change code, config, scripts, docs, templates, tests, o
 
 5. Use `$project-superpowers-router` when a request benefits from enhanced capabilities.
    Route browser automation, asset generation, multi-agent delegation, external tools, GSD long-task orchestration, gstack role review, or recurring work through the confirmed requirement and locked scope.
+   For frontend, desktop app, browser, visual, navigation, or user-facing button changes, use the interactive automation path when available and record screenshots or a UI report.
    Use `$project-gsd-router` only for long-running or context-heavy work. Use `$project-gstack-router` only for role-specific product, design, engineering, QA, ship, or reflection judgment.
 
 6. Use `$project-memory-router` when a request involves remembering, forgetting, retrieving, updating, sharing, or reflecting on reusable context.
@@ -50,6 +51,7 @@ For any request that may change code, config, scripts, docs, templates, tests, o
 
 13. Use `$project-test-and-report` before final delivery.
    Return a Chinese report with executed commands, results, uncovered areas, and residual risks.
+   Do not mark a UI path as fully verified unless it was clicked through in a visible interface or the report explicitly states the manual path and automation blocker.
 
 Repository-specific rules:
 

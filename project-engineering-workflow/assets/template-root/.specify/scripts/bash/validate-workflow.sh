@@ -65,6 +65,17 @@ v030_optional_paths=(
 
 missing=0
 declared_workflow_version=""
+contract_issues=()
+
+check_snippet() {
+  local rel="$1"
+  local snippet="$2"
+  local label="$3"
+
+  if [[ -e "$ROOT_DIR/$rel" ]] && ! grep -Fq "$snippet" "$ROOT_DIR/$rel"; then
+    contract_issues+=("$rel missing \"$snippet\" ($label)")
+  fi
+}
 
 if [[ -e "$ROOT_DIR/$current_version_marker" ]]; then
   declared_workflow_version="$(tr -d '[:space:]' < "$ROOT_DIR/$current_version_marker")"
@@ -98,6 +109,28 @@ for rel in "${version_required_paths[@]}"; do
     missing=1
   fi
 done
+
+if [[ -n "$declared_workflow_version" ]]; then
+  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Frontend / UI Interaction Contract" "Superpowers router UI contract"
+  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "problem collection" "Superpowers router repair loop"
+  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Do not report a full UI pass from static checks alone" "Superpowers router blocked-automation rule"
+  check_snippet ".agents/skills/project-test-and-report/SKILL.md" "UI / Interaction Reporting Rules" "Test report UI verification contract"
+  check_snippet ".agents/skills/project-test-and-report/SKILL.md" "界面/交互验证" "Chinese UI verification report field"
+  check_snippet "AGENTS.md" "Do not mark a UI path as fully verified" "AGENTS visible-interface verification rule"
+  check_snippet ".specify/templates/delivery-summary-template.md" "截图或 UI 报告" "Delivery summary UI evidence field"
+  check_snippet ".specify/memory/memory-policy.md" "Data Role Classification" "Memory data role policy"
+  check_snippet ".specify/memory/memory-policy.md" "account_reference" "Memory account reference role"
+  check_snippet ".agents/skills/project-memory-router/SKILL.md" "Data Role Decision" "Memory router data role decision"
+  check_snippet ".agents/skills/project-memory-router/SKILL.md" "blocked_sensitive" "Memory blocked sensitive role"
+  check_snippet ".specify/memory-store/memory-record.schema.json" "\"data_role\"" "Memory record data_role schema"
+fi
+
+if [[ ${#contract_issues[@]} -gt 0 ]]; then
+  for issue in "${contract_issues[@]}"; do
+    echo "Contract drift: $issue"
+    missing=1
+  done
+fi
 
 if [[ $missing -ne 0 ]]; then
   echo "Workflow validation failed."

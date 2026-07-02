@@ -95,6 +95,17 @@ fi
 missing=0
 optional_missing=()
 current_missing=()
+contract_issues=()
+
+check_snippet() {
+  local rel="$1"
+  local snippet="$2"
+  local label="$3"
+
+  if [[ -e "$TARGET_DIR/$rel" ]] && ! grep -Fq "$snippet" "$TARGET_DIR/$rel"; then
+    contract_issues+=("$rel missing \"$snippet\" ($label)")
+  fi
+}
 
 for rel in "${core_required_paths[@]}"; do
   if [[ ! -e "$TARGET_DIR/$rel" ]]; then
@@ -131,6 +142,32 @@ if [[ -n "$declared_workflow_version" ]]; then
     echo
     echo "Projects without $current_version_marker may adopt newer optional files gradually."
     echo "If this is meant to be a current-version project, complete the upgrade and rerun doctor."
+    exit 1
+  fi
+fi
+
+if [[ -n "$declared_workflow_version" ]]; then
+  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Frontend / UI Interaction Contract" "Superpowers router UI contract"
+  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "problem collection" "Superpowers router repair loop"
+  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Do not report a full UI pass from static checks alone" "Superpowers router blocked-automation rule"
+  check_snippet ".agents/skills/project-test-and-report/SKILL.md" "UI / Interaction Reporting Rules" "Test report UI verification contract"
+  check_snippet ".agents/skills/project-test-and-report/SKILL.md" "界面/交互验证" "Chinese UI verification report field"
+  check_snippet "AGENTS.md" "Do not mark a UI path as fully verified" "AGENTS visible-interface verification rule"
+  check_snippet ".specify/templates/delivery-summary-template.md" "截图或 UI 报告" "Delivery summary UI evidence field"
+  check_snippet ".specify/memory/memory-policy.md" "Data Role Classification" "Memory data role policy"
+  check_snippet ".specify/memory/memory-policy.md" "account_reference" "Memory account reference role"
+  check_snippet ".agents/skills/project-memory-router/SKILL.md" "Data Role Decision" "Memory router data role decision"
+  check_snippet ".agents/skills/project-memory-router/SKILL.md" "blocked_sensitive" "Memory blocked sensitive role"
+  check_snippet ".specify/memory-store/memory-record.schema.json" "\"data_role\"" "Memory record data_role schema"
+
+  if [[ ${#contract_issues[@]} -gt 0 ]]; then
+    echo "Doctor failed."
+    echo "This project declares workflow line $declared_workflow_version, but key workflow contract snippets are missing:"
+    for issue in "${contract_issues[@]}"; do
+      echo "Contract drift: $issue"
+    done
+    echo
+    echo "Restore the missing snippets through a planned upgrade or manual template sync, then rerun doctor."
     exit 1
   fi
 fi

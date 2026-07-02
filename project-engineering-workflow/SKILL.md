@@ -117,6 +117,8 @@ Run:
 bash scripts/doctor.sh /absolute/path/to/target-repo
 ```
 
+`doctor` checks required files and current-line workflow contract drift, including UI/interaction verification rules that prevent static checks from being reported as full visible-interface coverage.
+
 Or use structured CLI output when an upper workflow needs machine-readable status:
 
 ```bash

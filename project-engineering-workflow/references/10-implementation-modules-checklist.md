@@ -16,7 +16,7 @@
 | Memory Governance Module | 已有运行基础版 | `project-memory-router` + `memory-policy.md` + `.specify/memory-store/*` + `memory-index` | 记忆分域、生命周期、索引优先、durable memory 分层 | 补 candidate 写入器和归档器 |
 | Evolution Governance Module | 已有基础版 | `project-evolution-router` + evolution policy + rule proposal | 经验 -> 提案 -> 验证 -> 回滚 | 补提案状态机和 evidence schema |
 | Branch And Release Governance Module | 已有运行版 | `project-branch-release` + `.specify/release/*` + branch/release scripts + `release-doctor` | `feature/* -> release/* -> tag -> merge main` | 补 hotfix branch contract |
-| Execution Augmentation Module | 已有 | superpowers / GSD / gstack routers | 增强执行不绕过项目规则 | 补能力调用回收约束 |
+| Execution Augmentation Module | 已有 | superpowers / GSD / gstack routers | 增强执行不绕过项目规则 | 补能力调用回收约束和 UI 自测记录 |
 | Compatibility And Migration Module | 已有基础版 | `doctor` / `upgrade` / `json` / `report` | 旧项目兼容、dry-run、审批、可选升级 | 补 memory-store migration helper |
 | Capability Surfaces Layer | 部分具备 | 单一 skill 内部多入口 | bootstrap / doctor / upgrade / memory / evolution 语义边界 | 形成正式 surface 清单 |
 | Deployment Profiles Layer | 已有雏形 | 单 skill + 全局安装方式 | 分发策略不反向主导框架 | 补 single/split/managed profile 文档 |
@@ -140,10 +140,27 @@
 #### 当前缺口
 
 - 还缺“增强能力调用后的标准回收格式”
+- 前端/桌面 UI 改动后的布局、点击、截图和阻塞记录还没有形成统一交付证据
 
 #### 下一步
 
 - 增加 augmentation result contract
+- 将 `problem collection -> test -> repair -> record` 固化为 UI/交互变更的最小验证闭环
+
+#### UI/交互变更最小闭环
+
+适用：
+
+- 页面布局、视觉密度、导航选中态、按钮反馈、浏览器路径、桌面应用界面
+
+要求：
+
+1. 记录用户可见问题或风险。
+2. 先跑静态、类型、构建和项目约定的最低成本检查。
+3. 能自动化时，必须通过可见界面点击关键路径并保存截图或报告。
+4. 发现布局错乱、点击无效、反馈缺失、遮挡、溢出或竖排碎片时，修复后重跑。
+5. 自动化受阻时，报告阻塞原因和手工点击路径，不得把静态检查说成完整 UI 通过。
+6. 最终结果写入 `project-test-and-report` 或 `delivery-summary.md` 的 `界面/交互验证` 字段。
 
 ### 5. Branch And Release Governance Module
 

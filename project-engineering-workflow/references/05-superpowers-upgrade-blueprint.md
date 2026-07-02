@@ -92,12 +92,23 @@
 - 浏览器端到端验证
 - App、设备、模拟器操作
 - 截图比对和交互检查
+- 前端/桌面应用页面改动后的布局、导航、按钮反馈和关键用户路径验证
 
 治理要求：
 
 - 先确认本地目标、端口和入口
 - 验证结果写入测试报告
 - 不把临时环境状态当成最终事实
+- 如果自动化运行时不可用，必须记录阻塞原因和手工验证路径，不能把静态检查包装成完整 UI 通过
+
+推荐回收格式：
+
+- `checked_path`: 被点击或检查的用户路径
+- `commands`: 执行的静态/构建/自测命令
+- `screenshots_or_report`: 截图或 UI 自测报告路径
+- `issues_found`: 点击无效、布局错乱、遮挡、溢出、竖排碎片、反馈缺失等问题
+- `repairs_made`: 已修复内容
+- `remaining_risk`: 环境阻塞、未覆盖设备、未验证外部依赖等风险
 
 ### 5. External Side Effect
 
@@ -186,7 +197,7 @@
 | 任务类型 | 推荐通道 | 收口方式 |
 | --- | --- | --- |
 | 局部 bug 或小改动 | 基础 workflow | `project-test-and-report` |
-| 需要 TDD、debug、浏览器或资产工具 | `project-superpowers-router` | 工具结果进入 review 和 test report |
+| 需要 TDD、debug、浏览器、UI 自测或资产工具 | `project-superpowers-router` | 工具结果、截图或 UI 报告进入 review 和 test report |
 | 多模块、多轮、长周期任务 | `project-superpowers-router` -> `project-gsd-router` | 更新 `workflow-state.yaml` |
 | 产品、设计、发布或 QA 判断 | `project-superpowers-router` -> `project-gstack-router` | 角色结论进入 plan、review 或 report |
 | 高风险外部副作用 | `project-superpowers-router` + 用户确认 | 记录影响范围、结果和回退方式 |

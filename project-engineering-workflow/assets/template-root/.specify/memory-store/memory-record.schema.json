@@ -19,6 +19,19 @@
     "id": { "type": "string" },
     "scope": { "enum": ["user_private", "team_shared", "agent_self", "task_session"] },
     "owner_id": { "type": ["string", "null"] },
+    "data_role": {
+      "enum": [
+        "identity_context",
+        "user_preference",
+        "account_reference",
+        "infrastructure_reference",
+        "development_workflow",
+        "project_fact",
+        "governance_decision",
+        "verification_evidence",
+        "blocked_sensitive"
+      ]
+    },
     "type": { "enum": ["fact", "preference", "behavior_pattern", "relationship", "decision", "session_summary"] },
     "summary": { "type": "string" },
     "content": { "type": "string" },
