@@ -12,7 +12,45 @@ milestones: []
 
 capability_routes: []
 
+branch_flow:
+  feature_branch: "feature/[FEATURE SLUG]"
+  source_branch: null
+  release_branch: null
+  release_version: null
+  tag_name: null
+  merge_target: main
+  status: pending
+
 role_reviews: []
+
+session_reflections:
+  - status: pending
+    summary: ""
+    user_choices: []
+    choice_rationale: []
+    worked_well: []
+    should_change: []
+    user_feedback: []
+
+reflection_artifacts: []
+delivery_artifacts: []
+release_artifacts: []
+
+memory_candidates: []
+
+rule_change_candidates: []
+
+memory_updates:
+  approved: []
+  rejected: []
+  archived: []
+
+evolution_updates:
+  drafted: []
+  approved: []
+  validated: []
+  rejected: []
+  rolled_back: []
 
 validation_status: pending
 handoff_notes: []

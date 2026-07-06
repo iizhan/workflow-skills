@@ -2,11 +2,43 @@
 
 [English](README.md) | 中文
 
-Workflow Skills 是一套面向 AI 协作研发的企业级工程化工作流 starter。
+Workflow Skills 是一个由两个核心组成的 Skill 产品体系：
+
+1. 一套完整的 `Workflow + Skill Framework`
+2. 一个可视化的 `Skill 管理分析工具`
+
+它不是单纯的 MCP 管理器，也不是普通的提示词库。它的核心对象始终是 `skill`，而 `MCP` 只是 skill 生态中的一种能力来源。
+
+## 双核心定位
+
+### 核心一：Workflow + Skill Framework
+
+这是生产层。
+
+目标是把零散的 prompt、脚本、Agent 约定、MCP 调用和工程规则，组织成一套可复用、可治理、可协作、可打包、可发布的 skill framework。
+
+### 核心二：可视化 Skill 管理分析工具
+
+这是治理层。
+
+目标是把本地与远程的 skill 可视化，让用户能看清：
+
+- skill 在哪里
+- skill 是什么角色
+- skill 如何组合
+- skill 是否重复
+- skill 是否有价值
+- skill 的成本、性能、健康度和优化空间
+
+以后所有功能调整都应优先回答两个问题：
+
+1. 这个改动是否增强了 `Workflow + Skill Framework`
+2. 这个改动是否增强了 `Skill 的可视化管理与分析`
 
 它把以下能力组合成一套可接入、可治理、可恢复、可验证的项目底座：
 
 - spec-kit 风格的规格与交付工件
+- 记忆策略、会话复盘与框架进化工件
 - Superpowers 风格的增强执行与验证纪律
 - GSD 风格的长任务编排与上下文续航
 - gstack 风格的角色化评审
@@ -14,11 +46,11 @@ Workflow Skills 是一套面向 AI 协作研发的企业级工程化工作流 st
 - Codex 与 Claude Code 的 harness 适配说明
 - code review、测试报告、剩余风险说明等交付门禁
 
-这不是把多个框架简单堆在一起，而是用 project-local skills 把它们路由进同一套项目工程宪法。
+这不是把多个框架简单堆在一起，而是把 workflow、skill、治理规则和可视化分析路由进同一套 Skill 产品体系。
 
 ## 文档定位
 
-本项目旨在定义并落地一套轻量版的“企业级 AI 研发操作系统”。
+本项目旨在定义并落地一套以 `workflow + skill` 为生产核心、以 `visual analysis` 为治理核心的 Skill 操作系统。
 
 核心公式：
 
@@ -32,18 +64,13 @@ Enterprise AI Framework
 + LLMOps Harness
 ```
 
-当前仓库先聚焦最小可行闭环：
+当前仓库先聚焦两个可落地核心：
 
-- 项目级 AI 协作规则
-- 本地 skills
-- feature 级规格工件
-- workflow 状态文件
-- Superpowers / GSD / gstack 路由
-- 默认开发规范
-- 前端 JS / React / Vue / CSS 规范层
-- 安全审查与分阶段验证闭环
-- Codex / Claude Code 工作流差异
-- review 与测试收口
+- 一套完整的 workflow + skill framework
+- 一个本地优先的可视化 skill 管理分析工具
+- 项目级 AI 协作规则、本地 skills、feature 级规格工件和 workflow 状态文件
+- Superpowers / GSD / gstack 路由、默认开发规范、前端 JS / React / Vue / CSS 规范层、安全审查和分阶段验证闭环
+- Codex / Claude Code 工作流差异、review 与测试收口、评估体系和 token 成本分析
 
 ## 核心目标
 
@@ -66,13 +93,17 @@ flowchart TD
   F --> G["Superpowers: 增强执行"]
   F --> H["GSD: 长任务编排"]
   F --> I["gstack: 角色评审"]
+  E --> R["Memory Router"]
+  E --> Q["Evolution Router"]
   G --> J["项目本地 Skills"]
   H --> J
   I --> J
+  Q --> J
+  R --> J
   J --> K["代码生成"]
   K --> L["代码审查"]
   L --> M["测试与交付报告"]
-  M --> N["specs / workflow-state / delivery report"]
+  M --> N["specs / workflow-state / memory candidates / rule change candidates / delivery report"]
 ```
 
 ## 组件映射
@@ -83,7 +114,7 @@ flowchart TD
 | 智能体治理 | 控制流程、范围、角色和交付门禁 | `AGENTS.md`、`constitution.md`、router skills |
 | 可复用技能 | 把原子能力封装为声明式模块 | `.agents/skills/*/SKILL.md` |
 | 测试驱动验证 | 用 review、验证闭环和测试保护实现质量 | `project-code-review`、`project-verification-loop`、`project-test-and-report`、项目测试命令 |
-| 上下文工程 | 保存任务状态、交接信息和历史决策 | `workflow-state.yaml`、`specs`、`docs` |
+| 上下文工程 | 保存任务状态、交接信息、历史决策、记忆候选和规则变更提案 | `workflow-state.yaml`、`specs`、`docs`、`memory-policy.md`、`evolution-policy.md` |
 | LLMOps 预留层 | 为后续可观测性、评估、安全、成本控制预留结构 | 结构化报告、能力路由、角色评审、剩余风险 |
 
 ## 快速接入
@@ -134,12 +165,23 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 │       ├── plan.md
 │       ├── tasks.md
 │       ├── quickstart.md
+│       ├── delivery-summary.md
+│       ├── task-reflection.md
+│       ├── rule-change-proposal.md
+│       ├── memory-policy.md
+│       ├── evolution-policy.md
+│       ├── evolution-prefill-policy.md
+│       ├── evolution-draft-protocol.md
+│       ├── reflection-output-protocol.md
+│       ├── final-output-protocol.md
 │       ├── workflow-state.yaml
 │       └── checklists/
 └── docs/
     ├── Codex团队开发说明.md
     ├── ClaudeCode团队开发说明.md
-    └── AI协作架构.md
+    ├── AI协作架构.md
+    ├── AI能力地图.md
+    └── 升级兼容策略.md
 ```
 
 ## 核心工作流
@@ -151,10 +193,12 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 5. 能力路由：通过 `project-superpowers-router` 判断是否需要增强能力。
 6. 长任务编排：多轮、多天、跨模块任务启用 `project-gsd-router`。
 7. 角色评审：产品、设计、工程、QA、发布判断启用 `project-gstack-router`。
-8. 交付工件：在 `specs/<feature>/` 下生成 spec、plan、tasks、workflow state。
-9. 实现与复用：通过 project-local skills 做最小安全实现。
-10. 安全与验证：敏感或共享路径变更进入 `project-security-review` 和 `project-verification-loop`。
-11. 收口交付：完成 code review、测试报告、未覆盖项和剩余风险说明。
+8. 记忆路由：涉及记住、遗忘、偏好、团队知识、会话总结或自我提升时启用 `project-memory-router`。
+9. 进化路由：涉及 skill、模板、流程、宪法持续优化时启用 `project-evolution-router`。
+10. 交付工件：在 `specs/<feature>/` 下生成 spec、plan、tasks、workflow state、记忆候选和规则变更候选。
+11. 实现与复用：通过 project-local skills 做最小安全实现。
+12. 安全与验证：敏感或共享路径变更进入 `project-security-review` 和 `project-verification-loop`。
+13. 收口交付：完成 code review、测试报告、未覆盖项、剩余风险说明，以及记忆/规则候选确认。
 
 ## 路由矩阵
 
@@ -183,6 +227,8 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 | 重复流程摩擦 | 记录到会话历史和升级 backlog，再更新最小相关 skill |
 | 前端规则发散 | 通用开发规范放 `project-dev-core`，前端规则放分层 skill |
 | 安全规则遗漏 | auth、secrets、输入、API、数据库、隐私数据、外部副作用进入 `project-security-review` |
+| 记忆漂移或隐私泄漏 | 把记忆拆成用户私有、团队共享、agent 自身和任务会话四类；长期更新前先确认 |
+| 自我进化失控 | 先形成规则提案，再确认、验证、保留回滚路径，不允许静默自改 |
 | 需求漂移 | 需求门禁、范围锁定、验收标准必须先于实现 |
 | AI 产出不可验证 | 重要变更必须以 `project-verification-loop`、review、测试报告和剩余风险收口 |
 | 外部副作用失控 | 发布、部署、远端数据、凭证、定时任务必须显式确认并记录回退方式 |

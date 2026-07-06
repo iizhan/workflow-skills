@@ -2,11 +2,43 @@
 
 English | [中文](README.zh-CN.md)
 
-Workflow Skills is an enterprise AI engineering framework starter.
+Workflow Skills is a Skill product system with two core pillars:
+
+1. a complete `Workflow + Skill Framework`
+2. a visual `Skill Management & Analysis Tool`
+
+It is not just an MCP manager, and it is not just a prompt library. The primary product object is always the `skill`, while `MCP` is only one possible capability source inside the skill ecosystem.
+
+## Dual-Core Positioning
+
+### Core 1: Workflow + Skill Framework
+
+This is the production layer.
+
+Its job is to turn scattered prompts, scripts, agent conventions, MCP calls, and engineering rules into a reusable, governable, collaborative, packageable, and publishable skill framework.
+
+### Core 2: Visual Skill Management & Analysis Tool
+
+This is the governance layer.
+
+Its job is to make local and remote skills visible so users can understand:
+
+- where skills live
+- what role a skill plays
+- how skills compose together
+- which skills are duplicated
+- which skills are valuable
+- which skills are costly, slow, unhealthy, or worth optimizing
+
+Every future product adjustment should be measured against two questions:
+
+1. Does it strengthen the `Workflow + Skill Framework`?
+2. Does it strengthen `visual skill management and analysis`?
 
 It helps teams bootstrap a project-level workflow layer that combines:
 
 - spec-kit style specification artifacts
+- memory policy, session reflection, and workflow evolution artifacts
 - Superpowers-style execution discipline
 - GSD-style long-running task orchestration
 - gstack-style role-based review
@@ -14,11 +46,11 @@ It helps teams bootstrap a project-level workflow layer that combines:
 - Codex and Claude Code harness guidance
 - review, testing, and delivery reporting gates
 
-The purpose is not to stack frameworks side by side. The purpose is to route them through one project constitution so AI-assisted development becomes scoped, reviewable, recoverable, and repeatable.
+The purpose is not to stack frameworks side by side. The purpose is to route workflow, skills, governance, and analysis through one coherent Skill product system.
 
 ## Positioning
 
-This repository defines and ships a lightweight version of an enterprise AI development operating system.
+This repository defines and ships a lightweight Skill operating system with workflow production on one side and visual skill governance on the other.
 
 Core formula:
 
@@ -32,18 +64,13 @@ Enterprise AI Framework
 + LLMOps Harness
 ```
 
-The current package focuses on the first practical layer:
+The current repository focuses on two practical anchors:
 
-- structured project workflow
-- local skills
-- feature specs
-- workflow state
-- enhanced capability routing
-- default development rules
-- frontend rules for JS, React, Vue, and CSS
-- security review and staged verification loops
-- Codex / Claude Code workflow distinction
-- review and test closure
+- a complete workflow + skill framework
+- a local-first visual skill management and analysis tool
+- structured project workflow, local skills, feature specs, and workflow state
+- enhanced capability routing, default development rules, frontend stack rules, security review, and staged verification
+- Codex / Claude Code workflow distinction, review, test closure, evaluation, and token economics
 
 ## Goals
 
@@ -66,13 +93,17 @@ flowchart TD
   F --> G["Superpowers: enhanced execution"]
   F --> H["GSD: long-task orchestration"]
   F --> I["gstack: role review"]
+  E --> R["Memory Router"]
+  E --> Q["Evolution Router"]
   G --> J["Project Skills"]
   H --> J
   I --> J
+  Q --> J
+  R --> J
   J --> K["Code Generation"]
   K --> L["Code Review"]
   L --> M["Test And Report"]
-  M --> N["specs / workflow-state / delivery report"]
+  M --> N["specs / workflow-state / memory candidates / rule change candidates / delivery report"]
 ```
 
 ## Component Mapping
@@ -83,7 +114,7 @@ flowchart TD
 | Agent governance | Control routing, scope, roles, and delivery gates | `AGENTS.md`, `constitution.md`, project router skills |
 | Reusable skills | Encapsulate project-local capabilities | `.agents/skills/*/SKILL.md` |
 | Test-driven verification | Keep implementation tied to validation | `project-code-review`, `project-verification-loop`, `project-test-and-report`, configured test command |
-| Context engineering | Preserve task state and handoff context | `workflow-state.yaml`, specs, docs |
+| Context engineering | Preserve task state, handoff context, memory candidates, and rule change proposals | `workflow-state.yaml`, specs, docs, memory and evolution policies |
 | LLMOps-ready harness | Prepare for future observability, safety, and evaluation | structured reports, risks, role reviews, capability routes |
 
 ## Quick Start
@@ -134,12 +165,23 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 │       ├── plan.md
 │       ├── tasks.md
 │       ├── quickstart.md
+│       ├── delivery-summary.md
+│       ├── task-reflection.md
+│       ├── rule-change-proposal.md
+│       ├── memory-policy.md
+│       ├── evolution-policy.md
+│       ├── evolution-prefill-policy.md
+│       ├── evolution-draft-protocol.md
+│       ├── reflection-output-protocol.md
+│       ├── final-output-protocol.md
 │       ├── workflow-state.yaml
 │       └── checklists/
 └── docs/
     ├── Codex团队开发说明.md
     ├── ClaudeCode团队开发说明.md
-    └── AI协作架构.md
+    ├── AI协作架构.md
+    ├── AI能力地图.md
+    └── 升级兼容策略.md
 ```
 
 ## Delivery Workflow
@@ -151,10 +193,12 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 5. Route enhanced capabilities through `project-superpowers-router`.
 6. Use `project-gsd-router` for long-running or context-heavy work.
 7. Use `project-gstack-router` for PM, design, engineering, QA, ship, or reflection review.
-8. Create feature artifacts under `specs/<feature>/`.
-9. Implement through project-local skills.
-10. Run security review and staged verification when the change touches sensitive or shared paths.
-11. Close with code review, test report, uncovered areas, and residual risks.
+8. Use `project-memory-router` for remembering, forgetting, retrieving, preferences, team knowledge, session summaries, or agent self-improvement.
+9. Use `project-evolution-router` when repeated learnings should upgrade workflow rules, skills, templates, or constitution.
+10. Create feature artifacts under `specs/<feature>/`.
+11. Implement through project-local skills.
+12. Run security review and staged verification when the change touches sensitive or shared paths.
+13. Close with code review, test report, uncovered areas, residual risks, and memory or rule-change candidates when useful.
 
 ## Implementation Roadmap
 
@@ -173,6 +217,8 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 | Repeated workflow friction | Record it in session history and upgrade backlog, then update the smallest relevant skill |
 | Frontend rule drift | Keep generic dev rules in `project-dev-core` and frontend rules in stack-specific layers |
 | Security drift | Route auth, secrets, inputs, APIs, database, private data, and external effects through `project-security-review` |
+| Memory drift or privacy leakage | Split memory into user-private, team-shared, agent-self, and task-session scopes; ask before durable updates |
+| Self-evolution drift | Turn repeated feedback into rule proposals first; validate and keep rollback paths for framework changes |
 | Scope drift | Require requirement, scope, and impact gates before implementation |
 | Unverified output | Close meaningful changes with `project-verification-loop`, review, and test reporting |
 | Unsafe side effects | Route external effects through explicit confirmation and rollback notes |
