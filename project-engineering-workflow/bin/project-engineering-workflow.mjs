@@ -20,7 +20,19 @@ const requiredPaths = [
   ".agents/skills/project-code-generation/SKILL.md",
   ".agents/skills/project-code-review/SKILL.md",
   ".agents/skills/project-test-and-report/SKILL.md",
+  ".agents/skills/project-dev-core/SKILL.md",
+  ".agents/skills/project-frontend-standards/SKILL.md",
+  ".agents/skills/project-frontend-js/SKILL.md",
+  ".agents/skills/project-frontend-react/SKILL.md",
+  ".agents/skills/project-frontend-vue/SKILL.md",
+  ".agents/skills/project-frontend-css/SKILL.md",
+  ".agents/skills/project-security-review/SKILL.md",
+  ".agents/skills/project-verification-loop/SKILL.md",
+  ".agents/skills/project-session-summary/SKILL.md",
+  ".agents/skills/project-skill-upgrade-advisor/SKILL.md",
   ".specify/memory/constitution.md",
+  ".specify/memory/session-history.md",
+  ".specify/memory/skill-upgrade-backlog.md",
   ".specify/templates/spec-template.md",
   ".specify/templates/plan-template.md",
   ".specify/templates/tasks-template.md",
@@ -30,6 +42,7 @@ const requiredPaths = [
   ".specify/scripts/bash/create-feature.sh",
   ".specify/scripts/bash/validate-workflow.sh",
   "docs/Codex团队开发说明.md",
+  "docs/ClaudeCode团队开发说明.md",
   "docs/AI协作架构.md",
   "specs"
 ];
@@ -167,7 +180,10 @@ Next steps:
 2. Review ${join(outputDir, ".agents/skills/project-stack-standards/SKILL.md")}
 3. Review ${join(outputDir, ".specify/memory/constitution.md")}
 4. Review ${join(outputDir, "docs/Codex团队开发说明.md")}
-5. Run: project-engineering-workflow doctor --output-dir "${outputDir}"`);
+5. Review ${join(outputDir, "docs/ClaudeCode团队开发说明.md")}
+6. Review ${join(outputDir, ".specify/memory/session-history.md")}
+7. Review ${join(outputDir, ".specify/memory/skill-upgrade-backlog.md")}
+8. Run: project-engineering-workflow doctor --output-dir "${outputDir}"`);
 }
 
 function doctor(options) {

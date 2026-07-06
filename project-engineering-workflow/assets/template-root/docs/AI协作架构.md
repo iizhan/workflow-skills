@@ -94,6 +94,29 @@ flowchart TD
 
 ## 简短定义
 
+## Codex 与 Claude Code 适配
+
+Codex 和 Claude Code 共用同一套项目工程规则：
+
+- `AGENTS.md`
+- `.agents/skills`
+- `.specify`
+- `specs`
+- `docs`
+
+差异只在 harness 能力层：
+
+- Codex 默认依赖 `AGENTS.md`、project-local skills、sandbox、approval、MCP 和可选 multi-agent。
+- Claude Code 可以额外接入 hooks、slash commands、subagents 和 Claude 专属配置。
+
+原则：
+
+- 共用规则放在 `AGENTS.md` 和 `.agents/skills`。
+- Codex 专属说明放在 `docs/Codex团队开发说明.md`。
+- Claude Code 专属说明放在 `docs/ClaudeCode团队开发说明.md`。
+- hooks、MCP、远端工具和自动化只做 opt-in，不作为默认项目底座。
+- 任何 harness 增强能力都不能绕过需求确认、范围锁定、review、verification 和 test report。
+
 这套架构的核心不是拼接多个框架，而是：
 
 > 用 project-local skills 把 spec-kit、Superpowers、GSD、gstack 路由进同一套项目工程宪法。

@@ -11,6 +11,7 @@ It helps teams bootstrap a project-level workflow layer that combines:
 - GSD-style long-running task orchestration
 - gstack-style role-based review
 - project-local `SKILL.md` capabilities
+- Codex and Claude Code harness guidance
 - review, testing, and delivery reporting gates
 
 The purpose is not to stack frameworks side by side. The purpose is to route them through one project constitution so AI-assisted development becomes scoped, reviewable, recoverable, and repeatable.
@@ -38,12 +39,17 @@ The current package focuses on the first practical layer:
 - feature specs
 - workflow state
 - enhanced capability routing
+- default development rules
+- frontend rules for JS, React, Vue, and CSS
+- security review and staged verification loops
+- Codex / Claude Code workflow distinction
 - review and test closure
 
 ## Goals
 
 - Preserve intent from request to delivery through structured specs.
 - Keep project memory durable across sessions through `specs/` and `workflow-state.yaml`.
+- Capture session summaries and workflow upgrade signals through `.specify/memory/session-history.md` and `.specify/memory/skill-upgrade-backlog.md`.
 - Make agent autonomy reliable by routing capabilities through explicit governance.
 - Build quality into the workflow through review and verification gates.
 - Keep adoption lightweight enough for existing repositories.
@@ -76,7 +82,7 @@ flowchart TD
 | Spec-driven development | Capture intent and acceptance criteria as contracts | `.specify`, `specs/<feature>/spec.md`, `plan.md`, `tasks.md` |
 | Agent governance | Control routing, scope, roles, and delivery gates | `AGENTS.md`, `constitution.md`, project router skills |
 | Reusable skills | Encapsulate project-local capabilities | `.agents/skills/*/SKILL.md` |
-| Test-driven verification | Keep implementation tied to validation | `project-code-review`, `project-test-and-report`, configured test command |
+| Test-driven verification | Keep implementation tied to validation | `project-code-review`, `project-verification-loop`, `project-test-and-report`, configured test command |
 | Context engineering | Preserve task state and handoff context | `workflow-state.yaml`, specs, docs |
 | LLMOps-ready harness | Prepare for future observability, safety, and evaluation | structured reports, risks, role reviews, capability routes |
 
@@ -132,6 +138,7 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 │       └── checklists/
 └── docs/
     ├── Codex团队开发说明.md
+    ├── ClaudeCode团队开发说明.md
     └── AI协作架构.md
 ```
 
@@ -146,7 +153,8 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 7. Use `project-gstack-router` for PM, design, engineering, QA, ship, or reflection review.
 8. Create feature artifacts under `specs/<feature>/`.
 9. Implement through project-local skills.
-10. Close with code review, test report, uncovered areas, and residual risks.
+10. Run security review and staged verification when the change touches sensitive or shared paths.
+11. Close with code review, test report, uncovered areas, and residual risks.
 
 ## Implementation Roadmap
 
@@ -162,8 +170,11 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 | --- | --- |
 | Framework conflict | Keep `AGENTS.md` and `constitution.md` as the only top-level authority |
 | Context overload | Use GSD-style milestones and `workflow-state.yaml` instead of loading everything |
+| Repeated workflow friction | Record it in session history and upgrade backlog, then update the smallest relevant skill |
+| Frontend rule drift | Keep generic dev rules in `project-dev-core` and frontend rules in stack-specific layers |
+| Security drift | Route auth, secrets, inputs, APIs, database, private data, and external effects through `project-security-review` |
 | Scope drift | Require requirement, scope, and impact gates before implementation |
-| Unverified output | Close every task with review and test reporting |
+| Unverified output | Close meaningful changes with `project-verification-loop`, review, and test reporting |
 | Unsafe side effects | Route external effects through explicit confirmation and rollback notes |
 
 ## Repository Layout
@@ -188,7 +199,12 @@ project-engineering-workflow/
 
 ```bash
 npm --prefix project-engineering-workflow run doctor
+node evaluations/skills-workflow/scripts/check-contract.mjs
 ```
+
+Use `evaluations/skills-workflow/templates/quality-metrics.md` for A/B runs. The workflow should be judged by routing precision, task outcome, safety, verification strength, friction cost, output clarity, maintainability, and learning-loop quality, not only by whether a skill was mentioned.
+
+Use `evaluations/skills-workflow/templates/token-economics.md` and `evaluations/skills-workflow/scripts/estimate-token-cost.mjs` to compare quality gain against token cost. Real A/B runs should record provider usage metadata when available.
 
 Package dry-run:
 

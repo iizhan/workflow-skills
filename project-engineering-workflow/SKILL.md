@@ -29,6 +29,7 @@ This skill combines:
 - For first-time setup, read `references/03-quickstart.md`
 - For stack-specific tuning, read `references/04-customization-guide.md`
 - For Superpowers + GSD + gstack routing, read `references/05-superpowers-upgrade-blueprint.md`
+- For ECC benchmarking and selective absorption guidance, read `references/06-ecc-benchmark.md`
 
 ## What This Skill Ships
 
@@ -44,10 +45,20 @@ This skill combines:
   - superpowers router
   - GSD router
   - gstack router
+  - dev core
+  - frontend standards
+  - frontend JS
+  - frontend React
+  - frontend Vue
+  - frontend CSS
+  - security review
+  - verification loop
   - stack standards
   - code generation
   - code review
   - test and report
+  - session summary
+  - skill upgrade advisor
 
 ## Standard Workflow
 
@@ -91,6 +102,7 @@ After bootstrap, first customize:
 2. `.agents/skills/project-stack-standards/SKILL.md`
 3. `.specify/memory/constitution.md`
 4. `docs/Codex团队开发说明.md`
+5. `docs/ClaudeCode团队开发说明.md`
 
 This keeps onboarding fast and avoids overwhelming the team on day one.
 
@@ -114,10 +126,17 @@ In the target repository, the recommended sequence is:
    - `$project-gsd-router` for long-running or context-heavy work
    - `$project-gstack-router` for role-specific product, design, engineering, QA, ship, or reflection judgment
 6. `bash .specify/scripts/bash/create-feature.sh <feature-slug> "<Feature Name>"`
-7. `$project-stack-standards`
-8. `$project-code-generation`
-9. `$project-code-review`
-10. `$project-test-and-report`
+7. `$project-dev-core`
+8. `$project-stack-standards`
+9. `$project-frontend-standards` when the task is frontend
+10. `$project-frontend-js`, `$project-frontend-react`, `$project-frontend-vue`, or `$project-frontend-css` when the task needs that stack
+11. `$project-security-review` when the task touches auth, secrets, user input, APIs, databases, private data, or external effects
+12. `$project-code-generation`
+13. `$project-code-review`
+14. `$project-verification-loop` for meaningful, risky, shared, frontend, security, database, or cross-module changes
+15. `$project-test-and-report`
+16. `$project-session-summary`
+17. `$project-skill-upgrade-advisor` when the same friction repeats
 
 ## Working Principles
 

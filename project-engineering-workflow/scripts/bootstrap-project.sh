@@ -119,6 +119,23 @@ for path in root.rglob("*"):
         updated = updated.replace(old, new)
     if updated != text:
         path.write_text(updated, encoding="utf-8")
+
+memory_dir = root / ".specify" / "memory"
+memory_dir.mkdir(parents=True, exist_ok=True)
+
+session_history = memory_dir / "session-history.md"
+if not session_history.exists():
+    session_history.write_text(
+        "# Session History\n\n- [DATE] 任务：\n  - 结论：\n  - 影响文件：\n  - 下一步：\n",
+        encoding="utf-8",
+    )
+
+upgrade_backlog = memory_dir / "skill-upgrade-backlog.md"
+if not upgrade_backlog.exists():
+    upgrade_backlog.write_text(
+        "# Skill Upgrade Backlog\n\n- [DATE] 观察：\n  - 触发证据：\n  - 置信度：low | medium | high\n  - 建议升级：\n  - 处理状态：\n",
+        encoding="utf-8",
+    )
 PY
 
 cat <<EOF
@@ -131,5 +148,8 @@ Next steps:
 2. Review $OUTPUT_DIR/.agents/skills/project-stack-standards/SKILL.md
 3. Review $OUTPUT_DIR/.specify/memory/constitution.md
 4. Review $OUTPUT_DIR/docs/Codex团队开发说明.md
-5. Run: bash "$SKILL_ROOT/scripts/doctor.sh" "$OUTPUT_DIR"
+5. Review $OUTPUT_DIR/docs/ClaudeCode团队开发说明.md
+6. Review $OUTPUT_DIR/.specify/memory/session-history.md
+7. Review $OUTPUT_DIR/.specify/memory/skill-upgrade-backlog.md
+8. Run: bash "$SKILL_ROOT/scripts/doctor.sh" "$OUTPUT_DIR"
 EOF

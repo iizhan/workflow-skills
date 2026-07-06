@@ -11,6 +11,7 @@ Workflow Skills 是一套面向 AI 协作研发的企业级工程化工作流 st
 - GSD 风格的长任务编排与上下文续航
 - gstack 风格的角色化评审
 - 基于 `SKILL.md` 的项目本地 skills
+- Codex 与 Claude Code 的 harness 适配说明
 - code review、测试报告、剩余风险说明等交付门禁
 
 这不是把多个框架简单堆在一起，而是用 project-local skills 把它们路由进同一套项目工程宪法。
@@ -38,12 +39,17 @@ Enterprise AI Framework
 - feature 级规格工件
 - workflow 状态文件
 - Superpowers / GSD / gstack 路由
+- 默认开发规范
+- 前端 JS / React / Vue / CSS 规范层
+- 安全审查与分阶段验证闭环
+- Codex / Claude Code 工作流差异
 - review 与测试收口
 
 ## 核心目标
 
 - 意图无损：从需求到交付，以结构化规格作为事实来源。
 - 持续记忆：通过 `specs/` 和 `workflow-state.yaml` 保存跨会话上下文。
+- 会话回收：通过 `.specify/memory/session-history.md` 和 `.specify/memory/skill-upgrade-backlog.md` 记录会话总结与升级信号。
 - 可靠自治：增强能力必须经过范围、权限、角色和验证门禁。
 - 质量内置：把 review、测试报告、未覆盖项和剩余风险作为交付的一部分。
 - 低门槛接入：优先服务已有项目，不要求一开始就重构业务代码。
@@ -76,7 +82,7 @@ flowchart TD
 | 规格驱动开发 | 定义意图、验收标准和技术约束 | `.specify`、`specs/<feature>/spec.md`、`plan.md`、`tasks.md` |
 | 智能体治理 | 控制流程、范围、角色和交付门禁 | `AGENTS.md`、`constitution.md`、router skills |
 | 可复用技能 | 把原子能力封装为声明式模块 | `.agents/skills/*/SKILL.md` |
-| 测试驱动验证 | 用 review 和测试保护实现质量 | `project-code-review`、`project-test-and-report`、项目测试命令 |
+| 测试驱动验证 | 用 review、验证闭环和测试保护实现质量 | `project-code-review`、`project-verification-loop`、`project-test-and-report`、项目测试命令 |
 | 上下文工程 | 保存任务状态、交接信息和历史决策 | `workflow-state.yaml`、`specs`、`docs` |
 | LLMOps 预留层 | 为后续可观测性、评估、安全、成本控制预留结构 | 结构化报告、能力路由、角色评审、剩余风险 |
 
@@ -132,6 +138,7 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 │       └── checklists/
 └── docs/
     ├── Codex团队开发说明.md
+    ├── ClaudeCode团队开发说明.md
     └── AI协作架构.md
 ```
 
@@ -146,7 +153,8 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 7. 角色评审：产品、设计、工程、QA、发布判断启用 `project-gstack-router`。
 8. 交付工件：在 `specs/<feature>/` 下生成 spec、plan、tasks、workflow state。
 9. 实现与复用：通过 project-local skills 做最小安全实现。
-10. 收口交付：完成 code review、测试报告、未覆盖项和剩余风险说明。
+10. 安全与验证：敏感或共享路径变更进入 `project-security-review` 和 `project-verification-loop`。
+11. 收口交付：完成 code review、测试报告、未覆盖项和剩余风险说明。
 
 ## 路由矩阵
 
@@ -172,8 +180,11 @@ node project-engineering-workflow/bin/project-engineering-workflow.mjs init \
 | --- | --- |
 | 框架冲突与内耗 | `AGENTS.md` 和 `constitution.md` 作为唯一最高规则 |
 | 上下文爆炸 | 使用 GSD 原子任务和 `workflow-state.yaml` 控制上下文预算 |
+| 重复流程摩擦 | 记录到会话历史和升级 backlog，再更新最小相关 skill |
+| 前端规则发散 | 通用开发规范放 `project-dev-core`，前端规则放分层 skill |
+| 安全规则遗漏 | auth、secrets、输入、API、数据库、隐私数据、外部副作用进入 `project-security-review` |
 | 需求漂移 | 需求门禁、范围锁定、验收标准必须先于实现 |
-| AI 产出不可验证 | 所有任务必须以 review、测试报告和剩余风险收口 |
+| AI 产出不可验证 | 重要变更必须以 `project-verification-loop`、review、测试报告和剩余风险收口 |
 | 外部副作用失控 | 发布、部署、远端数据、凭证、定时任务必须显式确认并记录回退方式 |
 
 ## 仓库结构
@@ -198,7 +209,12 @@ project-engineering-workflow/
 
 ```bash
 npm --prefix project-engineering-workflow run doctor
+node evaluations/skills-workflow/scripts/check-contract.mjs
 ```
+
+A/B 验证使用 `evaluations/skills-workflow/templates/quality-metrics.md`。判断 workflow 是否变好，不能只看 skill 有没有命中，还要看路由精度、任务结果、安全范围、验证强度、摩擦成本、输出清晰度、可维护性和学习闭环。
+
+A/B 成本分析使用 `evaluations/skills-workflow/templates/token-economics.md` 和 `evaluations/skills-workflow/scripts/estimate-token-cost.mjs`。真实 A/B 运行优先记录 provider usage metadata，静态估算用于提前发现过大的 skill 和过度触发风险。
 
 发布包 dry-run：
 
