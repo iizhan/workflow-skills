@@ -11,6 +11,7 @@ Use it after changing workflow skills, template rules, session memory behavior, 
 - Security-sensitive work routes through security review.
 - Meaningful changes route through staged verification.
 - Sessions produce reusable memory and upgrade signals.
+- Task confirmation stays adaptive: fast work remains light, while controlled work uses versioned requirement, impact, plan, and acceptance gates.
 - Skill quality is better than baseline, not merely present or mentioned.
 - The generated project still passes doctor and package checks.
 
@@ -77,6 +78,12 @@ node evaluations/skills-workflow/scripts/estimate-token-cost.mjs
 
 This estimates token cost for generated `SKILL.md` files, docs, and references. It does not replace real provider usage, but it catches oversized skills and over-triggering risk before a full replay.
 
+For CI-style failure on hard budget violations, run:
+
+```bash
+node evaluations/skills-workflow/scripts/estimate-token-cost.mjs --enforce
+```
+
 ## Success Criteria
 
 The workflow is improved when:
@@ -117,10 +124,12 @@ Recommended minimum before calling a workflow upgrade successful:
 - `cases/frontend-interaction.md`: frontend interaction/layout task.
 - `cases/security-sensitive.md`: security-sensitive task.
 - `cases/harness-parity.md`: Codex vs Claude Code workflow distinction.
+- `cases/adaptive-confirmation.md`: fast/controlled routing, impact scope, versioned confirmation, acceptance, and dissatisfaction handling.
 - `templates/run-record.md`: manual run record.
 - `templates/scorecard.md`: scoring rubric.
 - `templates/quality-metrics.md`: quality score, bands, and regression signals.
 - `templates/token-economics.md`: token usage, A/B cost comparison, and acceptance gates.
 - `scripts/check-contract.mjs`: static contract check.
 - `scripts/estimate-token-cost.mjs`: static token-cost estimator for skills, docs, and references.
+  It reports individual skill budgets, progressive-disclosure references, bundle costs, and advisory/enforced budget status.
 - `runs/`: saved evaluation results over time.

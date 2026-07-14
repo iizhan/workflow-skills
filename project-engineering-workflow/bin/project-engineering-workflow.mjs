@@ -111,23 +111,75 @@ const branchReleaseOptionalPaths = [
   ".specify/templates/release-notes-template.md"
 ];
 
+const v040ProgressiveReferencePaths = [
+  ".agents/skills/project-memory-router/references/memory-governance.md",
+  ".agents/skills/project-memory-router/references/memory-data-roles.md",
+  ".agents/skills/project-memory-router/references/memory-retention-retrieval.md",
+  ".agents/skills/project-memory-router/references/memory-conflict-session.md",
+  ".agents/skills/project-evolution-router/references/evolution-governance.md",
+  ".agents/skills/project-superpowers-router/references/ui-automation-contract.md",
+  ".agents/skills/project-superpowers-router/references/implementation-contract.md",
+  ".agents/skills/project-superpowers-router/references/review-contract.md"
+];
+
 const workflowOptionalPathsByVersion = {
   "0.2.0": [...v020OptionalPaths],
   "0.2.1": [...v020OptionalPaths],
   "0.3.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths.filter((path) => path !== ".specify/scripts/bash/release-doctor.sh")],
-  "0.3.1": [...v020OptionalPaths, ...branchReleaseOptionalPaths]
+  "0.3.1": [...v020OptionalPaths, ...branchReleaseOptionalPaths],
+  "0.4.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths]
 };
 
-const upgradeOptionalPaths = [...v020OptionalPaths, ...branchReleaseOptionalPaths];
+const upgradeOptionalPaths = [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths];
 
 const workflowContentContracts = [
   {
+    maxVersion: "0.3.1",
     path: ".agents/skills/project-superpowers-router/SKILL.md",
-    label: "Superpowers router UI interaction contract",
+    label: "Legacy superpowers router UI interaction contract",
     requiredSnippets: [
       "Frontend / UI Interaction Contract",
       "problem collection",
       "Do not report a full UI pass from static checks alone"
+    ]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-superpowers-router/SKILL.md",
+    label: "Superpowers router progressive disclosure link",
+    requiredSnippets: [
+      "references/ui-automation-contract.md",
+      "references/implementation-contract.md",
+      "references/review-contract.md",
+      "Keep this file as the routing entry only"
+    ]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-superpowers-router/references/ui-automation-contract.md",
+    label: "Superpowers router UI interaction contract",
+    requiredSnippets: [
+      "UI Automation Contract",
+      "problem collection",
+      "Do not report a full UI pass from static checks alone"
+    ]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-superpowers-router/references/implementation-contract.md",
+    label: "Superpowers router implementation contract",
+    requiredSnippets: [
+      "Implementation Contract",
+      "Keep implementation separate from review"
+    ]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-superpowers-router/references/review-contract.md",
+    label: "Superpowers router review contract",
+    requiredSnippets: [
+      "Review Contract",
+      "accepted` means the direction is approved"
     ]
   },
   {
@@ -166,12 +218,60 @@ const workflowContentContracts = [
     ]
   },
   {
+    maxVersion: "0.3.1",
     path: ".agents/skills/project-memory-router/SKILL.md",
+    label: "Legacy memory router data role decision",
+    requiredSnippets: [
+      "Data Role Decision",
+      "blocked_sensitive"
+    ]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-memory-router/SKILL.md",
+    label: "Memory router progressive disclosure link",
+    requiredSnippets: [
+      "references/memory-governance.md",
+      "references/memory-data-roles.md",
+      "references/memory-retention-retrieval.md",
+      "references/memory-conflict-session.md"
+    ]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-memory-router/references/memory-governance.md",
+    label: "Memory router scoped reference map",
+    requiredSnippets: [
+      "Memory Governance Reference",
+      "Do not read every memory reference by default"
+    ]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-memory-router/references/memory-data-roles.md",
     label: "Memory router data role decision",
     requiredSnippets: [
       "Data Role Decision",
       "infrastructure_reference",
       "blocked_sensitive"
+    ]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-memory-router/references/memory-retention-retrieval.md",
+    label: "Memory router retention and retrieval policy",
+    requiredSnippets: [
+      "Memory Retention And Retrieval",
+      "Retrieval Modes"
+    ]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-memory-router/references/memory-conflict-session.md",
+    label: "Memory router conflict and session policy",
+    requiredSnippets: [
+      "Memory Conflict And Session Reflection",
+      "Conflict Rules"
     ]
   },
   {
@@ -182,18 +282,65 @@ const workflowContentContracts = [
       "\"account_reference\"",
       "\"development_workflow\""
     ]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-requirement-gate/SKILL.md",
+    label: "Adaptive requirement and confirmation contract",
+    requiredSnippets: ["Task Lanes", "需求版本", "确认执行", "controlled"]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-scope-impact-guard/SKILL.md",
+    label: "Full impact and scope-delta contract",
+    requiredSnippets: ["Impact Levels", "明确不影响", "影响版本", "scope delta"]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-verification-loop/SKILL.md",
+    label: "Impact-to-evidence verification contract",
+    requiredSnippets: ["Traceability", "事项与影响证据矩阵", "verified_with_risk"]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".agents/skills/project-test-and-report/SKILL.md",
+    label: "Versioned user acceptance report contract",
+    requiredSnippets: ["验证报告 vN", "awaiting_user_acceptance", "确认验收"]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".specify/templates/workflow-state-template.yaml",
+    label: "Adaptive workflow state contract",
+    requiredSnippets: ["task_lane:", "confirmation_gates:", "impact_assessment:", "scope_deltas:"]
+  },
+  {
+    minVersion: "0.4.0",
+    path: ".specify/templates/delivery-summary-template.md",
+    label: "User acceptance delivery artifact contract",
+    requiredSnippets: ["awaiting_user_acceptance", "事项与影响证据矩阵", "不满意分类"]
   }
 ];
 
 const upgradeModePaths = {
   governance: [
     "AGENTS.md",
+    ".agents/skills/project-requirement-gate/SKILL.md",
+    ".agents/skills/project-scope-impact-guard/SKILL.md",
+    ".agents/skills/project-tech-solution/SKILL.md",
+    ".agents/skills/project-verification-loop/SKILL.md",
+    ".agents/skills/project-test-and-report/SKILL.md",
+    ".agents/skills/project-session-summary/SKILL.md",
+    ".agents/skills/project-skill-upgrade-advisor/SKILL.md",
     ".specify/memory/constitution.md",
-    "docs/Codex团队开发说明.md"
+    "docs/Codex团队开发说明.md",
+    "docs/ClaudeCode团队开发说明.md",
+    "docs/AI协作架构.md"
   ],
   capabilities: [
     ".agents/skills/project-memory-router/SKILL.md",
     ".agents/skills/project-evolution-router/SKILL.md",
+    ".agents/skills/project-superpowers-router/SKILL.md",
+    ...v040ProgressiveReferencePaths,
     ".specify/memory/memory-policy.md",
     ".specify/memory/evolution-policy.md",
     ".specify/memory/evolution-prefill-policy.md",
@@ -212,6 +359,10 @@ const upgradeModePaths = {
     ".specify/scripts/bash/finalize-release.sh",
     ".specify/scripts/bash/release-doctor.sh",
     ".specify/templates/workflow-state-template.yaml",
+    ".specify/templates/spec-template.md",
+    ".specify/templates/plan-template.md",
+    ".specify/templates/tasks-template.md",
+    ".specify/templates/checklist-template.md",
     ".specify/templates/reflection-template.md",
     ".specify/templates/rule-change-template.md",
     ".specify/templates/delivery-summary-template.md",
@@ -238,7 +389,7 @@ function usage() {
     [--json-out "docs/workflow-doctor.json"]
 
   project-engineering-workflow release-doctor --output-dir "/absolute/path/to/target-repo"
-    [--release-version "0.3.1"]
+    [--release-version "0.4.0"]
     [--main-branch "main"]
     [--json]
     [--json-out "docs/workflow-release-doctor.json"]
@@ -366,6 +517,23 @@ function optionalPathsForWorkflowVersion(version) {
   return [...(workflowOptionalPathsByVersion[version] ?? upgradeOptionalPaths)];
 }
 
+function compareWorkflowVersions(leftVersion, rightVersion) {
+  const parse = (value) => value.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const left = parse(leftVersion);
+  const right = parse(rightVersion);
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return 0;
+}
+
+function isWorkflowVersionAtLeast(version, minimum) {
+  return compareWorkflowVersions(version, minimum) >= 0;
+}
+
 function normalizeMode(rawMode) {
   const mode = rawMode ?? "";
   if (mode === "full") {
@@ -424,7 +592,9 @@ function evaluateWorkflowState(outputDir) {
   const expectedCurrentPaths = declaredWorkflowVersion ? optionalPathsForWorkflowVersion(declaredWorkflowVersion) : [];
   const currentMissing = expectedCurrentPaths.filter((path) => !existsSync(join(outputDir, path)));
   const upgradeAvailable = upgradeOptionalPaths.filter((path) => !existsSync(join(outputDir, path)));
-  const contractIssues = declaredWorkflowVersion ? evaluateWorkflowContentContracts(outputDir) : [];
+  const contractIssues = declaredWorkflowVersion
+    ? evaluateWorkflowContentContracts(outputDir, declaredWorkflowVersion)
+    : [];
 
   return {
     declaredWorkflowVersion,
@@ -435,10 +605,16 @@ function evaluateWorkflowState(outputDir) {
   };
 }
 
-function evaluateWorkflowContentContracts(outputDir) {
+function evaluateWorkflowContentContracts(outputDir, declaredWorkflowVersion) {
   const issues = [];
 
   for (const contract of workflowContentContracts) {
+    if (contract.minVersion && !isWorkflowVersionAtLeast(declaredWorkflowVersion, contract.minVersion)) {
+      continue;
+    }
+    if (contract.maxVersion && compareWorkflowVersions(declaredWorkflowVersion, contract.maxVersion) > 0) {
+      continue;
+    }
     const absolutePath = join(outputDir, contract.path);
     if (!existsSync(absolutePath)) {
       continue;
@@ -914,7 +1090,8 @@ function inferProjectContext(targetDir, overrides) {
     "__PROJECT_NAME__": overrides["project-name"] ?? null,
     "__APP_PATH__": overrides["app-path"] ?? null,
     "__STACK_NAME__": overrides["stack-name"] ?? null,
-    "__ENV_OUTPUT__": overrides["env-output"] ?? null
+    "__ENV_OUTPUT__": overrides["env-output"] ?? null,
+    "__TEST_COMMAND__": overrides["test-command"] ?? null
   };
 
   const agentsPath = join(targetDir, "AGENTS.md");
@@ -930,6 +1107,12 @@ function inferProjectContext(targetDir, overrides) {
   if (existsSync(teamGuidePath)) {
     const teamGuideText = readText(teamGuidePath);
     context["__PROJECT_NAME__"] ??= teamGuideText.match(/^# (.+) Codex 团队开发说明$/m)?.[1] ?? null;
+  }
+
+  const testReportSkillPath = join(targetDir, ".agents", "skills", "project-test-and-report", "SKILL.md");
+  if (existsSync(testReportSkillPath)) {
+    const testReportSkillText = readText(testReportSkillPath);
+    context["__TEST_COMMAND__"] ??= testReportSkillText.match(/^Run: `([^`]+)`$/m)?.[1] ?? null;
   }
 
   if (!context["__ENV_OUTPUT__"]) {
@@ -1731,7 +1914,7 @@ function upgrade(options) {
     throw new Error(
       "Cannot infer upgrade placeholders for: " +
       missingPlaceholders.join(", ") +
-      ". Pass explicit values such as --project-name, --app-path, --stack-name, or --env-output."
+      ". Pass explicit values such as --project-name, --app-path, --stack-name, --env-output, or --test-command."
     );
   }
 

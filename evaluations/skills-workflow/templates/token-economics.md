@@ -107,3 +107,35 @@ This does not perfectly separate system prompt, conversation history, tool outpu
 4. Replace repeated deterministic instructions with scripts.
 5. Re-run the same A/B cases.
 6. Accept the change only if quality and token gates both pass.
+
+## Static Budget Gates
+
+`estimate-token-cost.mjs` reports static budgets for individual skills and common task bundles.
+
+Default budgets:
+
+| Budget | Value | Meaning |
+| --- | ---: | --- |
+| default skill | 700 | Ordinary `SKILL.md` files should stay concise. |
+| router skill | 900 | Router skills may be slightly larger, but should still be thin entry points. |
+| ordinary-dev target | 1500 | Long-term target for ordinary development routing. |
+| ordinary-dev warn | 2500 | Current warning threshold for ordinary development routing. |
+| ordinary-dev fail | 3500 | Hard failure threshold when `--enforce` is used. |
+| other bundle warn | 3500 | Warning threshold for frontend/security/enhanced bundles. |
+| other bundle fail | 5000 | Hard failure threshold when `--enforce` is used. |
+
+Run in advisory mode:
+
+```bash
+node evaluations/skills-workflow/scripts/estimate-token-cost.mjs
+```
+
+Run in CI/enforced mode:
+
+```bash
+node evaluations/skills-workflow/scripts/estimate-token-cost.mjs --enforce
+```
+
+If a skill exceeds its individual budget, first move rarely needed detail into `references/` and keep only trigger/routing logic in `SKILL.md`.
+
+If a bundle exceeds its warning threshold, inspect whether the task type is over-triggering skills or whether base skills need further slimming.

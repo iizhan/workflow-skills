@@ -28,7 +28,7 @@ npx @workflow-skills/project-engineering-workflow doctor \
 ```bash
 npx @workflow-skills/project-engineering-workflow release-doctor \
   --output-dir "/absolute/path/to/your-repo" \
-  --release-version "0.3.1" \
+  --release-version "0.4.0" \
   --json \
   --json-out "docs/workflow-release-doctor.json"
 ```
@@ -54,10 +54,10 @@ npx @workflow-skills/project-engineering-workflow upgrade \
 
 可用升级模式：
 
-- `governance`：刷新项目级入口规则、团队说明和宪法
+- `governance`：刷新项目级入口规则、任务分级/确认/影响 Skill、团队说明和宪法
 - `capabilities`：补齐 memory / evolution / branch-release 能力链及相关文档
-- `templates`：升级未来新 feature 模板，以及 feature 分支与 release 脚本
-- `current`：补齐完整 `0.3.x` 工作流线并写入 `.specify/workflow-version.txt`
+- `templates`：升级未来新 feature 的需求、影响、计划、任务、验证模板，以及 feature 分支与 release 脚本
+- `current`：补齐完整当前工作流线并写入 `.specify/workflow-version.txt`
 
 `upgrade` 默认只补缺失文件、保留已有 workflow 文件，不会静默重写旧内容。只有在看过 dry-run 结果后，才建议显式加 `--overwrite-existing`。
 如果希望顺手产出一份可评审文档，可以追加 `--write-report`，默认写到 `docs/workflow-upgrade-report.md`。
@@ -69,6 +69,7 @@ npx @workflow-skills/project-engineering-workflow upgrade \
 `memory-index` 只扫描约定好的 JSONL durable memory 源文件，重建 `.specify/memory-store/index.json`，遇到坏记录或重复 ID 会直接失败并保持原索引不被静默改写。
 如果项目还没接入 `.specify/memory-store`，先通过 `--mode capabilities` 补齐能力链。
 `0.3.x` 还新增了受治理的 git flow：默认跟踪型开发走 `feature/* -> release/* -> v<version> -> merge main`。
+`0.4.x` 新增 `fast / standard / controlled` 自适应任务通道、版本化确认门禁、完整影响范围、范围变化暂停机制，以及“事项/影响 → 验证证据 → 用户验收”闭环。
 远端 push 和 npm publish 仍然必须显式人工批准；内置 release 脚本会拒绝额外 push / publish 参数，避免把外部动作混进本地 release 准备。
 
 生成内容包含 `AGENTS.md`、项目本地 skills、spec-kit 风格工件、记忆治理、框架进化、分支与发布治理、Superpowers 路由、GSD 状态文件、gstack 角色评审、默认开发规范、前端栈规范、Codex / Claude Code 适配说明、安全审查、分阶段验证、代码审查和测试报告。
@@ -84,3 +85,4 @@ token 成本通过评估目录里的 token economics 模板和估算脚本记录
 六条主链的 onboarding 地图见生成后的 `docs/AI能力地图.md`。
 向后兼容升级规则见生成后的 `docs/升级兼容策略.md` 与 `references/08-upgrade-compatibility-pack/`。
 旧项目升级实操手册见 `references/08-upgrade-compatibility-pack/v0.1-to-v0.2-upgrade-manual.md` 与 `references/08-upgrade-compatibility-pack/v0.2-to-v0.3-upgrade-manual.md`。
+`0.3.x` 升级到自适应确认流程见 `references/08-upgrade-compatibility-pack/v0.3-to-v0.4-upgrade-manual.md`。

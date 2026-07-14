@@ -1,29 +1,27 @@
 ---
 name: project-test-and-report
-description: Validate project changes before delivery. Use after implementation to run low-cost automated checks, summarize manual verification steps, and provide a Chinese test report.
+description: Validate project changes before delivery and user acceptance. Use after implementation to run proportional automated and visible checks, map approved work items and impact to evidence, disclose uncovered areas and residual risks, and provide a versioned Chinese verification report with explicit accept or revise choices.
 ---
 
 # Project Test And Report
 
 Use this skill before final delivery.
 
-When the task is tracked under `specs/<feature>/`, follow `.specify/memory/final-output-protocol.md` and update `delivery-summary.md` so the user-facing closeout, verification result, reflection outcome, and memory/evolution follow-up stay aligned.
+For tracked work, follow `.specify/memory/final-output-protocol.md` and update `delivery-summary.md`.
 
 ## Workflow
 
-1. Identify changed areas and their risk level.
-2. Run the lowest-cost meaningful automated checks.
-3. For frontend, desktop app, browser, visual, or user-facing interaction changes, verify the changed path through the visible interface when automation is available.
-4. If runtime or UI verification depends on local tools, browser/app automation, devices, simulators, credentials, or external environments, state the exact manual verification path and do not claim full coverage.
-5. Summarize results in Chinese.
-6. Fold in key user choices, residual risks, and any memory or evolution follow-up needed for review.
+1. Identify changed areas/risk and run the lowest-cost meaningful checks.
+2. Verify user-facing changes through the visible interface when available; otherwise state the exact manual path and blocker.
+3. Map each approved item, acceptance, and impact to evidence, failure, or uncovered risk.
+4. Publish Chinese `验证报告 vN` with choices/risks/memory or evolution follow-up.
+5. Set `awaiting_user_acceptance`; offer `确认验收`, `继续修正`, `补充验证`, or `重新打开事项`.
 
 ## UI / Interaction Reporting Rules
 
-- Report visible UI checks separately from typecheck, build, lint, or unit tests.
-- Include screenshot paths, UI self-test report paths, or the exact manual click path when the task changes frontend pages.
-- Record any blocked automation as a verification risk, not as a passing UI result.
-- If a user reported a concrete broken interaction, name that scenario in the report and state whether it was clicked, statically guarded, or still blocked.
+- Separate visible UI evidence from static checks; include screenshots, reports, click path, or blocker.
+- Record any blocked automation as a verification risk, not a pass. Name reported broken interactions and verification method.
+- Do not substitute self-review claims for paths, commands, screenshots, reports, results, or a precise blocker.
 
 ## Suggested Check
 
@@ -32,10 +30,8 @@ Run: `__TEST_COMMAND__`
 ## Report Format
 
 - `本次完成`
-- `关键改动`
-- `执行命令`
-- `结果说明`
-- `界面/交互验证`
-- `未覆盖项`
-- `剩余风险`
-- `是否存在记忆/规则候选`
+- `关联版本`
+- `事项/影响验证矩阵`
+- `关键改动` · `执行命令` · `结果说明` · `界面/交互验证`
+- `未覆盖项` · `剩余风险` · `是否存在记忆/规则候选`
+- `验收状态与用户选项`

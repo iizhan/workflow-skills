@@ -7,6 +7,47 @@ feature:
 requirement_status: draft
 scope_status: unlocked
 active_milestone: null
+task_lane: null
+confirmation_state: clarification
+
+artifact_versions:
+  requirement: null
+  impact: null
+  plan: null
+  verification: null
+
+confirmation_gates:
+  requirement_impact:
+    required: false
+    status: pending
+    approved_version: null
+  child_task_plan:
+    required: false
+    status: pending
+    approved_version: null
+  user_acceptance:
+    required: true
+    status: pending
+    approved_version: null
+
+work_items: []
+impact_assessment:
+  level: null
+  direct: []
+  indirect: []
+  user: []
+  data_migration: []
+  interfaces_config: []
+  security_permissions: []
+  compatibility: []
+  performance_resources: []
+  tests: []
+  release_rollback: []
+  workflow_skills: []
+  explicitly_unaffected: []
+  unknowns: []
+
+scope_deltas: []
 
 milestones: []
 
@@ -31,6 +72,8 @@ session_reflections:
     worked_well: []
     should_change: []
     user_feedback: []
+    acceptance_status: pending
+    dissatisfaction_categories: []
 
 reflection_artifacts: []
 delivery_artifacts: []
@@ -53,5 +96,6 @@ evolution_updates:
   rolled_back: []
 
 validation_status: pending
+verification_evidence: []
 handoff_notes: []
 residual_risks: []

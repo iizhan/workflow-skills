@@ -1,27 +1,34 @@
 ---
 name: project-requirement-gate
-description: Analyze project requests before implementation. Use when a user describes a feature, bug, refactor, integration, or workflow update and Codex must first summarize the request in Chinese, list constraints, define acceptance criteria, identify impacted modules, and highlight risky assumptions.
+description: Analyze and route project requests before implementation. Use when a user describes a feature, bug, refactor, integration, or workflow update and Codex must assess clarity and complexity, investigate discoverable context, produce versioned requirements and work items, define acceptance criteria, and decide which user confirmation gates are required.
 ---
 
 # Project Requirement Gate
 
-Use this skill before implementation unless the current thread already contains a confirmed and unambiguous requirement statement.
+Use before implementation unless the same scope is already confirmed.
+
+## Task Lanes
+
+- `fast`: one clear, low-risk, reversible outcome. Restate briefly; no separate approval unless requested.
+- `standard`: multiple items or bounded shared impact. Confirm goal, items, acceptance, and impact once.
+- `controlled`: cross-module, architecture, data, security, permission, migration, external/destructive effect, release, or material ambiguity. Confirm requirement/impact, then child-task plan.
+
+Classify by uncertainty and impact, not word count. "直接做" may skip low-risk ceremony, never safety, permission, privacy, release, destructive, or irreversible confirmation.
 
 ## Workflow
 
-1. Restate the request in Chinese in one short paragraph.
-2. Extract the business goal and user-visible outcome.
-3. List explicit constraints and important assumptions.
-4. Map the request to impacted areas such as application code, configs, scripts, docs, tests, workflow files, or templates.
-5. Define concrete acceptance criteria.
-6. List ambiguities or risky assumptions.
-7. If ambiguity changes scope, permissions, user flow, data, or delivery behavior, stop and ask for confirmation before editing.
+1. Restate the Chinese goal and visible outcome.
+2. Inspect code/config/logs/docs before asking; ask only when ambiguity changes outcome, scope, data, permission, compatibility, delivery, or acceptance. Stop on material ambiguity.
+3. Select a lane and create versioned `ITEM-*` with outcome and acceptance.
+4. Record constraints, assumptions, non-goals, and dependencies.
+5. For standard/controlled work, obtain `$project-scope-impact-guard` output and publish `需求与事项 vN` with `确认执行`, `修改事项`, `缩小范围`, or `补充需求`.
+6. For controlled work, require a second confirmation of child tasks, dependencies, validation, and rollback.
+7. Bind approval to the artifact version. Reconfirm only changed items/impact; an earlier unscoped "可以" does not approve expansion.
 
 ## Output Format
 
 - `需求目标`
+- `任务通道与原因`
 - `已知约束`
-- `影响模块`
-- `验收标准`
-- `待确认项`
-- `下一步建议`
+- `事项清单与验收标准`
+- `待调查/待确认项` · `需求版本` · `需要的确认门禁` · `确认选项`

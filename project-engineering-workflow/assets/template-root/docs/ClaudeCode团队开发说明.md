@@ -4,6 +4,8 @@
 
 核心规则仍以 `AGENTS.md` 和 `.specify/memory/constitution.md` 为准。Claude Code 可以使用更丰富的 hooks、commands、subagents 或 MCP，但这些能力只能增强执行，不能绕过需求、范围、审查、验证和交付记录。
 
+Claude Code 与 Codex 共用 `fast / standard / controlled` 三档任务通道、版本化确认和影响范围门禁。Hooks 不得把未确认的 controlled 任务自动推进到写入阶段，也不得把旧版本的“可以”解释为对新增范围的批准。
+
 ## 与 Codex 的共用层
 
 - `AGENTS.md`
@@ -61,6 +63,7 @@ Claude Code 中仍按项目 skills 顺序执行：
 - hooks 不应自动提交、推送、发布、删除远端资源
 - hooks 不应写入 secrets、凭据或用户私有配置
 - hooks 的结果必须回收到 review、verification 或 session summary
+- hooks 检测到范围漂移时应阻断后续写入，并提示更新影响版本
 
 ## 与 Codex 的主要差异
 

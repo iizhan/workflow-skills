@@ -37,6 +37,7 @@ This skill combines:
 - For backward-compatible upgrade guidance, read `references/08-upgrade-compatibility-pack/`
 - For an old-project migration path from `v0.1` to `v0.2.x`, read `references/08-upgrade-compatibility-pack/v0.1-to-v0.2-upgrade-manual.md`
 - For an old-project migration path from `v0.2.x` to `v0.3.x`, read `references/08-upgrade-compatibility-pack/v0.2-to-v0.3-upgrade-manual.md`
+- For an old-project migration path from `v0.3.x` to `v0.4.x`, read `references/08-upgrade-compatibility-pack/v0.3-to-v0.4-upgrade-manual.md`
 - For the six-lane onboarding map, read the generated `docs/AI能力地图.md` in a bootstrapped project
 
 ## What This Skill Ships
@@ -145,7 +146,7 @@ If the repository already uses the governed branch/release lane, validate local 
 ```bash
 npx @workflow-skills/project-engineering-workflow release-doctor \
   --output-dir "/absolute/path/to/target-repo" \
-  --release-version "0.3.1" \
+  --release-version "0.4.0" \
   --json \
   --json-out "docs/workflow-release-doctor.json"
 ```
@@ -181,16 +182,19 @@ Rules:
 - review the dry-run plan before using `--overwrite-existing`
 - use `--mode current` only when the project intentionally adopts the full current workflow line
 - use `memory-index` to rebuild `.specify/memory-store/index.json` without rewriting durable memory record bodies
-- treat branch/release capability as additive for old projects and default only for the `0.3.x` workflow line
+- treat branch/release capability as additive for old projects; `0.4.x` retains it and adds adaptive task/confirmation governance
 
 ### 4. Pilot With One Real Requirement
 
 In the target repository, the recommended sequence is:
 
 1. `$project-requirement-gate`
+   - classify `fast / standard / controlled`, inspect before asking, and bind approval to a versioned requirement/item package
 2. `$project-codebase-onboarding`
 3. `$project-scope-impact-guard`
+   - cover direct/indirect, user, data, contracts, security, compatibility, performance, tests, release, workflow, and explicit non-impact boundaries
 4. `$project-tech-solution`
+   - decompose confirmed `ITEM-*` into `TASK-*`; controlled work requires plan confirmation before edits
 5. `$project-superpowers-router` when enhanced capabilities are useful
    - `$project-gsd-router` for long-running or context-heavy work
    - `$project-gstack-router` for role-specific product, design, engineering, QA, ship, or reflection judgment
@@ -206,7 +210,9 @@ In the target repository, the recommended sequence is:
 15. `$project-code-generation`
 16. `$project-code-review`
 17. `$project-verification-loop` for meaningful, risky, shared, frontend, security, database, or cross-module changes
+   - map every approved item and impact to evidence, failure, or residual risk
 18. `$project-test-and-report`
+   - publish a versioned report and wait for user acceptance or revision
 19. `$project-session-summary`
 20. `$project-skill-upgrade-advisor` when the same friction repeats
 

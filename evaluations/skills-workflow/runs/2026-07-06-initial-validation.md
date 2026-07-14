@@ -92,11 +92,14 @@ This run did not have provider-level usage metadata, so exact baseline-vs-candid
 - Baseline total tokens: not measured
 - Candidate total tokens: not measured
 - Candidate static generated skill estimate: recorded by `estimate-token-cost.mjs`
+- Static budget report: advisory mode; hard failures only when `--enforce` is used
 - Token ratio: unavailable until paired A/B replay
 - Cost per quality point: unavailable until paired A/B replay
 - Current decision: monitor
 
 Interpretation: static estimates can identify oversized skill files and docs; final "better than last version" decisions require paired runs with usage metadata or replay logs.
+
+Follow-up after the 0.3.1 merge: router slimming moved rarely needed memory, evolution, and UI automation details into skill-local `references/`. The largest router `SKILL.md` files are now below the router budget, while ordinary-dev/frontend/security bundles remain warning-level optimization targets.
 
 ## Findings
 

@@ -29,6 +29,14 @@
 
 ## 推荐工作流
 
+先选择任务通道：
+
+- `fast`：目标清楚、风险低、可回滚，简要复述后直接执行并验证。
+- `standard`：确认一版“需求 + 事项 + 验收 + 影响范围”后执行。
+- `controlled`：先确认需求、事项、验收和影响范围，再确认子任务、依赖、验证与回滚。
+
+确认必须绑定版本。执行中出现超出已确认范围的影响时，暂停并只确认新增差异。
+
 1. `project-requirement-gate`
 2. `project-codebase-onboarding`
 3. `project-scope-impact-guard`
@@ -52,6 +60,8 @@
 21. `project-session-summary`
 22. `project-skill-upgrade-advisor`，重复摩擦需要
 
+其中影响范围必须覆盖：直接和间接影响、用户、数据/迁移、接口/配置、安全/权限、兼容、性能、测试、发布/回滚、Workflow/Skill，以及明确不影响项。验证报告必须把每个事项和影响维度映射到证据、失败或未覆盖风险，并等待用户验收。
+
 ## 首轮接入必做
 
 至少确认以下内容已经改成项目真实规则：
@@ -66,6 +76,7 @@
 ## 维护原则
 
 - 流程规则变化时，优先同步 `AGENTS.md` 与 `.agents/skills`
+- 任务分级、确认门禁或影响维度变化时，同步 `project-requirement-gate`、`project-scope-impact-guard`、spec/plan/tasks/checklist/workflow-state 模板
 - 模板变化时，同步 `.specify/templates`
 - 技术栈或主应用目录变化时，同步 `project-stack-standards`
 - 前端通用或框架规则变化时，同步 `project-frontend-standards` 与对应栈 skill

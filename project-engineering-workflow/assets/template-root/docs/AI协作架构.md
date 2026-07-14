@@ -16,10 +16,10 @@ spec-kit + Memory Router + Evolution Router + Branch/Release Router + Superpower
 
 ```mermaid
 flowchart TD
-  A["AGENTS.md / constitution"] --> B["Requirement Gate"]
+  A["AGENTS.md / constitution"] --> B["Task Lane + Requirement Gate"]
   B --> C["Codebase Onboarding"]
-  C --> D["Scope Impact Guard"]
-  D --> E["Tech Solution"]
+  C --> D["Versioned Scope + Impact Guard"]
+  D --> E["Work Items + Child Tasks + Confirmation"]
   E --> F["Superpowers Router"]
   E --> P["Branch / Release Router"]
   E --> Q["Evolution Router"]
@@ -35,8 +35,9 @@ flowchart TD
   Q --> J
   R --> J
   J --> K["Code Review"]
-  K --> L["Test And Report"]
-  L --> M["specs / workflow-state / memory candidates / rule change candidates / delivery report"]
+  K --> L["Impact-to-Evidence Verification"]
+  L --> N["User Acceptance / Revision"]
+  N --> M["specs / workflow-state / memory candidates / rule change candidates / delivery report"]
 ```
 
 ## 分层职责
@@ -47,9 +48,11 @@ flowchart TD
 
 它们决定：
 
+- 任务走 fast、standard 还是 controlled
 - 什么请求必须先分析需求
 - 什么场景必须锁定范围
 - 什么变更需要技术方案
+- 哪些确认门禁必须等待用户，确认绑定哪个版本
 - 哪些目录和文件属于流程资产
 - 交付前必须完成哪些 review 和测试说明
 
@@ -65,6 +68,7 @@ flowchart TD
 - `quickstart.md`: 验证或使用入口
 - `checklists/delivery.md`: 交付检查
 - `workflow-state.yaml`: 长任务、能力路由、角色评审和恢复状态
+- `workflow-state.yaml`: 同时保存任务通道、需求/影响/计划/验证版本、确认门禁、事项、影响维度和范围变化
 - `memory-policy.md`: 记忆分域、保留期、检索和写入确认规则
 - `delivery-summary.md`: 面向用户的标准中文交付总结
 - `task-reflection.md`: 每次有意义任务结束后的固定复盘输出

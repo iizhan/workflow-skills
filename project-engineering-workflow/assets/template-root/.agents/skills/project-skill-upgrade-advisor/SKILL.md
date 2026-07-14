@@ -13,12 +13,13 @@ Use this skill when repeated sessions suggest the workflow itself should improve
 - a step is frequently missed in review, test, or delivery
 - a project rule keeps getting restated manually
 - a new project pattern appears often enough to deserve a skill
+- one high-impact workflow failure caused unsafe scope, data risk, permission misuse, false verification, or substantial rework
 
 ## Workflow
 
 1. Identify the repeated behavior or missing capability.
 2. Connect it to evidence from prior sessions or project artifacts.
-3. Estimate confidence:
+3. Classify the dissatisfaction or friction and estimate confidence:
    - `low`: one signal or weak evidence
    - `medium`: repeated twice or supported by a concrete artifact
    - `high`: repeated across multiple sessions or caused real rework
@@ -31,6 +32,7 @@ Use this skill when repeated sessions suggest the workflow itself should improve
 
 - Prefer project-local skill updates over global behavior changes.
 - Do not auto-edit skills from one weak signal.
+- Keep ordinary one-off dissatisfaction in session memory; a single signal may escalate only when impact is high and evidence is concrete.
 - Do not create a new skill when a short rule in an existing skill is enough.
 - Do not promote project-specific behavior to global guidance unless it appears in multiple projects.
 - Keep upgrade entries evidence-backed and reversible.

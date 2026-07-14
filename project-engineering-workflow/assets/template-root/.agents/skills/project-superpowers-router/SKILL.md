@@ -5,22 +5,24 @@ description: Route high-leverage AI capabilities safely inside this project. Use
 
 # Project Superpowers Router
 
-Use this skill before invoking enhanced capabilities that can read outside the immediate code path, call tools, create assets, automate browsers, schedule work, or affect external systems.
+Use this skill before invoking enhanced capabilities that read beyond the immediate code path, call tools, create assets, automate interfaces, schedule work, or affect external systems.
 
-This skill does not replace the normal engineering workflow. It decides how extra capabilities should be used within the confirmed requirement, locked scope, and project standards.
+Keep the confirmed requirement and scope lock authoritative. Extra capabilities support the normal workflow; they do not replace requirement, scope, review, or verification gates.
 
-## Inputs
+## Entry Discipline
 
-- confirmed requirement analysis
-- codebase onboarding summary when available
-- scope lock result
-- current tool or capability request
-- relevant project rules from `AGENTS.md`
+Keep this file as the routing entry only. Do not load implementation, UI, or review details until the task actually needs them.
+
+For development-heavy work, preserve the loop:
+
+`plan -> implement -> test -> review -> finish`
+
+The loop is mandatory, but its detailed rules live in references so ordinary routing does not spend context on them.
 
 ## Capability Classes
 
 - `read-only discovery`: search, inspect, browse, screenshot, analyze files, inspect schemas, or collect references
-- `local execution`: run tests, scripts, builds, formatters, dev servers, migrations in dry-run mode, or local verifiers
+- `local execution`: run tests, scripts, builds, formatters, dev servers, dry-run migrations, or local verifiers
 - `asset generation`: create or edit images, documents, spreadsheets, presentations, diagrams, fixtures, or mock data
 - `interactive automation`: use browser, app, device, simulator, or UI automation to verify behavior
 - `external side effect`: call external APIs, publish, deploy, send messages, schedule jobs, mutate remote data, or change credentials
@@ -30,32 +32,20 @@ This skill does not replace the normal engineering workflow. It decides how extr
 
 ## Routing Rules
 
-1. Keep the original requirement and scope lock authoritative.
-2. Pick the smallest capability class that can answer the need.
-3. Prefer read-only discovery before execution when the risk is unclear.
-4. Use local execution before external side effects.
-5. Require an explicit user confirmation before external side effects, credential changes, publishing, deployment, destructive commands, or recurring automations.
-6. Use `project-gsd-router` only when resumable milestones or context control are needed.
-7. Use `project-gstack-router` only when role-specific judgment will change quality, scope, or release confidence.
-8. Record assumptions, chosen capability, expected output, and rollback or cleanup path before acting.
-9. After the capability runs, fold the result back into the normal workflow:
-   - implementation uses `project-code-generation`
-   - review uses `project-code-review`
-   - validation uses `project-test-and-report`
+1. Pick the smallest capability class that can answer the need.
+2. Prefer read-only discovery before execution when risk is unclear.
+3. Use local execution before external side effects.
+4. Require explicit user confirmation before external side effects, credential changes, publishing, deployment, destructive commands, or recurring automations.
+5. Use `project-gsd-router` only when resumable milestones or context control are needed.
+6. Use `project-gstack-router` only when role-specific judgment will change quality, scope, or release confidence.
+7. Record assumptions, chosen capability, expected output, and rollback or cleanup path before acting.
+8. Fold results back into implementation, review, verification, and final report.
 
-## Frontend / UI Interaction Contract
+## When To Read References
 
-When the change touches UI layout, visual hierarchy, browser flow, desktop app screens, navigation, or user-facing buttons, route it as `interactive automation` unless the user explicitly says not to test visually.
-
-Use this loop (`problem collection -> test -> repair -> record`):
-
-1. Collect the visible issue or risk, including user screenshots, reported broken clicks, or unclear flows.
-2. Run the lowest-cost static and build checks first.
-3. Exercise the changed user path through the visible interface when browser, app, device, or simulator automation is available.
-4. Capture screenshots or a machine-readable UI report for changed first screens and high-risk actions.
-5. Record every failed click, layout overlap, clipped label, stale selection, missing feedback, or blocked automation.
-6. Repair, rerun the checks, and only then mark the UI path verified.
-7. If interactive automation is blocked by the environment, state that clearly and provide the exact manual verification path. Do not report a full UI pass from static checks alone.
+- Read `references/ui-automation-contract.md` when the task touches UI layout, visual hierarchy, browser flow, desktop app screens, navigation, or user-facing buttons.
+- Read `references/implementation-contract.md` when the task will edit code, generate files, run local commands, change data models, or alter build/test behavior.
+- Read `references/review-contract.md` before reporting completion for non-trivial implementation work, risky edits, multi-file changes, or any task that needs independent bug/risk/test scrutiny.
 
 ## Output Format
 

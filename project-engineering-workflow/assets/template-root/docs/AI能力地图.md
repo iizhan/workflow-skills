@@ -11,10 +11,12 @@
 
 ```mermaid
 flowchart TD
-  A["用户请求"] --> B["Requirement / Scope / Plan"]
-  B --> C["Implementation"]
+  A["用户请求"] --> A1["fast / standard / controlled"]
+  A1 --> B["Requirement / Items / Impact / Confirmation"]
+  B --> C["Child Tasks / Implementation"]
   C --> D["Review / Test"]
-  D --> E["Reflection"]
+  D --> D1["Impact-to-Evidence Report"]
+  D1 --> E["User Acceptance / Reflection"]
   E --> F["Memory"]
   E --> G["Evolution"]
   D --> H["Final Output"]
@@ -32,6 +34,8 @@ flowchart TD
 
 - 把需求变成交付
 - 把实现变成可验证结果
+- 按复杂度控制确认成本
+- 把事项和影响范围追溯到验证证据
 
 入口：
 
@@ -50,6 +54,13 @@ flowchart TD
 - `tasks.md`
 - `quickstart.md`
 - `delivery-summary.md`
+
+门禁：
+
+- fast：清楚且低风险时不强制多轮确认
+- standard：确认需求、事项、验收和影响范围
+- controlled：再确认子任务、依赖、验证和回滚
+- 范围漂移：暂停并确认新增差异
 
 ### 2. Memory 主链
 

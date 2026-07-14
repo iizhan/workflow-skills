@@ -5,17 +5,28 @@ Specification and delivery artifacts live under `.specify` and `specs`.
 
 For any request that may change code, config, scripts, docs, templates, tests, or delivery behavior, follow this sequence:
 
+Use an adaptive task lane before choosing how much ceremony to expose:
+
+- `fast`: one clear, low-risk, reversible outcome. Briefly restate the goal, execute, and verify without forcing separate requirement or child-task approval.
+- `standard`: multiple work items or bounded shared impact. Confirm one versioned package containing goal, work items, acceptance criteria, and impact before editing.
+- `controlled`: cross-module, architecture, database, security, permissions, migration, external effects, destructive actions, release behavior, or material ambiguity. Confirm requirements and impact first, then confirm child tasks, dependencies, verification, and rollback.
+
+Investigate discoverable project facts before asking questions. Ask only when ambiguity changes outcome, scope, data, permissions, compatibility, delivery behavior, or acceptance. Bind every approval to an explicit artifact version. If approved scope or impact expands during execution, pause and confirm the delta before continuing.
+
 1. Use `$project-requirement-gate`.
-   Produce a Chinese requirement analysis with goal, constraints, acceptance criteria, impacted modules, and risky assumptions.
+   Classify the task lane, check whether the request is clear, inspect discoverable context, and produce versioned Chinese requirements with `ITEM-*` work items and acceptance criteria.
+   For standard or controlled work, present concrete choices: confirm execution, modify items, narrow scope, or add requirements.
 
 2. Use `$project-codebase-onboarding` when entering an unfamiliar module.
    Build a read-only map of the request path, source of truth, key dependencies, and likely risks before editing.
 
-3. Use `$project-scope-impact-guard`.
-   Lock the smallest safe edit scope and separate direct impact from likely ripple impact.
+3. Use `$project-scope-impact-guard` for standard or controlled work; fast work needs it only if inspection reveals shared or uncertain impact.
+   Produce a versioned impact report covering direct and indirect impact, users, data/migration, interfaces/config, security/permissions, compatibility, performance, tests, release/rollback, Workflow/Skill assets, and explicit non-impact boundaries.
+   Assign `low`, `medium`, `high`, or `blocked`. Map approved impact to work items and verification evidence.
 
 4. Use `$project-tech-solution` for cross-layer, risky, or unclear tasks.
-   Turn the confirmed requirement into a concrete implementation plan.
+   Turn confirmed requirements and impact into `TASK-*` child tasks with dependencies, completion conditions, verification evidence, and rollback.
+   Controlled tasks require a second versioned confirmation before editing. Standard tasks need another confirmation only when decomposition changes approved scope or impact.
 
 5. Use `$project-superpowers-router` when a request benefits from enhanced capabilities.
    Route browser automation, asset generation, multi-agent delegation, external tools, GSD long-task orchestration, gstack role review, or recurring work through the confirmed requirement and locked scope.
@@ -59,17 +70,17 @@ For any request that may change code, config, scripts, docs, templates, tests, o
    Prioritize bugs, regressions, missing edge cases, and unsafe assumptions.
 
 16. Use `$project-verification-loop` for meaningful, risky, shared, frontend, security, database, or cross-module changes.
-    Run staged build/typecheck/lint/test/security/diff checks that exist in the target repo.
+    Run staged build/typecheck/lint/test/security/diff checks that exist in the target repo. Trace every approved impact and acceptance criterion to evidence or an explicit uncovered risk.
 
 17. Use `$project-test-and-report` before final delivery.
-   Return a Chinese report with executed commands, results, uncovered areas, and residual risks.
+   Return a versioned Chinese verification report with executed commands, impact-to-evidence mapping, results, uncovered areas, and residual risks. Mark delivery as `awaiting_user_acceptance` until the user accepts or requests revision.
    Do not mark a UI path as fully verified unless it was clicked through in a visible interface or the report explicitly states the manual path and automation blocker.
 
 18. Use `$project-session-summary` when a task or session completes.
-    Record outcome, changed files, risks, and next actions in `.specify/memory/session-history.md`.
+    Record outcome, changed files, risks, user acceptance, and dissatisfaction categories in `.specify/memory/session-history.md`.
 
 19. Use `$project-skill-upgrade-advisor` when the same friction repeats across sessions.
-    Capture evidence, propose the smallest useful skill update, and record it in `.specify/memory/skill-upgrade-backlog.md`.
+    Capture evidence, distinguish one-off dissatisfaction from repeated or high-impact workflow failure, propose the smallest useful update, and record it in `.specify/memory/skill-upgrade-backlog.md`.
 
 Repository-specific rules:
 
@@ -85,6 +96,9 @@ Repository-specific rules:
   - workflow assets: `AGENTS.md`, `.agents`, `.specify`, `specs`, `docs`
   - business assets: application code, runtime config, scripts, infrastructure files
 - Prefer the smallest safe change over broad refactors unless the user explicitly asks for a larger cleanup.
+- Do not force multi-round approval on fast tasks. Do not collapse controlled tasks into a vague one-line approval.
+- Treat requirement, impact, plan, and verification confirmations as different decisions. A later expanded version is not approved by an earlier unscoped "可以".
+- Treat scope drift as a workflow event: stop, describe the delta, update affected `ITEM-*` / `TASK-*`, and reconfirm only the changed impact.
 - When architecture, process, stack rules, or delivery expectations change, sync:
   - `AGENTS.md`
   - `.agents/skills/*`

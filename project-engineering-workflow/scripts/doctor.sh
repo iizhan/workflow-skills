@@ -83,7 +83,18 @@ branch_release_optional_paths=(
   ".specify/templates/release-notes-template.md"
 )
 
-upgrade_optional_paths=("${v020_optional_paths[@]}" "${branch_release_optional_paths[@]}")
+v040_progressive_reference_paths=(
+  ".agents/skills/project-memory-router/references/memory-governance.md"
+  ".agents/skills/project-memory-router/references/memory-data-roles.md"
+  ".agents/skills/project-memory-router/references/memory-retention-retrieval.md"
+  ".agents/skills/project-memory-router/references/memory-conflict-session.md"
+  ".agents/skills/project-evolution-router/references/evolution-governance.md"
+  ".agents/skills/project-superpowers-router/references/ui-automation-contract.md"
+  ".agents/skills/project-superpowers-router/references/implementation-contract.md"
+  ".agents/skills/project-superpowers-router/references/review-contract.md"
+)
+
+upgrade_optional_paths=("${v020_optional_paths[@]}" "${branch_release_optional_paths[@]}" "${v040_progressive_reference_paths[@]}")
 
 declared_workflow_version=""
 if [[ -e "$TARGET_DIR/$current_version_marker" ]]; then
@@ -97,6 +108,9 @@ if [[ -n "$declared_workflow_version" ]]; then
       current_required_optional_paths=("${v020_optional_paths[@]}")
       ;;
     0.3.0|0.3.1)
+      current_required_optional_paths=("${v020_optional_paths[@]}" "${branch_release_optional_paths[@]}")
+      ;;
+    0.4.0)
       current_required_optional_paths=("${upgrade_optional_paths[@]}")
       ;;
     *)
@@ -118,6 +132,24 @@ check_snippet() {
   if [[ -e "$TARGET_DIR/$rel" ]] && ! grep -Fq "$snippet" "$TARGET_DIR/$rel"; then
     contract_issues+=("$rel missing \"$snippet\" ($label)")
   fi
+}
+
+version_at_least() {
+  local version="$1"
+  local minimum="$2"
+  local version_major version_minor version_patch minimum_major minimum_minor minimum_patch
+  IFS=. read -r version_major version_minor version_patch <<< "$version"
+  IFS=. read -r minimum_major minimum_minor minimum_patch <<< "$minimum"
+  version_major="${version_major:-0}"
+  version_minor="${version_minor:-0}"
+  version_patch="${version_patch:-0}"
+  minimum_major="${minimum_major:-0}"
+  minimum_minor="${minimum_minor:-0}"
+  minimum_patch="${minimum_patch:-0}"
+
+  (( version_major > minimum_major )) ||
+    (( version_major == minimum_major && version_minor > minimum_minor )) ||
+    (( version_major == minimum_major && version_minor == minimum_minor && version_patch >= minimum_patch ))
 }
 
 for rel in "${core_required_paths[@]}"; do
@@ -160,18 +192,51 @@ if [[ -n "$declared_workflow_version" ]]; then
 fi
 
 if [[ -n "$declared_workflow_version" ]]; then
-  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Frontend / UI Interaction Contract" "Superpowers router UI contract"
-  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "problem collection" "Superpowers router repair loop"
-  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Do not report a full UI pass from static checks alone" "Superpowers router blocked-automation rule"
   check_snippet ".agents/skills/project-test-and-report/SKILL.md" "UI / Interaction Reporting Rules" "Test report UI verification contract"
   check_snippet ".agents/skills/project-test-and-report/SKILL.md" "界面/交互验证" "Chinese UI verification report field"
   check_snippet "AGENTS.md" "Do not mark a UI path as fully verified" "AGENTS visible-interface verification rule"
   check_snippet ".specify/templates/delivery-summary-template.md" "截图或 UI 报告" "Delivery summary UI evidence field"
   check_snippet ".specify/memory/memory-policy.md" "Data Role Classification" "Memory data role policy"
   check_snippet ".specify/memory/memory-policy.md" "account_reference" "Memory account reference role"
-  check_snippet ".agents/skills/project-memory-router/SKILL.md" "Data Role Decision" "Memory router data role decision"
-  check_snippet ".agents/skills/project-memory-router/SKILL.md" "blocked_sensitive" "Memory blocked sensitive role"
   check_snippet ".specify/memory-store/memory-record.schema.json" "\"data_role\"" "Memory record data_role schema"
+
+  if version_at_least "$declared_workflow_version" "0.4.0"; then
+    check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "references/ui-automation-contract.md" "Superpowers router progressive disclosure link"
+    check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "references/implementation-contract.md" "Superpowers router implementation progressive disclosure link"
+    check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "references/review-contract.md" "Superpowers router review progressive disclosure link"
+    check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Keep this file as the routing entry only" "Superpowers router narrow entry path"
+    check_snippet ".agents/skills/project-superpowers-router/references/ui-automation-contract.md" "UI Automation Contract" "Superpowers router UI contract"
+    check_snippet ".agents/skills/project-superpowers-router/references/ui-automation-contract.md" "problem collection" "Superpowers router repair loop"
+    check_snippet ".agents/skills/project-superpowers-router/references/ui-automation-contract.md" "Do not report a full UI pass from static checks alone" "Superpowers router blocked-automation rule"
+    check_snippet ".agents/skills/project-superpowers-router/references/implementation-contract.md" "Implementation Contract" "Superpowers router implementation contract"
+    check_snippet ".agents/skills/project-superpowers-router/references/implementation-contract.md" "Keep implementation separate from review" "Superpowers implementation/review split"
+    check_snippet ".agents/skills/project-superpowers-router/references/review-contract.md" "Review Contract" "Superpowers router review contract"
+    check_snippet ".agents/skills/project-superpowers-router/references/review-contract.md" 'accepted` means the direction is approved' "Superpowers proposal closure semantics"
+    check_snippet ".agents/skills/project-memory-router/SKILL.md" "references/memory-governance.md" "Memory router progressive disclosure link"
+    check_snippet ".agents/skills/project-memory-router/SKILL.md" "references/memory-data-roles.md" "Memory router data roles progressive disclosure link"
+    check_snippet ".agents/skills/project-memory-router/SKILL.md" "references/memory-retention-retrieval.md" "Memory router retention progressive disclosure link"
+    check_snippet ".agents/skills/project-memory-router/SKILL.md" "references/memory-conflict-session.md" "Memory router conflict progressive disclosure link"
+    check_snippet ".agents/skills/project-memory-router/references/memory-governance.md" "Do not read every memory reference by default" "Memory router scoped reference map"
+    check_snippet ".agents/skills/project-memory-router/references/memory-data-roles.md" "Data Role Decision" "Memory router data role decision"
+    check_snippet ".agents/skills/project-memory-router/references/memory-data-roles.md" "blocked_sensitive" "Memory blocked sensitive role"
+    check_snippet ".agents/skills/project-memory-router/references/memory-retention-retrieval.md" "Retrieval Modes" "Memory router retrieval modes"
+    check_snippet ".agents/skills/project-memory-router/references/memory-conflict-session.md" "Conflict Rules" "Memory router conflict rules"
+    check_snippet ".agents/skills/project-requirement-gate/SKILL.md" "Task Lanes" "Adaptive task lane contract"
+    check_snippet ".agents/skills/project-requirement-gate/SKILL.md" "确认执行" "Versioned requirement confirmation options"
+    check_snippet ".agents/skills/project-scope-impact-guard/SKILL.md" "Impact Levels" "Impact level contract"
+    check_snippet ".agents/skills/project-scope-impact-guard/SKILL.md" "明确不影响" "Explicit non-impact boundary"
+    check_snippet ".agents/skills/project-verification-loop/SKILL.md" "Traceability" "Impact-to-evidence traceability"
+    check_snippet ".agents/skills/project-test-and-report/SKILL.md" "awaiting_user_acceptance" "User acceptance delivery state"
+    check_snippet ".specify/templates/workflow-state-template.yaml" "confirmation_gates:" "Workflow confirmation state"
+    check_snippet ".specify/templates/workflow-state-template.yaml" "impact_assessment:" "Workflow impact state"
+    check_snippet ".specify/templates/delivery-summary-template.md" "事项与影响证据矩阵" "Delivery evidence matrix"
+  else
+    check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Frontend / UI Interaction Contract" "Legacy superpowers router UI contract"
+    check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "problem collection" "Legacy superpowers router repair loop"
+    check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Do not report a full UI pass from static checks alone" "Legacy superpowers blocked-automation rule"
+    check_snippet ".agents/skills/project-memory-router/SKILL.md" "Data Role Decision" "Legacy memory router data role decision"
+    check_snippet ".agents/skills/project-memory-router/SKILL.md" "blocked_sensitive" "Legacy memory blocked sensitive role"
+  fi
 
   if [[ ${#contract_issues[@]} -gt 0 ]]; then
     echo "Doctor failed."

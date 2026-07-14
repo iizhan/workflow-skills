@@ -1,48 +1,46 @@
 ---
 name: project-verification-loop
-description: Run a staged project verification loop. Use after meaningful code changes, before PRs, before commits, or when a task touches shared behavior, security, frontend layout, database code, or cross-module contracts.
+description: Run a staged, traceable project verification loop. Use after meaningful changes, before PRs, commits, or user acceptance, or when a task touches shared behavior, security, frontend layout, data, compatibility, performance, release behavior, workflow assets, or cross-module contracts and every approved item and impact must map to evidence or residual risk.
 ---
 
 # Project Verification Loop
 
-Use this skill for changes that need more than the minimum test command.
+Use for changes needing more than the minimum check.
 
 ## Verification Stages
 
-Choose the stages that exist in the target repository. Do not invent commands.
+Use only repository-supported commands: Build or compile, Typecheck, lint/format, unit/integration, visible UI/layout, security/secret scan, and Diff Review as relevant. Do not invent commands.
 
-1. Build or compile.
-2. Typecheck.
-3. Lint or format check.
-4. Unit or integration tests.
-5. Frontend render/layout check when UI changed.
-6. Security or secret scan when sensitive code changed.
-7. Diff review.
+## Traceability
+
+Build a matrix: approved `ITEM-*`/acceptance, impact dimension, implementation, verification method, evidence/result, uncovered risk.
+
+Build/Typecheck alone is not full verification. UI needs visible evidence when available; data/contracts need migration/compatibility evidence; security/external effects need boundary checks.
 
 ## Command Selection
 
-- Prefer project scripts from `package.json`, `pyproject.toml`, `Makefile`, `justfile`, CI config, or docs.
-- If the generated starter configured `__TEST_COMMAND__`, include it unless the task clearly needs a narrower check.
-- If a command is unavailable, record that it was not run and why.
-- If a command is expensive or destructive, ask before running it.
+- Prefer scripts from project config, CI, or docs; include `__TEST_COMMAND__` when relevant.
+- Record unavailable checks and why. Ask before expensive or destructive checks.
 
 ## Diff Review
 
-Before final delivery, inspect changed files for:
+Review for unrelated/out-of-scope edits, missing errors/tests, misleading UI, unreviewed security changes, unwanted generated files, accepted items without evidence, and new impact.
 
-- unrelated edits
-- missing error paths
-- stale copy or misleading UI text
-- missing tests or manual verification
-- security-sensitive changes without review
-- generated artifacts that should not be committed
+If verification discovers unapproved impact, stop delivery, publish the scope delta, and route back through `$project-scope-impact-guard`.
+
+## Result States
+
+- `verified`: all acceptance and approved impact have evidence.
+- `verified_with_risk`: core acceptance passed, but named non-blocking gaps remain.
+- `failed`: one or more acceptance criteria failed.
+- `blocked`: required environment, permission, data, or tool is unavailable.
+
+Self-review gathers evidence; it is not proof. Preserve uncertainty and offer acceptance choices.
 
 ## Output Format
 
 - `验证范围`
-- `执行命令`
-- `通过项`
-- `失败项`
-- `未执行项`
-- `差异审查`
-- `最终状态`
+- `关联需求/影响/计划版本`
+- `事项与影响证据矩阵`
+- `执行命令` · `通过项` · `失败项` · `未执行项`
+- `差异审查` · `最终状态` · `用户验收选项`

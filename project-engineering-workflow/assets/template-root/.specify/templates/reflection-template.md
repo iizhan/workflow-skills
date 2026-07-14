@@ -6,6 +6,8 @@
 - Date: `[DATE]`
 - Related Request: `[ORIGINAL REQUEST]`
 - Reflection Status: `draft`
+- Requirement / Impact / Plan / Verification Versions:
+- User Acceptance: pending / accepted / revision_requested
 
 ## Task Outcome
 
@@ -36,6 +38,14 @@ List the important user choices made in this task:
 ## What Should Change
 
 -
+
+## User Dissatisfaction
+
+- category: requirement_miss / item_breakdown / plan_miss / implementation_defect / ui_interaction / verification_gap / communication_gap / skill_routing / process_overhead
+- evidence:
+- affected confirmed version:
+- task-level correction:
+- repeated or high-impact workflow signal: yes / no
 
 ## Memory Candidates
 
