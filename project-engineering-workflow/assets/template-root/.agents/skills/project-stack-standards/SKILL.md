@@ -7,6 +7,8 @@ description: Implement changes using the repository's actual stack conventions. 
 
 Use this skill when the confirmed scope includes `__APP_PATH__`.
 
+Use the fresh Profile, relevant architecture section, and matched decisions. If missing or stale, route through `$project-profile-router` instead of rediscovering conventions.
+
 ## Follow The Existing Stack
 
 - Work within `__APP_PATH__`.
@@ -14,9 +16,9 @@ Use this skill when the confirmed scope includes `__APP_PATH__`.
 - Prefer the smallest safe change over broad refactors unless explicitly requested.
 - Read existing modules, naming, folder layout, state shape, config loading, and testing style before editing.
 
-## Fill These Project-Specific Rules First
+## Project-Specific Rules
 
-Before broad team use, customize this file with the project's real answers:
+Keep this curated skill aligned with verified Profile facts for:
 
 - main directory layout
 - component or module layering
@@ -37,7 +39,7 @@ Before broad team use, customize this file with the project's real answers:
 - Reuse existing abstractions before creating new ones.
 - Keep business rules close to the module that owns them.
 - Preserve project language, naming, copy style, and delivery conventions.
-- If stack-specific rules are missing, update this skill first so future work stays aligned.
+- If stack-specific rules are missing, refresh the Profile first, then update this curated skill only for stable rules that should govern future implementation.
 
 ## Verification
 

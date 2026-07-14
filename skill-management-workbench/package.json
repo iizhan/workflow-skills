@@ -11,7 +11,7 @@
     "preview": "electron-vite preview",
     "smoke": "node scripts/smoke-check.mjs",
     "layout:check": "node scripts/layout-check.mjs",
-    "self-test:ui": "node scripts/self-test-ui.mjs",
+    "self-test:ui": "SKILL_OS_SELF_TEST_REQUIRE_BROWSER=1 node scripts/self-test-ui.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {

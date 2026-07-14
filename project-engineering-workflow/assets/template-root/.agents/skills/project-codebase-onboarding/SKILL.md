@@ -5,7 +5,7 @@ description: Build a read-only codebase map before editing unfamiliar areas. Use
 
 # Project Codebase Onboarding
 
-Use this skill when the changed area is unfamiliar or the repository lacks obvious ownership boundaries.
+Use when the changed area is absent from or conflicts with the fresh Project Profile. Reuse `.specify/project-profile/architecture.md`; do not remap known modules without changed evidence.
 
 ## Workflow
 
@@ -15,6 +15,7 @@ Use this skill when the changed area is unfamiliar or the repository lacks obvio
 4. Distinguish confirmed structure from reasonable inference.
 5. Explain why the current structure likely exists, especially around state, cache, async flow, permissions, generated config, or deployment boundaries.
 6. Summarize what can be changed safely first and what should stay untouched.
+7. Update only the affected Profile/architecture sections and capture evidence when this analysis discovers reusable project facts.
 
 ## Output Format
 

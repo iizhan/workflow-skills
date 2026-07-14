@@ -40,14 +40,14 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/styles.css",
   styles,
-  ".overview-next-step",
-  "Overview must use a focused recommended next-step card"
+  ".overview-dashboard-card",
+  "Overview must use a metric dashboard card"
 );
 assertIncludes(
   "src/renderer/src/styles.css",
   styles,
-  ".overview-next-actions",
-  "Overview next-step actions must have dedicated styling"
+  ".overview-kpi-grid",
+  "Overview dashboard metrics must have dedicated layout"
 );
 assertIncludes(
   "src/renderer/src/styles.css",
@@ -64,8 +64,8 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/styles.css",
   styles,
-  ".overview-state-list",
-  "Overview must keep status as a compact side list"
+  ".overview-health-list",
+  "Overview must summarize health and risk indicators"
 );
 assertIncludes(
   "src/renderer/src/styles.css",
@@ -88,8 +88,8 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  'className="overview-next-step entity-skill"',
-  "Layout check expects focused Overview next-step markup"
+  'className="overview-dashboard-card entity-skill"',
+  "Layout check expects Overview dashboard metric markup"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -150,6 +150,60 @@ assertIncludes(
   styles,
   'data-active-section="analysis"] #telemetry .section-headline > div',
   "Analysis detail cards should stack headings and descriptions instead of squeezing them into one row"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  "Runtime layout repair",
+  "Runtime telemetry intake should have a dedicated layout repair layer"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  '#telemetry .local-tool-intake .section-headline.compact .toolbar.wrap',
+  "Runtime local tool toolbar should override global headline grid rules"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'className="project-library-table"',
+  "Project Library must render bound projects as a table"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'tx("Bound Projects", "已绑定项目")',
+  "Project Library should use bound-project language instead of recent or managed-project language"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "扫描和分析仍然一次只作用于一个选中项目",
+  "Project Library must state the single selected project boundary"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".project-library-table-shell",
+  "Project Library table shell styling must exist"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".project-library-table-shell {\n  max-width: 100%;\n  overflow-x: hidden;",
+  "Project Library table must not require horizontal scrolling"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".project-library-table td::before",
+  "Project Library table should collapse into labeled fields on narrower screens"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".project-table-action.danger",
+  "Project Library table actions should have deliberate compact action styling"
 );
 assertIncludes(
   "src/renderer/src/styles.css",
@@ -220,8 +274,8 @@ assertIncludes(
 assertIncludes(
   "scripts/self-test-ui.mjs",
   read("scripts/self-test-ui.mjs"),
-  "reported-remote-analysis-obra-superpowers",
-  "Self-test must capture the user-reported remote analysis scenario"
+  "reported-remote-candidate-preview",
+  "Self-test must capture remote candidate preview readability"
 );
 assertIncludes(
   "scripts/self-test-ui.mjs",
@@ -238,14 +292,26 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  "Open Framework",
-  "Overview should guide users to one next action instead of listing every feature"
+  "Overview Metrics",
+  "Overview should lead with metric summary content"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
   'className="overview-report-card"',
   "Overview should show a compact report surface"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'className="overview-kpi-grid"',
+  "Overview should expose KPI trend cards"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'className="overview-health-list"',
+  "Overview should expose coverage and risk indicators"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -273,7 +339,7 @@ assertIncludes(
   "src/renderer/src/App.tsx",
   app,
   'className="overview-boundary-card entity-project"',
-  "Overview should expose Workbench as a first-screen entry"
+  "Overview should expose Runtime as a first-screen entry"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -292,6 +358,18 @@ assertIncludes(
   app,
   "overview-today-report",
   "Overview should include a compact report strip instead of leaving first-screen dead space"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'data-product-section="evaluate"',
+  "Evaluate should be a first-class product module"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".evaluate-score-grid",
+  "Evaluate scorecards should have dedicated layout"
 );
 assertIncludes(
   "src/renderer/src/styles.css",
@@ -410,6 +488,18 @@ assertIncludes(
   styles,
   '.product-workspace.single-module-mode[data-active-section="apply-center"] .apply-center-workspace',
   "Apply Center should keep scope selection narrow and the staged workbench primary"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "formatApplyScope(scope.value, languageMode)",
+  "Apply Center scope cards should show localized scope labels"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "formatDiffPreviewStatus(\n                          remoteApplyCandidateDetail?.diffPreview.status",
+  "Apply Center remote handoff should show localized diff preview status"
 );
 assertIncludes(
   "src/renderer/src/styles.css",

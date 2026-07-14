@@ -13,6 +13,19 @@ This policy defines how Codex should handle memory for this project.
 
 Durable memory should be stored under `.specify/memory-store/`, while short-lived task state can stay in `specs/<feature>/workflow-state.yaml`.
 
+## Project Profile Cache
+
+`.specify/project-profile/` is a separate source-backed project context cache:
+
+- `profile.yaml` stores verified stack, commands, architecture facts, source-of-truth locations, and engineering conventions.
+- `architecture.md` stores the human-readable module and execution-flow map.
+- `decision-memory.yaml` stores project-shared, explicitly confirmed reusable decisions.
+- ignored `local-state.json` stores evidence fingerprints used to detect stale Profile sections.
+
+Refreshing reproducible Profile facts from repository evidence does not require repeated memory confirmation, but must not copy secrets, raw environment values, private data, or unsupported inference. New decision-memory entries still require explicit confirmation. User-private preferences remain in `user_private`; Profile cache must not become a shortcut around memory isolation.
+
+Never treat remembered decisions as current authorization for permissions, destructive actions, remote writes, publish/push/deploy, task scope, release readiness, or final acceptance.
+
 If the host cannot identify the user, do not mix `user_private` memories across people. Keep them in `task_session` or ask the user to choose a stable identity.
 
 ## Remembering Rules

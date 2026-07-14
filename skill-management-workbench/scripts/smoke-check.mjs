@@ -25,6 +25,9 @@ const styles = read("src/renderer/src/styles.css");
 const sharedTypes = read("src/shared/types.ts");
 const database = read("src/main/database.ts");
 const main = read("src/main/index.ts");
+const registryService = read("src/main/registry-service.ts");
+const localToolTelemetryService = read("src/main/local-tool-telemetry-service.ts");
+const projectProfileService = read("src/main/project-profile-service.ts");
 const preload = read("src/preload/index.ts");
 const previewApi = read("src/renderer/src/preview-api.ts");
 const packageJson = read("package.json");
@@ -59,6 +62,7 @@ const requiredProductSections = [
   "overview",
   "discovery",
   "local-skills",
+  "evaluate",
   "remote-market",
   "analysis",
   "graph",
@@ -94,14 +98,14 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  'className="overview-next-step entity-skill"',
-  "Overview uses a single recommended next-step card"
+  'className="overview-dashboard-card entity-skill"',
+  "Overview uses a dashboard metric card instead of a next-step-only card"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  "Open Framework",
-  "Overview has one primary guided next action"
+  "Overview Metrics",
+  "Overview has summary metrics as the primary content"
 );
 assert(
   !app.includes("hero-entry-grid") && !styles.includes("hero-entry-grid"),
@@ -136,8 +140,14 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/styles.css",
   styles,
-  ".overview-next-step",
-  "Overview next-step card styling"
+  ".overview-dashboard-card",
+  "Overview dashboard card styling"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".overview-sparkline",
+  "Overview trend sparkline styling"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -224,6 +234,72 @@ assertIncludes(
   "Optimization Proposals uses an anti-squeeze headline layout"
 );
 assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'tx("Workspace", "工作台")',
+  "Product navigation exposes the workspace module group"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'tx("Assets", "资产")',
+  "Product navigation exposes the asset module group"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'tx("Reports", "报告")',
+  "Product navigation exposes the report module group"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'tx("Governance", "治理")',
+  "Product navigation exposes the governance module group"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'className="proposal-lifecycle-strip"',
+  "Optimization Center shows the review-plan-apply-close lifecycle"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'className="proposal-work-queue"',
+  "Optimization Center exposes accepted work as an implementation queue"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "function formatProposalStatus(status: OptimizationProposalStatus, mode: LanguageMode)",
+  "Optimization Proposals status labels must be language-aware"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "formatProposalType(proposal.proposalType, mode)",
+  "Optimization Proposals should not render raw proposal type codes"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "formatProposalActorType(action.actorType, mode)",
+  "Optimization Proposal action actors should be localized"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "function formatApplyScope(scope: SkillApplyScope, mode: LanguageMode)",
+  "Apply Center scope labels must be language-aware"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "formatRemoteVerificationStatus(remoteApplyCandidate.verificationStatus, languageMode)",
+  "Apply Center remote verification status should not render raw codes"
+);
+assertIncludes(
   "src/renderer/src/styles.css",
   styles,
   "Skill OS module headline anti-squeeze repair",
@@ -246,6 +322,18 @@ assertIncludes(
   app,
   'className="overview-report-card"',
   "Overview compact report card"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'className="overview-kpi-grid"',
+  "Overview exposes KPI trend cards"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'className="overview-health-list"',
+  "Overview exposes health summary indicators"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -291,7 +379,7 @@ assertIncludes(
   "src/renderer/src/App.tsx",
   app,
   'className="overview-boundary-card entity-project"',
-  "Overview exposes Workbench as a first-screen product entry"
+  "Overview exposes Runtime as a first-screen product entry"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -308,26 +396,50 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  'className="overview-report-metrics"',
+  'className="overview-report-metrics overview-compact-metrics"',
   "Overview compact report metrics"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  '{tx("Open Workbench", "进入 Workbench")}',
-  "Overview secondary action routes to the workbench"
+  "{recommendedFlowCta}",
+  "Overview primary action follows the current guided workflow recommendation"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  '{ href: "#analysis", icon: "▤"',
-  "Analysis navigation uses a chart icon"
+  'tx("Improve a Skill", "打磨 Skill")',
+  "Overview secondary action helps users continue after the core workflow is ready"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  '{ href: "#evaluate", icon: "◎"',
+  "Evaluation reports navigation is visible in the report module"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  '{ href: "#analysis", icon: "▤", label: tx("Monitoring", "运行监控")',
+  "Monitoring navigation keeps the telemetry chain visible"
 );
 assertIncludes(
   "src/renderer/src/styles.css",
   styles,
   "Analysis pressure-summary refinement",
   "Analysis first screen should stay compact and signal-led"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  "Runtime layout repair",
+  "Runtime telemetry intake should stay dark and aligned"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  '#telemetry .local-tool-intake .section-headline.compact .toolbar.wrap',
+  "Runtime local tool toolbar should stay horizontal and not inherit the global headline grid"
 );
 assertIncludes(
   "src/renderer/src/styles.css",
@@ -356,8 +468,8 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/styles.css",
   styles,
-  ".overview-workflow-handoff",
-  "Overview workflow handoff styling"
+  ".evaluate-score-grid",
+  "Evaluate scorecard styling"
 );
 assertIncludes(
   "src/renderer/src/styles.css",
@@ -400,6 +512,24 @@ assertIncludes(
   app,
   "graph-operator-band",
   "Graph Studio exposes a compact first-screen Search/Select/Trace operator flow"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "graphNeighborhoodCacheRef",
+  "Graph Studio should cache loaded neighborhoods between panel jumps"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "getGraphNeighborhoodCacheKey(selectedGraphNodeId, graphSnapshot.generatedAt)",
+  "Graph Studio neighborhood cache should be scoped to node and graph snapshot"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "graphNeighborhoodCacheRef.current.clear();",
+  "Graph Studio neighborhood cache should invalidate when the graph snapshot changes"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -1426,8 +1556,8 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  "discovery-entry-strip",
-  "Discovery should expose staged entry cards instead of one dense first block"
+  "project-table-icon-action",
+  "Project Management table should use compact icon actions"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -1552,8 +1682,8 @@ assertIncludes(
 assertIncludes(
   "scripts/self-test-ui.mjs",
   read("scripts/self-test-ui.mjs"),
-  "Skill Library next step visible on first screen",
-  "Skill Library progressive UI self-test"
+  "Skill Library tabbed asset workflow",
+  "Skill Library tabbed asset UI self-test"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -1568,6 +1698,42 @@ assertIncludes(
   "Overview next-step actions styling"
 );
 assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'className="project-library-table"',
+  "Project Library uses table markup"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'tx("Bound Projects", "已绑定项目")',
+  "Project Library uses bound-project copy"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "本版本不扫描整台电脑",
+  "Project Management page states the no full-computer scan boundary"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".project-library-table-shell {\n  max-width: 100%;\n  overflow-x: hidden;",
+  "Project Library table should not require horizontal scrolling"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".project-library-table td::before",
+  "Project Library table should collapse into labeled fields on narrower screens"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".project-status-pill",
+  "Project Library status pill styling"
+);
+assertIncludes(
   "package.json",
   packageJson,
   "\"layout:check\": \"node scripts/layout-check.mjs\"",
@@ -1576,8 +1742,8 @@ assertIncludes(
 assertIncludes(
   "scripts/self-test-ui.mjs",
   read("scripts/self-test-ui.mjs"),
-  "https://github.com/obra/superpowers",
-  "UI self-test should cover the user-reported remote repository analysis path"
+  "Remote candidate preview exposes its source repository",
+  "UI self-test should cover remote candidate source repository preview"
 );
 assertIncludes(
   "scripts/self-test-ui.mjs",
@@ -1633,7 +1799,135 @@ assertIncludes(
   "https://github.com/${owner}/${repo}",
   "Preview API should normalize GitHub repository URLs for remote analysis"
 );
+assertIncludes(
+  "src/main/registry-service.ts",
+  registryService,
+  "Project scope: ${basename(resolvedProjectRoot)}",
+  "Targeted project scan creates a project-scoped authorization policy when first-run authorization is empty"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "Skill OS v1 scans only the selected project directory.",
+  "Legacy scan entrypoints should route to selected-project scanning"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "Scanning the selected project folder...",
+  "Project scan should show immediate in-card progress feedback"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "scan-result-modal",
+  "Scan completion should show a result dialog"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "scanResult.rootPaths.length > 0",
+  "Empty project scans should show the recommended workflow starter from the scan result"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "workflowStarterProjectRoot",
+  "Workflow starter card should use the normalized scanned project root"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "Recommended skills-workflow",
+  "Empty project scans should visibly recommend the bundled skills-workflow"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "Use recommended skills-workflow",
+  "Empty project modal should provide a clear selected recommendation action"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "focusWorkflowStarterCard",
+  "Recommended workflow action should scroll to the preview card"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "Previewing the recommended workflow. No files are being written yet.",
+  "Recommended workflow action should show immediate preview feedback"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".workflow-starter-card.is-highlighted",
+  "Recommended workflow preview card should be visually highlighted"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".project-scope-status",
+  "Project scan progress feedback styling"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".scan-result-modal-backdrop",
+  "Scan result dialog overlay styling"
+);
+assert(
+  !registryService.includes('throw new Error("No active authorization policy. Grant authorization first.");\n    }\n\n    const trimmedProjectRoot = projectRoot.trim();'),
+  "Targeted project scan must not fail before first-run authorization."
+);
+assert(
+  !app.includes("scanResult.rootPaths.includes(targetProjectRoot)"),
+  "Empty project starter visibility must not depend on exact unnormalized path equality."
+);
+assertIncludes(
+  "src/shared/types.ts",
+  sharedTypes,
+  '"connected_no_skill_runs"',
+  "Runtime evidence should distinguish a matched Codex directory from a Skill invocation"
+);
+assertIncludes(
+  "src/main/local-tool-telemetry-service.ts",
+  localToolTelemetryService,
+  '? "connected_no_skill_runs"',
+  "A matched Codex workspace should be reported as connected before a Skill run exists"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  '"connected-awaiting-skill"',
+  "Project status should expose the connected-awaiting-Skill state"
+);
+assertIncludes(
+  "src/main/project-profile-service.ts",
+  projectProfileService,
+  "project-profile.mjs",
+  "Project Profile service should use the project-local freshness probe"
+);
+assertIncludes(
+  "src/main/index.ts",
+  main,
+  '"workbench:get-project-profile"',
+  "Project Profile should be exposed through the main IPC boundary"
+);
+assertIncludes(
+  "src/preload/index.ts",
+  preload,
+  "getProjectProfile",
+  "Project Profile should be available to the renderer"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "project-profile-summary",
+  "Project detail should show the local Profile summary"
+);
 
 console.log(
-  `Smoke checks passed: ${navHrefs.length} navigation sections, desktop shell scroll guard, layout QA workflow hook, no inert buttons, Health Score policy/layout, Skill action feedback, Apply Preview/scope feedback, Graph Studio action feedback, Marketplace catalog/preview plumbing, Optimization decision feedback, and Bundle action feedback.`
+  `Smoke checks passed: ${navHrefs.length} navigation sections, desktop shell scroll guard, layout QA workflow hook, no inert buttons, Health Score policy/layout, Skill action feedback, Apply Preview/scope feedback, Graph Studio action feedback, Marketplace catalog/preview plumbing, Optimization decision feedback, project-scoped first-run scan, Project Profile summary plumbing, and Bundle action feedback.`
 );

@@ -1,6 +1,6 @@
 # Release Pack
 
-This pack summarizes release milestones for `project-engineering-workflow`, currently covering the `0.2.x`, `0.3.x`, and `0.4.x` workflow lines.
+This pack summarizes release milestones for `project-engineering-workflow`, currently covering the `0.2.x` through `0.6.x` workflow lines.
 
 It is intentionally a release-preparation pack, not an automatic version bump.
 
@@ -26,6 +26,14 @@ It is intentionally a release-preparation pack, not an automatic version bump.
   Release checks for adaptive task lanes, confirmation, impact, evidence, and acceptance.
 - `v0.4.0-release-notes.md`
   Release notes for the `0.4.0` workflow contract.
+- `v0.5.0-release-checklist.md`
+  Release checks for adaptive backend/frontend role workflows, cost, compatibility, and live-evaluation gaps.
+- `v0.5.0-release-notes.md`
+  Release notes for the `0.5.0` role workflow line.
+- `v0.6.0-release-checklist.md`
+  Release checks for Profile freshness, decision memory, reuse, and targeted refresh.
+- `v0.6.0-release-notes.md`
+  Release notes for the `0.6.0` project-aware context line.
 
 ## Intended Use
 

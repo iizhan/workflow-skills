@@ -56,6 +56,8 @@ Use this skill for every development task unless the work is strictly non-code.
 
 ## Routing
 
-- For frontend work, continue with `$project-frontend-standards` and the relevant stack skill.
-- For security-sensitive work, continue with `$project-security-review`.
-- For final delivery, continue with `$project-test-and-report`.
+- Backend: use `$project-backend-standards` and only matched references.
+- Frontend: use `$project-frontend-standards` and only affected stack skills.
+- Full-stack: route each approved surface independently.
+- Security-sensitive: use `$project-security-review`.
+- Delivery: use `$project-test-and-report`.

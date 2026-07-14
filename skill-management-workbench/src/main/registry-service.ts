@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type {
@@ -241,6 +241,14 @@ interface HealthSnapshotRow {
   sample_count: number;
 }
 
+interface RegistryScanInput {
+  policyId: string;
+  rootPaths: string[];
+  exclusions: string[];
+  triggerType: "manual" | "targeted_project";
+  scanScope: ScanResult["scanScope"];
+}
+
 function walkSkillFiles(
   root: string,
   found: string[],
@@ -284,6 +292,47 @@ function walkSkillFiles(
   }
 }
 
+function detectWorkflowMarkers(rootPaths: string[]) {
+  const markerSet = new Set<string>();
+  let workflowVersion: string | null = null;
+
+  for (const rootPath of rootPaths) {
+    const markers = [
+      "AGENTS.md",
+      ".agents/skills",
+      ".specify/workflow-version.txt",
+      ".specify/templates/workflow-state-template.yaml",
+      ".specify/scripts/bash/validate-workflow.sh"
+    ];
+
+    for (const marker of markers) {
+      const markerPath = join(rootPath, marker);
+      if (existsSync(markerPath)) {
+        markerSet.add(marker);
+      }
+    }
+
+    const versionPath = join(rootPath, ".specify/workflow-version.txt");
+    if (!workflowVersion && existsSync(versionPath)) {
+      try {
+        workflowVersion = readFileSync(versionPath, "utf8").trim() || null;
+      } catch {
+        workflowVersion = null;
+      }
+    }
+  }
+
+  const workflowMarkers = [...markerSet].sort();
+  return {
+    workflowDetected:
+      workflowMarkers.includes("AGENTS.md") &&
+      workflowMarkers.includes(".agents/skills") &&
+      workflowMarkers.includes(".specify/workflow-version.txt"),
+    workflowVersion,
+    workflowMarkers
+  };
+}
+
 function toSkillSummary(
   row: Record<string, unknown>,
   healthScorePolicy: SkillHealthScorePolicy
@@ -316,6 +365,12 @@ function toSkillSummary(
       sourcePath: String(row.source_path),
       description
     }),
+    runtime: {
+      totalRuns: Number(row.total_runs ?? 0),
+      totalTokens: Number(row.total_tokens ?? 0),
+      runs7d,
+      latestRunAt: row.latest_run_at ? String(row.latest_run_at) : null
+    },
     health: calculateSkillHealth(
       {
         hasDescription: Boolean(description && description.trim().length > 0),
@@ -363,6 +418,9 @@ export class RegistryService {
            COALESCE(metric_rollup.failure_count_7d, 0) AS failure_count_7d,
            metric_rollup.avg_duration_ms_7d,
            COALESCE(metric_rollup.total_tokens_7d, 0) AS total_tokens_7d,
+           COALESCE(run_rollup.total_runs, 0) AS total_runs,
+           COALESCE(run_rollup.total_tokens, 0) AS total_tokens,
+           run_rollup.latest_run_at,
            COALESCE(proposal_rollup.open_proposal_count, 0) AS open_proposal_count,
            COALESCE(proposal_rollup.accepted_proposal_count, 0) AS accepted_proposal_count,
            COALESCE(proposal_rollup.high_severity_proposal_count, 0) AS high_severity_proposal_count,
@@ -392,6 +450,16 @@ export class RegistryService {
          LEFT JOIN (
            SELECT
              skill_id,
+             COUNT(*) AS total_runs,
+             COALESCE(SUM(total_tokens), 0) AS total_tokens,
+             MAX(started_at) AS latest_run_at
+           FROM skill_runs
+           GROUP BY skill_id
+         ) run_rollup
+           ON run_rollup.skill_id = skills.id
+         LEFT JOIN (
+           SELECT
+             skill_id,
              SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_proposal_count,
              SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS accepted_proposal_count,
              SUM(CASE WHEN status IN ('open', 'accepted') AND severity = 'high' THEN 1 ELSE 0 END) AS high_severity_proposal_count,
@@ -401,8 +469,7 @@ export class RegistryService {
            GROUP BY skill_id
          ) proposal_rollup
            ON proposal_rollup.skill_id = skills.id
-         WHERE skills.is_active = 1
-         ORDER BY skills.last_seen_at DESC, skills.display_name ASC`
+         ORDER BY skills.is_active DESC, skills.last_seen_at DESC, skills.display_name ASC`
       )
       .all() as Record<string, unknown>[];
 
@@ -446,6 +513,65 @@ export class RegistryService {
     }
     const exclusions = this.authorizationService.listExclusions(policy.id).map((entry) => entry.path);
 
+    return this.scanRoots({
+      policyId: policy.id,
+      rootPaths: roots.map((root) => root.path),
+      exclusions,
+      triggerType: "manual",
+      scanScope: "approved_roots"
+    });
+  }
+
+  scanProjectRoot(projectRoot: string): ScanResult {
+    const trimmedProjectRoot = projectRoot.trim();
+    if (!trimmedProjectRoot) {
+      throw new Error("Choose a project folder before running a targeted scan.");
+    }
+    const resolvedProjectRoot = resolve(trimmedProjectRoot);
+
+    let policy = this.authorizationService.getActivePolicy();
+    const projectAlreadyAuthorized = policy
+      ? this.authorizationService
+          .listRoots(policy.id)
+          .some((root) => isSameOrDescendantPath(resolvedProjectRoot, root.path))
+      : false;
+    if (!policy || !projectAlreadyAuthorized) {
+      policy = this.authorizationService.grantAuthorization({
+        name: `Project scope: ${basename(resolvedProjectRoot)}`,
+        scanRoots: [resolvedProjectRoot],
+        scanExclusions: [],
+        telemetryMode: policy?.telemetryMode ?? "disabled",
+        allowRawContent: policy?.allowRawContent ?? false,
+        allowBackgroundWatch: policy?.allowBackgroundWatch ?? false
+      });
+    }
+
+    const projectExclusions = this.authorizationService
+      .listExclusions(policy.id)
+      .map((entry) => entry.path)
+      .filter(
+        (exclusion) =>
+          isSameOrDescendantPath(exclusion, resolvedProjectRoot) ||
+          isSameOrDescendantPath(resolvedProjectRoot, exclusion)
+      );
+
+    return this.scanRoots({
+      policyId: policy.id,
+      rootPaths: [resolvedProjectRoot],
+      exclusions: projectExclusions,
+      triggerType: "targeted_project",
+      scanScope: "project"
+    });
+  }
+
+  private scanRoots(input: RegistryScanInput): ScanResult {
+    const rootPaths = Array.from(
+      new Set(input.rootPaths.map((rootPath) => resolve(rootPath.trim())).filter(Boolean))
+    );
+    if (rootPaths.length === 0) {
+      throw new Error("At least one scan root is required.");
+    }
+
     const startedAt = nowIso();
     const scanRunId = randomUUID();
 
@@ -454,16 +580,18 @@ export class RegistryService {
         `INSERT INTO scan_runs (
            id, policy_id, trigger_type, started_at, finished_at, status,
            roots_scanned, files_seen, skills_found, skills_changed, error_count, summary_json
-         ) VALUES (?, ?, 'manual', ?, NULL, 'running', ?, 0, 0, 0, 0, ?)`
+         ) VALUES (?, ?, ?, ?, NULL, 'running', ?, 0, 0, 0, 0, ?)`
       )
       .run(
         scanRunId,
-        policy.id,
+        input.policyId,
+        input.triggerType,
         startedAt,
-        roots.length,
+        rootPaths.length,
         JSON.stringify({
-          roots: roots.map((root) => root.path),
-          exclusions
+          scanScope: input.scanScope,
+          roots: rootPaths,
+          exclusions: input.exclusions
         })
       );
 
@@ -476,12 +604,12 @@ export class RegistryService {
     const upsertTransaction = this.database.db.transaction(() => {
       const allSkillFiles: string[] = [];
       const walkStats = { skippedEntryCount: 0 };
-      for (const root of roots) {
-        if (isExcludedPath(root.path, exclusions)) {
+      for (const rootPath of rootPaths) {
+        if (isExcludedPath(rootPath, input.exclusions)) {
           walkStats.skippedEntryCount += 1;
           continue;
         }
-        walkSkillFiles(root.path, allSkillFiles, exclusions, walkStats);
+        walkSkillFiles(rootPath, allSkillFiles, input.exclusions, walkStats);
       }
 
       skippedEntryCount = walkStats.skippedEntryCount;
@@ -517,13 +645,17 @@ export class RegistryService {
            frontmatter_description, line_count, detected_at, is_current, metadata_json
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
       );
-      const deactivateActiveSkills = this.database.db.prepare(
+      const deactivateActiveSkillsUnderRoot = this.database.db.prepare(
         `UPDATE skills
          SET is_active = 0
-         WHERE is_active = 1`
+         WHERE is_active = 1
+           AND (source_path = ? OR source_path LIKE ?)`
       );
 
-      deactivateActiveSkills.run();
+      for (const rootPath of rootPaths) {
+        const normalizedRoot = resolve(rootPath);
+        deactivateActiveSkillsUnderRoot.run(normalizedRoot, `${normalizedRoot}/%`);
+      }
 
       for (const filePath of uniqueSkillFiles) {
         try {
@@ -594,6 +726,7 @@ export class RegistryService {
     upsertTransaction();
 
     const completedAt = nowIso();
+    const workflowState = detectWorkflowMarkers(rootPaths);
     this.database.db
       .prepare(
         `UPDATE scan_runs
@@ -607,22 +740,31 @@ export class RegistryService {
         skillsChanged,
         errorCount,
         JSON.stringify({
-          roots: roots.map((root) => root.path),
-          exclusions,
-          excludedPathCount: exclusions.length,
-          skippedEntryCount
+          scanScope: input.scanScope,
+          roots: rootPaths,
+          exclusions: input.exclusions,
+          excludedPathCount: input.exclusions.length,
+          skippedEntryCount,
+          workflowDetected: workflowState.workflowDetected,
+          workflowVersion: workflowState.workflowVersion,
+          workflowMarkers: workflowState.workflowMarkers
         }),
         scanRunId
       );
 
     return {
       scanRunId,
+      scanScope: input.scanScope,
+      rootPaths,
       filesSeen,
       skillsFound,
       skillsChanged,
       errorCount,
-      excludedPathCount: exclusions.length,
+      excludedPathCount: input.exclusions.length,
       skippedEntryCount,
+      workflowDetected: workflowState.workflowDetected,
+      workflowVersion: workflowState.workflowVersion,
+      workflowMarkers: workflowState.workflowMarkers,
       completedAt,
       skills: this.listSkills()
     };

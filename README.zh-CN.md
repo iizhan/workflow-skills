@@ -69,7 +69,7 @@ Enterprise AI Framework
 - 一套完整的 workflow + skill framework
 - 一个本地优先的可视化 skill 管理分析工具
 - 项目级 AI 协作规则、本地 skills、feature 级规格工件和 workflow 状态文件
-- Superpowers / GSD / gstack 路由、默认开发规范、前端 JS / React / Vue / CSS 规范层、安全审查和分阶段验证闭环
+- Superpowers / GSD / gstack 路由、项目 Profile、后端/前端角色 Workflow、默认开发规范、前端 JS / React / Vue / CSS 规范层、安全审查和分阶段验证闭环
 - Codex / Claude Code 工作流差异、review 与测试收口、评估体系和 token 成本分析
 
 ## 核心目标
@@ -85,17 +85,20 @@ Enterprise AI Framework
 
 ```mermaid
 flowchart TD
-  A["AGENTS.md / constitution"] --> B["需求门禁"]
+  A["AGENTS.md / constitution"] --> P["项目 Profile / 新鲜度"]
+  P --> B["需求门禁"]
   B --> C["代码库入场"]
   C --> D["影响范围锁定"]
   D --> E["技术方案"]
+  E --> W["后端 / 前端角色 Workflow"]
   E --> F["Superpowers Router"]
   F --> G["Superpowers: 增强执行"]
   F --> H["GSD: 长任务编排"]
   F --> I["gstack: 角色评审"]
   E --> R["Memory Router"]
   E --> Q["Evolution Router"]
-  G --> J["项目本地 Skills"]
+  W --> J["项目本地 Skills"]
+  G --> J
   H --> J
   I --> J
   Q --> J
@@ -113,8 +116,9 @@ flowchart TD
 | 规格驱动开发 | 定义意图、验收标准和技术约束 | `.specify`、`specs/<feature>/spec.md`、`plan.md`、`tasks.md` |
 | 智能体治理 | 控制流程、范围、角色和交付门禁 | `AGENTS.md`、`constitution.md`、router skills |
 | 可复用技能 | 把原子能力封装为声明式模块 | `.agents/skills/*/SKILL.md` |
+| 研发角色 | 用按需引用把核心流程适配到真实后端/前端路径 | `project-stack-standards`、`project-backend-standards`、`project-frontend-standards` |
 | 测试驱动验证 | 用 review、验证闭环和测试保护实现质量 | `project-code-review`、`project-verification-loop`、`project-test-and-report`、项目测试命令 |
-| 上下文工程 | 保存任务状态、交接信息、历史决策、记忆候选和规则变更提案 | `workflow-state.yaml`、`specs`、`docs`、`memory-policy.md`、`evolution-policy.md` |
+| 上下文工程 | 复用新鲜项目事实，保存任务状态、交接、历史决策和规则候选 | `.specify/project-profile`、`workflow-state.yaml`、`specs`、memory/evolution policies |
 | LLMOps 预留层 | 为后续可观测性、评估、安全、成本控制预留结构 | 结构化报告、能力路由、角色评审、剩余风险 |
 
 ## 快速接入

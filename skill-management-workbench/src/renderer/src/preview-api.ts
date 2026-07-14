@@ -10,6 +10,12 @@ import type {
   LocalBackupRestoreImpactResult,
   LocalBackupSummary,
   LocalBackupValidationResult,
+  LocalToolTelemetryImportResult,
+  LocalToolTelemetryPreview,
+  LocalToolTelemetrySource,
+  ManagedProjectRecord,
+  ProjectProfileSummary,
+  ProjectRuntimeEvidenceRefreshResult,
   RemoteMarketplaceCatalog,
   OptimizationProposal,
   OptimizationProposalRefreshResult,
@@ -40,6 +46,7 @@ import type {
 
 const now = new Date("2026-06-05T09:30:00+08:00").toISOString();
 const storageRoot = "/Users/demo/Library/Application Support/Skill Management Workbench";
+let previewManagedProjects: ManagedProjectRecord[] = [];
 
 const previewHealthScorePolicies: Record<SkillHealthScorePolicy["preset"], SkillHealthScorePolicy> = {
   balanced: {
@@ -169,7 +176,7 @@ function previewHealth(
   };
 }
 
-const skills: SkillSummary[] = [
+const skills: SkillSummary[] = ([
   {
     id: "skill-memory",
     canonicalName: "memory-governance",
@@ -311,7 +318,15 @@ const skills: SkillSummary[] = [
       lineCount: 264
     })
   }
-];
+] satisfies Array<Omit<SkillSummary, "runtime">>).map((skill) => ({
+  ...skill,
+  runtime: {
+    totalRuns: skill.health.signals.runs7d,
+    totalTokens: skill.health.signals.runs7d * Math.round(skill.health.signals.avgTokensPerRun7d ?? 1800),
+    runs7d: skill.health.signals.runs7d,
+    latestRunAt: skill.health.signals.runs7d > 0 ? now : null
+  }
+}));
 
 function makeSkillAnalysis(skillId: string): SkillIntelligenceAnalysis {
   const skill = skills.find((entry) => entry.id === skillId) ?? skills[0];
@@ -578,7 +593,9 @@ const recentRuns: SkillRunSummary[] = [
     modelName: "gpt-5",
     toolCallCount: 5,
     captureMode: "estimated",
+    confidenceScore: 0.9,
     sourceType: "preview_log",
+    workspaceRef: "/Users/demo/projects/skill-os-preview",
     firstOutputLatencyMs: 380
   },
   {
@@ -594,7 +611,9 @@ const recentRuns: SkillRunSummary[] = [
     modelName: "gpt-5",
     toolCallCount: 4,
     captureMode: "estimated",
+    confidenceScore: 0.9,
     sourceType: "preview_log",
+    workspaceRef: "/Users/demo/projects/skill-os-preview",
     firstOutputLatencyMs: 420
   },
   {
@@ -610,7 +629,9 @@ const recentRuns: SkillRunSummary[] = [
     modelName: "gpt-5",
     toolCallCount: 6,
     captureMode: "estimated",
+    confidenceScore: 0.9,
     sourceType: "preview_log",
+    workspaceRef: "/Users/demo/projects/skill-os-preview",
     firstOutputLatencyMs: 610
   },
   {
@@ -626,7 +647,9 @@ const recentRuns: SkillRunSummary[] = [
     modelName: "gpt-4.1",
     toolCallCount: 2,
     captureMode: "estimated",
+    confidenceScore: 0.9,
     sourceType: "preview_log",
+    workspaceRef: "/Users/demo/projects/skill-os-preview",
     firstOutputLatencyMs: 280
   }
 ];
@@ -639,15 +662,37 @@ const proposals: OptimizationProposal[] = [
     skillVersionId: null,
     proposalType: "workflow",
     severity: "medium",
-    status: "open",
+    status: "resolved",
     title: "Split implementation and review steps into narrower references",
     summary: "The development Skill is healthy but still mixes planning, implementation, and review guidance into one entry path.",
     estimatedBenefit: "Improve edit precision while preserving the Superpowers development loop.",
     createdAt: now,
     updatedAt: now,
-    closedAt: null,
+    closedAt: now,
     evidence: [],
-    actions: []
+    actions: [
+      {
+        id: "action-superpowers-accepted",
+        proposalId: "proposal-superpowers-split",
+        actionType: "accepted",
+        actorType: "user",
+        summary: "Proposal accepted for Superpowers Dev Implementer.",
+        metadata: { previousStatus: "open", nextStatus: "accepted" },
+        createdAt: now
+      },
+      {
+        id: "action-superpowers-resolved",
+        proposalId: "proposal-superpowers-split",
+        actionType: "resolved",
+        actorType: "system",
+        summary: "Implementation and review guidance split into progressive references.",
+        metadata: {
+          implementationReference: "references/implementation-contract.md",
+          reviewReference: "references/review-contract.md"
+        },
+        createdAt: now
+      }
+    ]
   },
   {
     id: "proposal-memory-split",
@@ -656,13 +701,13 @@ const proposals: OptimizationProposal[] = [
     skillVersionId: null,
     proposalType: "token_reduction",
     severity: "high",
-    status: "open",
+    status: "resolved",
     title: "Split long memory policy into scoped references",
     summary: "The memory skill is doing too much first-pass reading. Move durable policy details into targeted references.",
     estimatedBenefit: "Reduce first-turn context by roughly 28% while keeping exact retrieval paths.",
     createdAt: now,
     updatedAt: now,
-    closedAt: null,
+    closedAt: now,
     evidence: [
       {
         id: "evidence-memory-weekly",
@@ -683,6 +728,28 @@ const proposals: OptimizationProposal[] = [
         summary: "Generated from weekly token and line-count evidence.",
         metadata: {},
         createdAt: now
+      },
+      {
+        id: "action-memory-accepted",
+        proposalId: "proposal-memory-split",
+        actionType: "accepted",
+        actorType: "user",
+        summary: "Proposal accepted for Memory Governance.",
+        metadata: { previousStatus: "open", nextStatus: "accepted" },
+        createdAt: now
+      },
+      {
+        id: "action-memory-resolved",
+        proposalId: "proposal-memory-split",
+        actionType: "resolved",
+        actorType: "system",
+        summary: "Memory policy split into scoped data role, retention/retrieval, and conflict/session references.",
+        metadata: {
+          dataRoleReference: "references/memory-data-roles.md",
+          retentionReference: "references/memory-retention-retrieval.md",
+          conflictReference: "references/memory-conflict-session.md"
+        },
+        createdAt: now
       }
     ]
   },
@@ -693,15 +760,37 @@ const proposals: OptimizationProposal[] = [
     skillVersionId: null,
     proposalType: "latency",
     severity: "medium",
-    status: "accepted",
+    status: "resolved",
     title: "Cache graph neighborhood summaries between panel jumps",
     summary: "Repeated panel-to-graph inspection can reuse the loaded graph snapshot instead of deriving the same neighborhood twice.",
     estimatedBenefit: "Improve perceived graph inspection latency for repeated exploration.",
     createdAt: now,
     updatedAt: now,
-    closedAt: null,
+    closedAt: now,
     evidence: [],
-    actions: []
+    actions: [
+      {
+        id: "action-graph-cache-accepted",
+        proposalId: "proposal-graph-cache",
+        actionType: "accepted",
+        actorType: "user",
+        summary: "Proposal accepted for Graph Analyzer.",
+        metadata: { previousStatus: "open", nextStatus: "accepted" },
+        createdAt: now
+      },
+      {
+        id: "action-graph-cache-resolved",
+        proposalId: "proposal-graph-cache",
+        actionType: "resolved",
+        actorType: "system",
+        summary: "Graph neighborhood lookups now reuse a renderer cache scoped to the loaded graph snapshot.",
+        metadata: {
+          cacheKey: "graphSnapshot.generatedAt + selectedGraphNodeId",
+          invalidation: "graph snapshot generatedAt change"
+        },
+        createdAt: now
+      }
+    ]
   }
 ];
 
@@ -755,7 +844,7 @@ const graphNodes: GraphNodeSummary[] = [
   { id: "skill:skill-superpowers-dev", nodeType: "skill", refId: "skill-superpowers-dev", displayName: "Superpowers Dev Implementer", degree: 4, updatedAt: now, metadata: { sourcePath: skills[3].sourcePath, sourceType: "repo", preferredHarness: "superpowers" } },
   { id: "model:gpt-5", nodeType: "model", refId: "gpt-5", displayName: "gpt-5", degree: 2, updatedAt: now, metadata: { modelName: "gpt-5" } },
   { id: "model:gpt-4.1", nodeType: "model", refId: "gpt-4.1", displayName: "gpt-4.1", degree: 1, updatedAt: now, metadata: { modelName: "gpt-4.1" } },
-  { id: "proposal:proposal-memory-split", nodeType: "proposal", refId: "proposal-memory-split", displayName: "Split long memory policy", degree: 1, updatedAt: now, metadata: { status: "open", severity: "high" } },
+  { id: "proposal:proposal-memory-split", nodeType: "proposal", refId: "proposal-memory-split", displayName: "Split long memory policy", degree: 1, updatedAt: now, metadata: { status: "resolved", severity: "high" } },
   { id: "bundle:bundle-memory-001", nodeType: "bundle", refId: "bundle-memory-001", displayName: "Memory Governance Bundle", degree: 2, updatedAt: now, metadata: { lifecycleState: "current", lineageKey: "memory-governance", itemCount: 1 } },
   { id: "bundle:bundle-graph-001", nodeType: "bundle", refId: "bundle-graph-001", displayName: "Graph Analyzer Bundle", degree: 2, updatedAt: now, metadata: { lifecycleState: "retained", lineageKey: "graph-analyzer", itemCount: 1 } }
 ];
@@ -769,8 +858,8 @@ const graphEdges: GraphEdgeSummary[] = [
   { id: "edge-graph-model", edgeType: "uses_model", fromNodeId: "skill:skill-graph", toNodeId: "model:gpt-5", fromDisplayName: "Graph Analyzer", toDisplayName: "gpt-5", weight: 11, firstSeenAt: now, lastSeenAt: now, metadata: { runs: 11 } },
   { id: "edge-bundle-model", edgeType: "uses_model", fromNodeId: "skill:skill-bundle", toNodeId: "model:gpt-4.1", fromDisplayName: "Bundle Publisher", toDisplayName: "gpt-4.1", weight: 7, firstSeenAt: now, lastSeenAt: now, metadata: { runs: 7 } },
   { id: "edge-superpowers-model", edgeType: "uses_model", fromNodeId: "skill:skill-superpowers-dev", toNodeId: "model:gpt-5", fromDisplayName: "Superpowers Dev Implementer", toDisplayName: "gpt-5", weight: 23, firstSeenAt: now, lastSeenAt: now, metadata: { runs: 23, harness: "superpowers" } },
-  { id: "edge-memory-proposal", edgeType: "optimized_by", fromNodeId: "skill:skill-memory", toNodeId: "proposal:proposal-memory-split", fromDisplayName: "Memory Governance", toDisplayName: "Split long memory policy", weight: 1, firstSeenAt: now, lastSeenAt: now, metadata: { status: "open", severity: "high" } },
-  { id: "edge-superpowers-proposal", edgeType: "optimized_by", fromNodeId: "skill:skill-superpowers-dev", toNodeId: "proposal:proposal-superpowers-split", fromDisplayName: "Superpowers Dev Implementer", toDisplayName: "Split implementation and review steps", weight: 1, firstSeenAt: now, lastSeenAt: now, metadata: { status: "open", severity: "medium" } },
+  { id: "edge-memory-proposal", edgeType: "optimized_by", fromNodeId: "skill:skill-memory", toNodeId: "proposal:proposal-memory-split", fromDisplayName: "Memory Governance", toDisplayName: "Split long memory policy", weight: 1, firstSeenAt: now, lastSeenAt: now, metadata: { status: "resolved", severity: "high" } },
+  { id: "edge-superpowers-proposal", edgeType: "optimized_by", fromNodeId: "skill:skill-superpowers-dev", toNodeId: "proposal:proposal-superpowers-split", fromDisplayName: "Superpowers Dev Implementer", toDisplayName: "Split implementation and review steps", weight: 1, firstSeenAt: now, lastSeenAt: now, metadata: { status: "resolved", severity: "medium" } },
   { id: "edge-memory-bundle", edgeType: "packaged_as", fromNodeId: "skill:skill-memory", toNodeId: "bundle:bundle-memory-001", fromDisplayName: "Memory Governance", toDisplayName: "Memory Governance Bundle", weight: 1, firstSeenAt: now, lastSeenAt: now, metadata: { lifecycleState: "current" } },
   { id: "edge-graph-bundle", edgeType: "packaged_as", fromNodeId: "skill:skill-graph", toNodeId: "bundle:bundle-graph-001", fromDisplayName: "Graph Analyzer", toDisplayName: "Graph Analyzer Bundle", weight: 1, firstSeenAt: now, lastSeenAt: now, metadata: { lifecycleState: "retained" } }
 ];
@@ -1444,6 +1533,188 @@ function makePreviewRemoteCandidateDetail(candidateId: string): RemoteSkillCandi
   };
 }
 
+const localToolSources: LocalToolTelemetrySource[] = [
+  {
+    id: "codex-sessions",
+    kind: "codex",
+    label: "Codex sessions",
+    description: "Read-only scan of Codex session JSONL files for tool calls, Skill evidence, and token usage fields.",
+    path: "/Users/demo/.codex/sessions",
+    pathType: "directory",
+    exists: true,
+    status: "ready",
+    recommended: true,
+    privacyLevel: "high",
+    fileCount: 18,
+    byteCount: 842112,
+    lastModifiedAt: now,
+    warnings: ["Session logs may contain prompts. Preview stores counts only; import stores normalized metrics."]
+  },
+  {
+    id: "claude-projects",
+    kind: "claude_code",
+    label: "Claude Code projects",
+    description: "Read-only scan of Claude Code project JSONL files.",
+    path: "/Users/demo/.claude/projects",
+    pathType: "directory",
+    exists: true,
+    status: "ready",
+    recommended: true,
+    privacyLevel: "high",
+    fileCount: 9,
+    byteCount: 504320,
+    lastModifiedAt: now,
+    warnings: ["Claude project logs may contain prompts. Import keeps normalized metrics only."]
+  },
+  {
+    id: "terminal-manual-file",
+    kind: "terminal_file",
+    label: "Terminal log file",
+    description: "Choose a specific JSONL, NDJSON, log, or txt file before import. Shell history is never scanned automatically.",
+    path: "",
+    pathType: "manual",
+    exists: false,
+    status: "needs_selection",
+    recommended: false,
+    privacyLevel: "high",
+    fileCount: 0,
+    byteCount: 0,
+    lastModifiedAt: null,
+    warnings: ["Use the existing file picker for one-off terminal exports; automatic shell history scanning is disabled."]
+  }
+];
+
+function makeLocalToolPreview(source: LocalToolTelemetrySource): LocalToolTelemetryPreview {
+  const isCodex = source.kind === "codex";
+  return {
+    source,
+    previewedAt: now,
+    candidateFiles: source.fileCount,
+    readableFiles: source.status === "ready" ? source.fileCount : 0,
+    scannedLines: source.status === "ready" ? (isCodex ? 1840 : 920) : 0,
+    detectedEvents: source.status === "ready" ? (isCodex ? 42 : 19) : 0,
+    detectedRuns: source.status === "ready" ? (isCodex ? 8 : 4) : 0,
+    importableRuns: source.status === "ready" ? (isCodex ? 6 : 2) : 0,
+    detectedSkillNames: isCodex
+      ? ["project-engineering-workflow", "design-md-ui"]
+      : ["project-dev-core"],
+    detectedToolNames: isCodex
+      ? ["exec_command", "apply_patch", "browser"]
+      : ["Bash", "Read", "Edit"],
+    detectedModelNames: isCodex ? ["gpt-5"] : ["claude-sonnet-4"],
+    tokenFieldsDetected: isCodex,
+    sensitiveFieldCount: isCodex ? 1 : 0,
+    confidence: isCodex ? "high" : "medium",
+    normalizedEventCount: source.status === "ready" ? (isCodex ? 21 : 7) : 0,
+    warnings: source.warnings
+  };
+}
+
+function makeLocalToolImport(source: LocalToolTelemetrySource): LocalToolTelemetryImportResult {
+  const preview = makeLocalToolPreview(source);
+  return {
+    source,
+    preview,
+    telemetry: {
+      filePath: `${storageRoot}/events/local-tool-imports/${source.id}.jsonl`,
+      importedAt: now,
+      linesRead: preview.normalizedEventCount,
+      processedEvents: preview.normalizedEventCount,
+      ignoredEvents: 0,
+      importedRuns: preview.importableRuns,
+      updatedRuns: 0,
+      affectedSkills: preview.detectedSkillNames.length,
+      affectedSkillIds: preview.detectedSkillNames.slice(0, 2),
+      observedModelNames: preview.detectedModelNames,
+      errorCount: 0,
+      errors: []
+    }
+  };
+}
+
+function makeProjectRuntimeEvidenceRefresh(
+  projectRoot: string
+): ProjectRuntimeEvidenceRefreshResult {
+  const source = localToolSources[0];
+  const preview = makeLocalToolPreview(source);
+  return {
+    projectRoot,
+    refreshedAt: now,
+    status: "imported",
+    telemetryMode: "estimated",
+    sourcesChecked: 1,
+    importableRuns: preview.importableRuns,
+    importedRuns: preview.importableRuns,
+    updatedRuns: 1,
+    affectedSkills: 2,
+    affectedSkillIds: skills.slice(0, 2).map((skill) => skill.id),
+    warnings: [],
+    errors: [],
+    sourcePreviews: [preview]
+  };
+}
+
+function makeProjectProfile(projectRoot: string): ProjectProfileSummary {
+  return {
+    projectRoot,
+    profilePath: `${projectRoot}/.specify/project-profile/profile.yaml`,
+    architecturePath: `${projectRoot}/.specify/project-profile/architecture.md`,
+    decisionMemoryPath: `${projectRoot}/.specify/project-profile/decision-memory.yaml`,
+    localStatePath: `${projectRoot}/.specify/project-profile/local-state.json`,
+    status: "ready",
+    evidenceState: "fresh",
+    lastAnalyzedAt: now,
+    lastCheckedAt: now,
+    capturedAt: now,
+    changedEvidence: [],
+    evidenceCount: 8,
+    projectName: "Preview Project",
+    declaredStack: "React + Node.js",
+    applicationRoots: ["apps/web"],
+    detectedLanguages: ["TypeScript"],
+    packageManagers: ["pnpm"],
+    frameworks: ["React", "Vite"],
+    runtimes: ["Node.js"],
+    architectureStyles: ["Modular frontend", "API-backed application"],
+    modules: [
+      {
+        name: "web",
+        responsibility: "User-facing application",
+        entry: "apps/web/src/main.tsx",
+        dependsOn: ["api"],
+        evidence: ["apps/web/package.json"]
+      },
+      {
+        name: "api",
+        responsibility: "Application service boundary",
+        entry: "apps/api/src/server.ts",
+        dependsOn: ["database"],
+        evidence: ["apps/api/src/server.ts"]
+      }
+    ],
+    entryPoints: ["apps/web/src/main.tsx", "apps/api/src/server.ts"],
+    requestOrEventFlows: ["request -> API -> database -> response"],
+    ownershipBoundaries: ["web owns presentation", "api owns business rules"],
+    dataStores: ["PostgreSQL"],
+    cachesIndexes: ["database indexes"],
+    messagingJobs: [],
+    externalIntegrations: ["GitHub"],
+    commands: {
+      install: ["pnpm install"],
+      build: ["pnpm build"],
+      test: ["pnpm test"],
+      run: ["pnpm dev"]
+    },
+    conventions: {
+      layering: ["UI -> API -> data"],
+      testing_delivery: ["Run unit tests before review"]
+    },
+    unknowns: [],
+    decisionCount: 3,
+    activeDecisionCount: 2
+  };
+}
+
 export function createPreviewWorkbenchApi(): WorkbenchApi {
   return {
     bootstrap: () =>
@@ -1451,6 +1722,16 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
         ...boot,
         healthScorePolicy: activePreviewHealthScorePolicy
       }),
+    listManagedProjects: () => delay(previewManagedProjects),
+    saveManagedProjects: (projects) => {
+      previewManagedProjects = projects;
+      return delay(previewManagedProjects);
+    },
+    deleteManagedProject: (projectPath) => {
+      previewManagedProjects = previewManagedProjects.filter((project) => project.path !== projectPath);
+      return delay(undefined);
+    },
+    getProjectProfile: (projectRoot: string) => delay(makeProjectProfile(projectRoot)),
     pickDirectory: () => delay(nextPreviewDirectory()),
     pickTelemetryFile: () => delay("/Users/demo/Downloads/sample-telemetry.jsonl"),
     pickBackupManifest: () => delay(backups[0].manifestPath),
@@ -1532,15 +1813,69 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
     scanSkills: () =>
       delay({
         scanRunId: "scan-preview",
+        scanScope: "approved_roots",
+        rootPaths: boot.roots.map((root) => root.path),
         filesSeen: 3,
         skillsFound: 3,
         skillsChanged: 1,
         errorCount: 0,
         excludedPathCount: 1,
         skippedEntryCount: 4,
+        workflowDetected: true,
+        workflowVersion: "preview",
+        workflowMarkers: ["AGENTS.md", ".agents/skills", ".specify/workflow-version.txt"],
         completedAt: now,
         skills
       }),
+    scanProjectSkills: (projectRoot: string) =>
+      delay({
+        scanRunId: "scan-project-preview",
+        scanScope: "project",
+        rootPaths: [projectRoot],
+        filesSeen: 3,
+        skillsFound: 3,
+        skillsChanged: 1,
+        errorCount: 0,
+        excludedPathCount: 1,
+        skippedEntryCount: 4,
+        workflowDetected: true,
+        workflowVersion: "preview",
+        workflowMarkers: ["AGENTS.md", ".agents/skills", ".specify/workflow-version.txt"],
+        completedAt: now,
+        skills
+      }),
+    previewRecommendedWorkflowStarter: (projectRoot: string) =>
+      delay({
+        starterId: "project-engineering-workflow",
+        starterName: "Project Engineering Workflow",
+        starterVersion: "0.3.1",
+        projectRoot,
+        templateRoot: "/Users/demo/workflow-skills/project-engineering-workflow/assets/template-root",
+        generatedAt: now,
+        canApply: true,
+        filesToCreate: [
+          "AGENTS.md",
+          ".agents/skills/project-dev-core/SKILL.md",
+          ".agents/skills/project-code-review/SKILL.md",
+          ".specify/workflow-version.txt"
+        ],
+        directoriesToCreate: [".agents", ".agents/skills", ".specify", "specs"],
+        fileConflicts: [],
+        skippedExistingDirectories: [],
+        skillCount: 24,
+        totalFileCount: 52,
+        totalDirectoryCount: 36,
+        warnings: []
+      }),
+    applyRecommendedWorkflowStarter: async (projectRoot: string) => {
+      const preview = await thisApi.previewRecommendedWorkflowStarter(projectRoot);
+      return delay({
+        preview,
+        appliedAt: now,
+        copiedFileCount: preview.filesToCreate.length,
+        createdDirectoryCount: preview.directoriesToCreate.length
+      });
+    },
     listSkills: () => delay(skills),
     generateSkillAnalysis: (skillId: string) => delay(makeSkillAnalysis(skillId)),
     getLatestSkillAnalysis: (skillId: string) => delay(makeSkillAnalysis(skillId)),
@@ -1576,7 +1911,43 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
         errorCount: 0,
         errors: []
       }),
+    discoverLocalToolTelemetrySources: () => delay(localToolSources),
+    previewLocalToolTelemetrySource: (source: LocalToolTelemetrySource) =>
+      delay(makeLocalToolPreview(source)),
+    importLocalToolTelemetrySource: (source: LocalToolTelemetrySource) =>
+      delay(makeLocalToolImport(source)),
+    refreshProjectRuntimeEvidence: (projectRoot: string) =>
+      delay(makeProjectRuntimeEvidenceRefresh(projectRoot)),
+    checkProjectConnection: (projectRoot: string) =>
+      delay(makeProjectRuntimeEvidenceRefresh(projectRoot)),
     listRecentRuns: (limit = 12) => delay(recentRuns.slice(0, limit)),
+    listSkillRuns: (skillId: string, limit = 100) => {
+      const skill = skills.find((entry) => entry.id === skillId);
+      const existingRuns = recentRuns.filter((run) => run.skillId === skillId);
+      const targetCount = Math.min(limit, skill?.runtime.totalRuns ?? existingRuns.length);
+      const generatedRuns = Array.from({ length: Math.max(targetCount - existingRuns.length, 0) }, (_, index) => {
+        const startedAt = new Date(new Date(now).getTime() - (index + 1) * 3_600_000).toISOString();
+        return {
+          runId: `preview-${skillId}-${index}`,
+          skillId,
+          skillName: skill?.displayName ?? "Preview Skill",
+          status: "completed" as const,
+          startedAt,
+          finishedAt: new Date(new Date(startedAt).getTime() + 90_000).toISOString(),
+          durationMs: 90_000,
+          totalTokens: 1800 + index * 24,
+          estimatedCostUsd: 0.004,
+          modelName: "gpt-5",
+          toolCallCount: 1 + (index % 3),
+          captureMode: "estimated",
+          confidenceScore: 0.9,
+          sourceType: "preview_local_log",
+          workspaceRef: "/Users/demo/projects/skill-os-preview",
+          firstOutputLatencyMs: 850
+        };
+      });
+      return delay([...existingRuns, ...generatedRuns].slice(0, limit));
+    },
     getDailySummary: () => delay(dailySummary),
     getWeeklySummary: () => delay(weeklySummary),
     refreshOptimizationProposals: () =>

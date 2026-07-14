@@ -28,6 +28,25 @@ CREATE TABLE IF NOT EXISTS authorization_events (
   metadata_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS managed_projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  path TEXT NOT NULL UNIQUE,
+  bound_at TEXT NOT NULL,
+  last_focused_at TEXT NOT NULL,
+  last_scan_at TEXT,
+  skills_found INTEGER,
+  files_seen INTEGER,
+  skills_changed INTEGER,
+  workflow_applied INTEGER NOT NULL DEFAULT 0,
+  monitoring_enabled INTEGER NOT NULL DEFAULT 0,
+  monitoring_interval_ms INTEGER NOT NULL DEFAULT 60000,
+  last_monitor_at TEXT,
+  last_observed_workspace_ref TEXT,
+  last_connection_check_at TEXT,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS scan_roots (
   id TEXT PRIMARY KEY,
   policy_id TEXT NOT NULL,
@@ -322,6 +341,9 @@ CREATE INDEX IF NOT EXISTS idx_graph_nodes_type_ref
 
 CREATE INDEX IF NOT EXISTS idx_graph_edges_type_weight
   ON graph_edges(edge_type, weight DESC);
+
+CREATE INDEX IF NOT EXISTS idx_managed_projects_last_focused
+  ON managed_projects(last_focused_at DESC);
 `;
 
 export class WorkbenchDatabase {

@@ -11,6 +11,7 @@ Do not write private, shared, or agent-self memory silently. Prepare candidates,
 
 ## Quick Routing
 
+- `project_profile`: reproducible stack, architecture, commands, module boundaries, and project-shared confirmed decisions; route through `$project-profile-router`
 - `task_session`: current feature state, choices, evidence, handoff notes
 - `user_private`: stable user's preferences or private working context
 - `team_shared`: sourced project facts, conventions, FAQs, decisions, glossary
@@ -18,6 +19,8 @@ Do not write private, shared, or agent-self memory silently. Prepare candidates,
 - `blocked_sensitive`: secrets, credentials, tokens, OTPs, cookies, private third-party data, speculative personal facts
 
 If identity is unavailable, keep private memory session-scoped unless the user selects a stable identity or storage space.
+
+Do not duplicate source-backed project facts into general durable memory. Put verified facts in `.specify/project-profile/`; use durable memory for information that is not safely reconstructable from the repository. Project decision entries require confirmation once, then may be retrieved by scope, but never reused as current-task authorization.
 
 ## When To Read References
 

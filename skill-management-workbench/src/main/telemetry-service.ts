@@ -291,6 +291,11 @@ function toRunSummary(row: Record<string, unknown>): SkillRunSummary {
     firstOutputAt != null
       ? Math.max(new Date(firstOutputAt).getTime() - new Date(startedAt).getTime(), 0)
       : null;
+  const summary = safeParseSummary(row.summary_json ? String(row.summary_json) : null);
+  const workspaceRef =
+    typeof summary.workspaceRef === "string" && summary.workspaceRef.trim()
+      ? summary.workspaceRef
+      : null;
 
   return {
     runId: String(row.id),
@@ -310,7 +315,9 @@ function toRunSummary(row: Record<string, unknown>): SkillRunSummary {
     modelName: row.model_name ? String(row.model_name) : null,
     toolCallCount: Number(row.tool_call_count ?? 0),
     captureMode: String(row.capture_mode),
+    confidenceScore: Number(row.confidence_score ?? 0),
     sourceType: String(row.source_type),
+    workspaceRef,
     firstOutputLatencyMs
   };
 }
@@ -776,6 +783,7 @@ export class TelemetryService {
   }
 
   listRecentRuns(limit = 12): SkillRunSummary[] {
+    const safeLimit = Math.min(Math.max(Math.round(limit), 1), 500);
     const rows = this.database.db
       .prepare(
         `SELECT
@@ -792,13 +800,47 @@ export class TelemetryService {
            skill_runs.model_name,
            skill_runs.tool_call_count,
            skill_runs.capture_mode,
-           skill_runs.source_type
+           skill_runs.confidence_score,
+           skill_runs.source_type,
+           skill_runs.summary_json
          FROM skill_runs
          INNER JOIN skills ON skills.id = skill_runs.skill_id
          ORDER BY skill_runs.started_at DESC
          LIMIT ?`
       )
-      .all(limit) as Record<string, unknown>[];
+      .all(safeLimit) as Record<string, unknown>[];
+
+    return rows.map(toRunSummary);
+  }
+
+  listSkillRuns(skillId: string, limit = 100): SkillRunSummary[] {
+    const safeLimit = Math.min(Math.max(Math.round(limit), 1), 500);
+    const rows = this.database.db
+      .prepare(
+        `SELECT
+           skill_runs.id,
+           skill_runs.skill_id,
+           skills.display_name,
+           skill_runs.status,
+           skill_runs.started_at,
+           skill_runs.first_output_at,
+           skill_runs.finished_at,
+           skill_runs.duration_ms,
+           skill_runs.total_tokens,
+           skill_runs.estimated_cost_usd,
+           skill_runs.model_name,
+           skill_runs.tool_call_count,
+           skill_runs.capture_mode,
+           skill_runs.confidence_score,
+           skill_runs.source_type,
+           skill_runs.summary_json
+         FROM skill_runs
+         INNER JOIN skills ON skills.id = skill_runs.skill_id
+         WHERE skill_runs.skill_id = ?
+         ORDER BY skill_runs.started_at DESC
+         LIMIT ?`
+      )
+      .all(skillId, safeLimit) as Record<string, unknown>[];
 
     return rows.map(toRunSummary);
   }

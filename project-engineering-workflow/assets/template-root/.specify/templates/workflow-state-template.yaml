@@ -8,7 +8,20 @@ requirement_status: draft
 scope_status: unlocked
 active_milestone: null
 task_lane: null
+# clarification | requirement_impact_pending | plan_pending | executing | verifying | awaiting_user_acceptance | accepted | revision_requested
 confirmation_state: clarification
+task_lane_history: []
+
+project_profile:
+  status: missing
+  profile_version: null
+  last_checked_at: null
+  evidence_state: missing
+  changed_evidence: []
+  loaded_sections: []
+  refreshed_sections: []
+  reused_decisions: []
+  invalidation_reason: null
 
 artifact_versions:
   requirement: null
@@ -30,7 +43,9 @@ confirmation_gates:
     status: pending
     approved_version: null
 
+confirmation_history: []
 work_items: []
+child_tasks: []
 impact_assessment:
   level: null
   direct: []

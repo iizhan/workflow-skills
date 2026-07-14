@@ -69,7 +69,7 @@ The current repository focuses on two practical anchors:
 - a complete workflow + skill framework
 - a local-first visual skill management and analysis tool
 - structured project workflow, local skills, feature specs, and workflow state
-- enhanced capability routing, default development rules, frontend stack rules, security review, and staged verification
+- enhanced capability routing, adaptive backend/frontend role workflows, source-backed project Profile reuse, default development rules, frontend stack rules, security review, and staged verification
 - Codex / Claude Code workflow distinction, review, test closure, evaluation, and token economics
 
 ## Goals
@@ -85,17 +85,20 @@ The current repository focuses on two practical anchors:
 
 ```mermaid
 flowchart TD
-  A["AGENTS.md / constitution"] --> B["Requirement Gate"]
+  A["AGENTS.md / constitution"] --> P["Project Profile / Freshness"]
+  P --> B["Requirement Gate"]
   B --> C["Codebase Onboarding"]
   C --> D["Scope Impact Guard"]
   D --> E["Tech Solution"]
+  E --> W["Backend / Frontend Role Workflows"]
   E --> F["Superpowers Router"]
   F --> G["Superpowers: enhanced execution"]
   F --> H["GSD: long-task orchestration"]
   F --> I["gstack: role review"]
   E --> R["Memory Router"]
   E --> Q["Evolution Router"]
-  G --> J["Project Skills"]
+  W --> J["Project Skills"]
+  G --> J
   H --> J
   I --> J
   Q --> J
@@ -113,8 +116,9 @@ flowchart TD
 | Spec-driven development | Capture intent and acceptance criteria as contracts | `.specify`, `specs/<feature>/spec.md`, `plan.md`, `tasks.md` |
 | Agent governance | Control routing, scope, roles, and delivery gates | `AGENTS.md`, `constitution.md`, project router skills |
 | Reusable skills | Encapsulate project-local capabilities | `.agents/skills/*/SKILL.md` |
+| Engineering roles | Adapt the core flow to real backend/frontend paths with progressive references | `project-stack-standards`, `project-backend-standards`, `project-frontend-standards` |
 | Test-driven verification | Keep implementation tied to validation | `project-code-review`, `project-verification-loop`, `project-test-and-report`, configured test command |
-| Context engineering | Preserve task state, handoff context, memory candidates, and rule change proposals | `workflow-state.yaml`, specs, docs, memory and evolution policies |
+| Context engineering | Reuse fresh project facts, task state, handoff context, memory candidates, and rule proposals | `.specify/project-profile`, `workflow-state.yaml`, specs, memory and evolution policies |
 | LLMOps-ready harness | Prepare for future observability, safety, and evaluation | structured reports, risks, role reviews, capability routes |
 
 ## Quick Start

@@ -158,6 +158,12 @@ export interface SkillSummary {
   lastSeenAt: string;
   governance: SkillGovernanceProfile;
   health: SkillHealthSummary;
+  runtime: {
+    totalRuns: number;
+    totalTokens: number;
+    runs7d: number;
+    latestRunAt: string | null;
+  };
 }
 
 export type SkillRole =
@@ -347,14 +353,44 @@ export interface AuthorizationInput {
 
 export interface ScanResult {
   scanRunId: string;
+  scanScope: "approved_roots" | "project";
+  rootPaths: string[];
   filesSeen: number;
   skillsFound: number;
   skillsChanged: number;
   errorCount: number;
   excludedPathCount: number;
   skippedEntryCount: number;
+  workflowDetected: boolean;
+  workflowVersion: string | null;
+  workflowMarkers: string[];
   completedAt: string;
   skills: SkillSummary[];
+}
+
+export interface WorkflowStarterPreview {
+  starterId: "project-engineering-workflow";
+  starterName: string;
+  starterVersion: string | null;
+  projectRoot: string;
+  templateRoot: string;
+  generatedAt: string;
+  canApply: boolean;
+  filesToCreate: string[];
+  directoriesToCreate: string[];
+  fileConflicts: string[];
+  skippedExistingDirectories: string[];
+  skillCount: number;
+  totalFileCount: number;
+  totalDirectoryCount: number;
+  warnings: string[];
+}
+
+export interface WorkflowStarterApplyResult {
+  preview: WorkflowStarterPreview;
+  appliedAt: string;
+  copiedFileCount: number;
+  createdDirectoryCount: number;
 }
 
 export interface TelemetryImportResult {
@@ -372,6 +408,153 @@ export interface TelemetryImportResult {
   errors: string[];
 }
 
+export type LocalToolTelemetrySourceKind =
+  | "codex"
+  | "claude_code"
+  | "terminal_file"
+  | "jsonl_file";
+
+export type LocalToolTelemetryPathType = "file" | "directory" | "manual";
+
+export type LocalToolTelemetrySourceStatus =
+  | "ready"
+  | "missing"
+  | "needs_selection"
+  | "blocked";
+
+export interface LocalToolTelemetrySource {
+  id: string;
+  kind: LocalToolTelemetrySourceKind;
+  label: string;
+  description: string;
+  path: string;
+  pathType: LocalToolTelemetryPathType;
+  exists: boolean;
+  status: LocalToolTelemetrySourceStatus;
+  recommended: boolean;
+  privacyLevel: "normal" | "sensitive" | "high";
+  fileCount: number;
+  byteCount: number;
+  lastModifiedAt: string | null;
+  warnings: string[];
+}
+
+export interface LocalToolTelemetryPreview {
+  source: LocalToolTelemetrySource;
+  previewedAt: string;
+  candidateFiles: number;
+  readableFiles: number;
+  scannedLines: number;
+  detectedEvents: number;
+  detectedRuns: number;
+  importableRuns: number;
+  detectedSkillNames: string[];
+  detectedToolNames: string[];
+  detectedModelNames: string[];
+  tokenFieldsDetected: boolean;
+  sensitiveFieldCount: number;
+  confidence: "high" | "medium" | "low" | "none";
+  normalizedEventCount: number;
+  warnings: string[];
+}
+
+export interface LocalToolTelemetryImportResult {
+  source: LocalToolTelemetrySource;
+  preview: LocalToolTelemetryPreview;
+  telemetry: TelemetryImportResult;
+}
+
+export type ProjectRuntimeEvidenceRefreshStatus =
+  | "imported"
+  | "connected_no_skill_runs"
+  | "no_importable_runs"
+  | "no_ready_sources"
+  | "telemetry_disabled"
+  | "unauthorized";
+
+export interface ProjectRuntimeEvidenceRefreshResult {
+  projectRoot: string;
+  refreshedAt: string;
+  status: ProjectRuntimeEvidenceRefreshStatus;
+  telemetryMode: TelemetryMode | "missing";
+  sourcesChecked: number;
+  importableRuns: number;
+  importedRuns: number;
+  updatedRuns: number;
+  affectedSkills: number;
+  affectedSkillIds: string[];
+  matchedWorkspaceRef?: string | null;
+  latestObservedWorkspaceRef?: string | null;
+  warnings: string[];
+  errors: string[];
+  sourcePreviews: LocalToolTelemetryPreview[];
+}
+
+export interface ManagedProjectRecord {
+  id: string;
+  name: string;
+  path: string;
+  boundAt: string;
+  lastFocusedAt: string;
+  lastScanAt: string | null;
+  skillsFound: number | null;
+  filesSeen: number | null;
+  skillsChanged: number | null;
+  workflowApplied: boolean;
+  monitoringEnabled: boolean;
+  monitoringIntervalMs: number;
+  lastMonitorAt: string | null;
+  lastObservedWorkspaceRef: string | null;
+  lastConnectionCheckAt: string | null;
+}
+
+export type ProjectProfileStatus = "missing" | "pending_analysis" | "ready" | "invalid";
+export type ProjectProfileEvidenceState = "missing" | "fresh" | "changed" | "unknown";
+
+export interface ProjectProfileModuleSummary {
+  name: string;
+  responsibility: string | null;
+  entry: string | null;
+  dependsOn: string[];
+  evidence: string[];
+}
+
+export interface ProjectProfileSummary {
+  projectRoot: string;
+  profilePath: string;
+  architecturePath: string;
+  decisionMemoryPath: string;
+  localStatePath: string;
+  status: ProjectProfileStatus;
+  evidenceState: ProjectProfileEvidenceState;
+  lastAnalyzedAt: string | null;
+  lastCheckedAt: string | null;
+  capturedAt: string | null;
+  changedEvidence: string[];
+  evidenceCount: number;
+  projectName: string | null;
+  declaredStack: string | null;
+  applicationRoots: string[];
+  detectedLanguages: string[];
+  packageManagers: string[];
+  frameworks: string[];
+  runtimes: string[];
+  architectureStyles: string[];
+  modules: ProjectProfileModuleSummary[];
+  entryPoints: string[];
+  requestOrEventFlows: string[];
+  ownershipBoundaries: string[];
+  dataStores: string[];
+  cachesIndexes: string[];
+  messagingJobs: string[];
+  externalIntegrations: string[];
+  commands: Record<string, string[]>;
+  conventions: Record<string, string[]>;
+  unknowns: string[];
+  decisionCount: number;
+  activeDecisionCount: number;
+}
+
 export interface SkillRunSummary {
   runId: string;
   skillId: string;
@@ -385,7 +568,9 @@ export interface SkillRunSummary {
   modelName: string | null;
   toolCallCount: number;
   captureMode: string;
+  confidenceScore: number;
   sourceType: string;
+  workspaceRef: string | null;
   firstOutputLatencyMs: number | null;
 }
 
@@ -887,6 +1072,10 @@ export interface RemoteMarketplaceCatalog {
 
 export interface WorkbenchApi {
   bootstrap: () => Promise<BootstrapState>;
+  listManagedProjects: () => Promise<ManagedProjectRecord[]>;
+  saveManagedProjects: (projects: ManagedProjectRecord[]) => Promise<ManagedProjectRecord[]>;
+  deleteManagedProject: (projectPath: string) => Promise<void>;
+  getProjectProfile: (projectRoot: string) => Promise<ProjectProfileSummary>;
   pickDirectory: () => Promise<string | null>;
   pickTelemetryFile: () => Promise<string | null>;
   pickBackupManifest: () => Promise<string | null>;
@@ -898,6 +1087,9 @@ export interface WorkbenchApi {
   validateBackupManifest: (manifestPath: string) => Promise<LocalBackupValidationResult>;
   previewBackupRestoreImpact: (manifestPath: string) => Promise<LocalBackupRestoreImpactResult>;
   scanSkills: () => Promise<ScanResult>;
+  scanProjectSkills: (projectRoot: string) => Promise<ScanResult>;
+  previewRecommendedWorkflowStarter: (projectRoot: string) => Promise<WorkflowStarterPreview>;
+  applyRecommendedWorkflowStarter: (projectRoot: string) => Promise<WorkflowStarterApplyResult>;
   listSkills: () => Promise<SkillSummary[]>;
   generateSkillAnalysis: (skillId: string) => Promise<SkillIntelligenceAnalysis>;
   getLatestSkillAnalysis: (skillId: string) => Promise<SkillIntelligenceAnalysis | null>;
@@ -913,7 +1105,19 @@ export interface WorkbenchApi {
   previewSkillApply: (input: SkillApplyPreviewInput) => Promise<SkillApplyPreview>;
   listMarketplaceCatalog: (query?: string) => Promise<RemoteMarketplaceCatalog>;
   importTelemetryFile: (filePath: string) => Promise<TelemetryImportResult>;
+  discoverLocalToolTelemetrySources: () => Promise<LocalToolTelemetrySource[]>;
+  previewLocalToolTelemetrySource: (
+    source: LocalToolTelemetrySource
+  ) => Promise<LocalToolTelemetryPreview>;
+  importLocalToolTelemetrySource: (
+    source: LocalToolTelemetrySource
+  ) => Promise<LocalToolTelemetryImportResult>;
+  refreshProjectRuntimeEvidence: (
+    projectRoot: string
+  ) => Promise<ProjectRuntimeEvidenceRefreshResult>;
+  checkProjectConnection: (projectRoot: string) => Promise<ProjectRuntimeEvidenceRefreshResult>;
   listRecentRuns: (limit?: number) => Promise<SkillRunSummary[]>;
+  listSkillRuns: (skillId: string, limit?: number) => Promise<SkillRunSummary[]>;
   getDailySummary: (date?: string) => Promise<DailyMetricsSummary>;
   getWeeklySummary: (endDate?: string) => Promise<WeeklyMetricsSummary>;
   refreshOptimizationProposals: (date?: string) => Promise<OptimizationProposalRefreshResult>;

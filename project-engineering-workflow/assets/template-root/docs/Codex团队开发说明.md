@@ -29,6 +29,8 @@
 
 ## 推荐工作流
 
+每次研发任务先执行 `project-profile-router`：检查 Profile 新鲜度，优先复用项目技术栈、架构、命令、模块边界和已确认决策。只有 Profile 缺失、证据变化或当前模块未覆盖时，才做相应范围的重新读取。
+
 先选择任务通道：
 
 - `fast`：目标清楚、风险低、可回滚，简要复述后直接执行并验证。
@@ -37,6 +39,7 @@
 
 确认必须绑定版本。执行中出现超出已确认范围的影响时，暂停并只确认新增差异。
 
+0. `project-profile-router`
 1. `project-requirement-gate`
 2. `project-codebase-onboarding`
 3. `project-scope-impact-guard`
@@ -50,15 +53,16 @@
 11. `.specify/scripts/bash/create-feature.sh`
 12. `project-dev-core`
 13. `project-stack-standards`
-14. `project-frontend-standards`，前端任务再进入这一层
-15. `project-frontend-js` / `project-frontend-react` / `project-frontend-vue` / `project-frontend-css`，按任务栈选择
-16. `project-code-generation`
-17. `project-code-review`
-18. `project-security-review`，安全敏感任务需要
-19. `project-verification-loop`，重要或跨模块变更需要
-20. `project-test-and-report`
-21. `project-session-summary`
-22. `project-skill-upgrade-advisor`，重复摩擦需要
+14. `project-backend-standards`，后端任务按 Profile 和变更信号加载架构、接口、数据、运行时、验证和 Java/Spring 引用
+15. `project-frontend-standards`，前端任务按 Profile 和变更信号加载体验状态、数据流、无障碍/响应式、性能/安全和验证引用
+16. `project-frontend-js` / `project-frontend-react` / `project-frontend-vue` / `project-frontend-css`，只选择实际改变的栈表面
+17. `project-code-generation`
+18. `project-code-review`
+19. `project-security-review`，安全敏感任务需要
+20. `project-verification-loop`，重要或跨模块变更需要
+21. `project-test-and-report`
+22. `project-session-summary`
+23. `project-skill-upgrade-advisor`，重复摩擦需要
 
 其中影响范围必须覆盖：直接和间接影响、用户、数据/迁移、接口/配置、安全/权限、兼容、性能、测试、发布/回滚、Workflow/Skill，以及明确不影响项。验证报告必须把每个事项和影响维度映射到证据、失败或未覆盖风险，并等待用户验收。
 
@@ -68,6 +72,10 @@
 
 - `AGENTS.md`
 - `.agents/skills/project-stack-standards/SKILL.md`
+- `.agents/skills/project-profile-router/SKILL.md`
+- `.specify/project-profile/profile.yaml`
+- `.specify/project-profile/architecture.md`
+- `.specify/project-profile/decision-memory.yaml`
 - `.specify/memory/constitution.md`
 - `.specify/memory/memory-policy.md`
 - `.specify/memory/evolution-policy.md`
@@ -79,7 +87,9 @@
 - 任务分级、确认门禁或影响维度变化时，同步 `project-requirement-gate`、`project-scope-impact-guard`、spec/plan/tasks/checklist/workflow-state 模板
 - 模板变化时，同步 `.specify/templates`
 - 技术栈或主应用目录变化时，同步 `project-stack-standards`
-- 前端通用或框架规则变化时，同步 `project-frontend-standards` 与对应栈 skill
+- 首次接入或架构/模块/构建事实变化时，刷新 `.specify/project-profile/` 并重新捕获证据指纹
+- 后端角色流程或技术规范变化时，同步 `project-backend-standards` 入口与对应按需 reference
+- 前端角色流程变化时，同步 `project-frontend-standards` 入口与对应按需 reference；框架规则变化时再同步对应栈 skill
 - 安全边界变化时，同步 `project-security-review`
 - 验证方式变化时，同步 `project-verification-loop` 和 `project-test-and-report`
 - 团队交付要求变化时，同步测试报告和 code review 约束

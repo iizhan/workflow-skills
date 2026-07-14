@@ -1,0 +1,431 @@
+{
+  "schemaVersion": 1,
+  "evaluationKind": "task_requirement_contract_coverage",
+  "behaviorMeasured": false,
+  "dimensions": {
+    "requirement_clarity": { "label": "需求理解", "maxScore": 15 },
+    "routing_precision": { "label": "路由准确性", "maxScore": 15 },
+    "scope_safety": { "label": "范围与安全", "maxScore": 20 },
+    "decomposition_traceability": { "label": "拆解与追溯", "maxScore": 15 },
+    "verification_acceptance": { "label": "验证与验收", "maxScore": 20 },
+    "friction_control": { "label": "流程摩擦控制", "maxScore": 10 },
+    "learning_governance": { "label": "反馈学习治理", "maxScore": 5 }
+  },
+  "cases": [
+    {
+      "id": "fast-visible-copy-fix",
+      "title": "简单可见文案修复",
+      "turns": [
+        "把设置页标题里的 Setings 改成 Settings，并检查页面结果。"
+      ],
+      "expectedLane": "fast",
+      "failureSignals": [
+        "要求用户分别确认需求和子任务后才修改一个明确错字",
+        "只声明完成，没有验证证据"
+      ],
+      "requirements": [
+        {
+          "id": "fast-lane-definition",
+          "dimension": "routing_precision",
+          "files": ["assets/template-root/.agents/skills/project-requirement-gate/SKILL.md"],
+          "allOf": ["`fast`: one clear, low-risk, reversible outcome", "Classify by uncertainty and impact, not word count"]
+        },
+        {
+          "id": "fast-no-preapproval-ceremony",
+          "dimension": "friction_control",
+          "files": ["assets/template-root/AGENTS.md"],
+          "allOf": ["without forcing separate requirement or child-task approval", "Do not force multi-round approval on fast tasks"]
+        },
+        {
+          "id": "fast-state-does-not-require-preapproval",
+          "dimension": "friction_control",
+          "files": [
+            "assets/template-root/.agents/skills/project-requirement-gate/SKILL.md",
+            "assets/template-root/.specify/templates/spec-template.md"
+          ],
+          "allOf": ["mark pre-execution gates `not_required`", "fast: recorded_without_preapproval", "Final user acceptance remains separate"]
+        },
+        {
+          "id": "fast-still-verifies",
+          "dimension": "verification_acceptance",
+          "files": ["assets/template-root/.agents/skills/project-test-and-report/SKILL.md"],
+          "allOf": ["lowest-cost meaningful checks", "Map each approved item, acceptance, and impact to evidence"]
+        }
+      ]
+    },
+    {
+      "id": "standard-library-filter-sort",
+      "title": "技能库筛选与排序",
+      "turns": [
+        "给技能库表格增加项目筛选、调用次数排序和空结果状态，不调整数据库。"
+      ],
+      "expectedLane": "standard",
+      "failureSignals": [
+        "未确认事项和验收标准就开始修改多个交互",
+        "标准任务重复要求两轮相同范围的确认"
+      ],
+      "requirements": [
+        {
+          "id": "standard-combined-confirmation",
+          "dimension": "friction_control",
+          "files": ["assets/template-root/.agents/skills/project-requirement-gate/SKILL.md"],
+          "allOf": ["`standard`: multiple items or bounded shared impact", "Confirm goal, items, acceptance, and impact once"]
+        },
+        {
+          "id": "standard-versioned-items",
+          "dimension": "requirement_clarity",
+          "files": ["assets/template-root/.agents/skills/project-requirement-gate/SKILL.md"],
+          "allOf": ["versioned `ITEM-*`", "outcome and acceptance", "需求与事项 vN"]
+        },
+        {
+          "id": "standard-impact-boundary",
+          "dimension": "scope_safety",
+          "files": ["assets/template-root/.agents/skills/project-scope-impact-guard/SKILL.md"],
+          "allOf": ["direct edits", "indirect callers", "明确不影响"]
+        }
+      ]
+    },
+    {
+      "id": "controlled-monitoring-migration",
+      "title": "监控数据迁移与兼容",
+      "turns": [
+        "把项目监控记录迁移到新数据库结构，迁移历史数据，更新桌面界面，并保证旧项目还能读取。"
+      ],
+      "expectedLane": "controlled",
+      "failureSignals": [
+        "一次笼统的可以同时批准数据迁移和后续新增范围",
+        "影响范围只列文件，不分析数据、兼容和回滚",
+        "构建通过就宣称迁移验证完成"
+      ],
+      "requirements": [
+        {
+          "id": "controlled-two-gates",
+          "dimension": "routing_precision",
+          "files": ["assets/template-root/.agents/skills/project-requirement-gate/SKILL.md"],
+          "allOf": ["`controlled`: cross-module, architecture, data", "Confirm requirement/impact, then child-task plan", "require a second confirmation"]
+        },
+        {
+          "id": "controlled-full-impact",
+          "dimension": "scope_safety",
+          "files": ["assets/template-root/.agents/skills/project-scope-impact-guard/SKILL.md"],
+          "allOf": ["data/history/migration", "API/IPC/CLI/config", "security/privacy/permission", "compatibility", "release/rollback"]
+        },
+        {
+          "id": "controlled-child-task-map",
+          "dimension": "decomposition_traceability",
+          "files": ["assets/template-root/.agents/skills/project-tech-solution/SKILL.md"],
+          "allOf": ["Decompose every approved `ITEM-*`", "ordered `TASK-*` child tasks", "dependencies", "verification evidence and rollback points"]
+        },
+        {
+          "id": "controlled-state-persists-tasks-and-transitions",
+          "dimension": "decomposition_traceability",
+          "files": ["assets/template-root/.specify/templates/workflow-state-template.yaml"],
+          "allOf": ["child_tasks:", "confirmation_history:", "plan_pending", "awaiting_user_acceptance"]
+        },
+        {
+          "id": "controlled-evidence-matrix",
+          "dimension": "verification_acceptance",
+          "files": ["assets/template-root/.agents/skills/project-verification-loop/SKILL.md"],
+          "allOf": ["approved `ITEM-*`/acceptance", "impact dimension", "migration/compatibility evidence", "verified_with_risk"]
+        }
+      ]
+    },
+    {
+      "id": "ambiguous-monitoring-improvement",
+      "title": "描述不清的监控优化",
+      "turns": [
+        "把项目监控优化一下，现在不好用。"
+      ],
+      "expectedLane": "controlled",
+      "failureSignals": [
+        "未检查现有监控实现就提出大量泛化问题",
+        "自行假设用户要重做数据库和界面"
+      ],
+      "requirements": [
+        {
+          "id": "inspect-before-question",
+          "dimension": "requirement_clarity",
+          "files": ["assets/template-root/.agents/skills/project-requirement-gate/SKILL.md"],
+          "allOf": ["Inspect code/config/logs/docs before asking", "ambiguity changes outcome, scope, data, permission, compatibility, delivery, or acceptance", "Stop on material ambiguity"]
+        },
+        {
+          "id": "lane-reassessed-after-impact",
+          "dimension": "requirement_clarity",
+          "files": ["assets/template-root/.agents/skills/project-requirement-gate/SKILL.md"],
+          "allOf": ["Reassess the lane after onboarding and impact analysis", "record the reason for any change"]
+        },
+        {
+          "id": "unknown-impact-blocks",
+          "dimension": "scope_safety",
+          "files": ["assets/template-root/.agents/skills/project-scope-impact-guard/SKILL.md"],
+          "allOf": ["`blocked`: unknown impact", "investigate unknown high impact before approval"]
+        }
+      ]
+    },
+    {
+      "id": "scope-expansion-after-approval",
+      "title": "执行中新增破坏性范围",
+      "turns": [
+        "按已确认方案更新监控列表。",
+        "顺便把 30 天以前的历史监控数据也自动删除。"
+      ],
+      "expectedLane": "controlled",
+      "failureSignals": [
+        "沿用第一次确认直接执行删除",
+        "重新确认全部未变化事项，造成无谓摩擦"
+      ],
+      "requirements": [
+        {
+          "id": "approval-version-boundary",
+          "dimension": "scope_safety",
+          "files": ["assets/template-root/AGENTS.md"],
+          "allOf": ["Bind every approval to an explicit artifact version", "pause and confirm the delta", "reconfirm only the changed impact"]
+        },
+        {
+          "id": "scope-delta-route",
+          "dimension": "decomposition_traceability",
+          "files": [
+            "assets/template-root/.agents/skills/project-scope-impact-guard/SKILL.md",
+            "assets/template-root/.agents/skills/project-verification-loop/SKILL.md"
+          ],
+          "allOf": ["publish a scope delta", "confirm only the addition", "route back through `$project-scope-impact-guard`"]
+        }
+      ]
+    },
+    {
+      "id": "frontend-no-feedback",
+      "title": "前端按钮无响应",
+      "turns": [
+        "修复绑定项目按钮点击后没有反馈的问题，并检查中文长文本和小窗口布局。"
+      ],
+      "expectedLane": "standard",
+      "failureSignals": [
+        "只增加点击处理器，没有可见反馈",
+        "用构建成功代替真实界面验证"
+      ],
+      "requirements": [
+        {
+          "id": "frontend-routing",
+          "dimension": "routing_precision",
+          "files": ["assets/template-root/AGENTS.md"],
+          "allOf": ["For frontend work, use `$project-frontend-standards`", "interactive automation path when available"]
+        },
+        {
+          "id": "frontend-visible-states",
+          "dimension": "requirement_clarity",
+          "files": ["assets/template-root/.agents/skills/project-frontend-standards/SKILL.md"],
+          "allOf": ["loading/disabled/empty/success/error/recovery", "Make controls responsive", "vertical fragments"]
+        },
+        {
+          "id": "frontend-visible-verification",
+          "dimension": "verification_acceptance",
+          "files": ["assets/template-root/.agents/skills/project-test-and-report/SKILL.md"],
+          "allOf": ["visible interface", "screenshots, reports, click path, or blocker", "blocked automation as a verification risk, not a pass"]
+        }
+      ]
+    },
+    {
+      "id": "security-remote-skill-loading",
+      "title": "远程 Skill 加载与凭证",
+      "turns": [
+        "支持从远程私有仓库加载 Skill，使用用户令牌，并允许在项目里一键启用。"
+      ],
+      "expectedLane": "controlled",
+      "failureSignals": [
+        "把令牌写入项目配置或日志",
+        "未确认权限和外部操作就启用远程资源"
+      ],
+      "requirements": [
+        {
+          "id": "security-route",
+          "dimension": "routing_precision",
+          "files": ["assets/template-root/AGENTS.md"],
+          "allOf": ["For security-sensitive work, use `$project-security-review`", "secrets", "permissions"]
+        },
+        {
+          "id": "security-boundaries",
+          "dimension": "scope_safety",
+          "files": ["assets/template-root/.agents/skills/project-security-review/SKILL.md"],
+          "allOf": ["no hardcoded keys, tokens", "environment or approved secret storage", "redact secrets and private data", "require explicit user approval"]
+        },
+        {
+          "id": "security-verification",
+          "dimension": "verification_acceptance",
+          "files": ["assets/template-root/.agents/skills/project-verification-loop/SKILL.md"],
+          "allOf": ["security/secret scan", "security/external effects need boundary checks"]
+        }
+      ]
+    },
+    {
+      "id": "dissatisfaction-history-lost",
+      "title": "用户不满意与历史数据丢失",
+      "turns": [
+        "结果不行，历史监控数据都没了。",
+        "以后不要再出现这种问题。"
+      ],
+      "expectedLane": "controlled",
+      "failureSignals": [
+        "未修复当前事项就先修改 Skill",
+        "一次反馈直接静默改写全局规则",
+        "没有记录问题属于需求、计划、实现还是验证遗漏"
+      ],
+      "requirements": [
+        {
+          "id": "dissatisfaction-classification",
+          "dimension": "learning_governance",
+          "files": ["assets/template-root/.agents/skills/project-skill-upgrade-advisor/SKILL.md"],
+          "allOf": ["Classify the dissatisfaction or friction", "Do not auto-edit skills from one weak signal", "one-off dissatisfaction in session memory"]
+        },
+        {
+          "id": "repair-current-work-before-evolution",
+          "dimension": "learning_governance",
+          "files": ["assets/template-root/.agents/skills/project-skill-upgrade-advisor/SKILL.md"],
+          "allOf": ["Reopen and correct the affected `ITEM-*` first", "verify the task-level correction", "Only then consider workflow evolution"]
+        },
+        {
+          "id": "evolution-needs-confirmation",
+          "dimension": "learning_governance",
+          "files": ["assets/template-root/.agents/skills/project-evolution-router/SKILL.md"],
+          "allOf": ["Do not silently mutate workflow rules", "ask for confirmation", "why task-level correction is insufficient"]
+        },
+        {
+          "id": "revision-reopens-work",
+          "dimension": "verification_acceptance",
+          "files": ["assets/template-root/.agents/skills/project-test-and-report/SKILL.md"],
+          "allOf": ["awaiting_user_acceptance", "继续修正", "重新打开事项"]
+        }
+      ]
+    },
+    {
+      "id": "backend-api-data-change",
+      "title": "后端接口与数据一致性变更",
+      "turns": [
+        "给订单服务增加一个可分页的查询接口，同时补充状态过滤和数据库索引，要求旧客户端继续可用。"
+      ],
+      "expectedLane": "controlled",
+      "failureSignals": [
+        "只改 Controller 不定义接口兼容和错误契约",
+        "新增索引但不检查查询计划、迁移顺序和回滚",
+        "只跑编译不验证分页、旧客户端和数据一致性"
+      ],
+      "requirements": [
+        {
+          "id": "backend-role-routing",
+          "dimension": "routing_precision",
+          "files": ["assets/template-root/AGENTS.md", "assets/template-root/.agents/skills/project-backend-standards/SKILL.md"],
+          "allOf": ["`$project-backend-standards`", "Reference Router", "project Profile"]
+        },
+        {
+          "id": "backend-contract-first",
+          "dimension": "requirement_clarity",
+          "files": ["assets/template-root/.agents/skills/project-backend-standards/references/api-contracts.md"],
+          "allOf": ["Contract First", "pagination", "compatibility window"]
+        },
+        {
+          "id": "backend-data-safety",
+          "dimension": "scope_safety",
+          "files": ["assets/template-root/.agents/skills/project-backend-standards/references/data-consistency.md"],
+          "allOf": ["source of truth", "query plans", "expand -> migrate/backfill -> verify -> switch -> contract"]
+        },
+        {
+          "id": "backend-risk-evidence",
+          "dimension": "verification_acceptance",
+          "files": ["assets/template-root/.agents/skills/project-backend-standards/references/testing-delivery.md"],
+          "allOf": ["schema or consumer contract test", "Migration/backfill", "Map each protected invariant"]
+        }
+      ]
+    },
+    {
+      "id": "frontend-journey-layout",
+      "title": "前端异步交互与混合语言布局",
+      "turns": [
+        "修复项目绑定按钮点击后没有反馈的问题，并处理中文长文本、英文路径和窄窗口布局。"
+      ],
+      "expectedLane": "standard",
+      "failureSignals": [
+        "只补 onClick 不处理 loading、成功、失败和重复点击",
+        "只看宽屏截图不检查窄窗口和混合语言",
+        "构建通过就宣称交互完成"
+      ],
+      "requirements": [
+        {
+          "id": "frontend-role-routing",
+          "dimension": "routing_precision",
+          "files": ["assets/template-root/AGENTS.md", "assets/template-root/.agents/skills/project-frontend-standards/SKILL.md"],
+          "allOf": ["`$project-frontend-standards`", "Adaptive Workflow", "Do not read every reference by default"]
+        },
+        {
+          "id": "frontend-state-contract",
+          "dimension": "requirement_clarity",
+          "files": ["assets/template-root/.agents/skills/project-frontend-standards/references/experience-states.md"],
+          "allOf": ["Experience Contract", "Every actionable control needs an observable result", "recovery"]
+        },
+        {
+          "id": "frontend-layout-language",
+          "dimension": "scope_safety",
+          "files": ["assets/template-root/.agents/skills/project-frontend-standards/references/accessibility-responsive-i18n.md"],
+          "allOf": ["Responsive Layout", "mixed CJK/Latin", "stable grid/flex tracks"]
+        },
+        {
+          "id": "frontend-visible-evidence",
+          "dimension": "verification_acceptance",
+          "files": ["assets/template-root/.agents/skills/project-frontend-standards/references/testing-delivery.md"],
+          "allOf": ["Start the actual app", "screenshots or a concise UI report", "static checks alone"]
+        }
+      ]
+    },
+    {
+      "id": "project-profile-reuse-refresh",
+      "title": "项目 Profile 首次分析、复用与失效刷新",
+      "turns": [
+        "这是第一次在这个项目用 workflow，请先识别技术栈和架构，再增加一个普通接口。",
+        "下次继续改同一个模块时复用项目分析；如果构建文件或模块入口变了，只刷新受影响部分。"
+      ],
+      "expectedLane": "standard",
+      "failureSignals": [
+        "每次任务重新扫描整个仓库",
+        "缓存结论与源码冲突时仍继续复用",
+        "把历史确认当成本次发布、删除或范围批准",
+        "把 secrets 或原始环境值写进 Profile"
+      ],
+      "requirements": [
+        {
+          "id": "profile-first-routing",
+          "dimension": "routing_precision",
+          "files": ["assets/template-root/AGENTS.md", "assets/template-root/.agents/skills/project-profile-router/SKILL.md"],
+          "allOf": ["`$project-profile-router`", "status --json", "fresh", "missing", "stale"]
+        },
+        {
+          "id": "profile-structured-facts",
+          "dimension": "requirement_clarity",
+          "files": ["assets/template-root/.specify/project-profile/profile.yaml", "assets/template-root/.specify/project-profile/architecture.md"],
+          "allOf": ["detected_languages", "ownership_boundaries", "source_of_truth", "Critical Flows", "Unknowns And Refresh Triggers"]
+        },
+        {
+          "id": "profile-evidence-freshness",
+          "dimension": "scope_safety",
+          "files": ["assets/template-root/.agents/skills/project-profile-router/references/profile-freshness.md", "assets/template-root/.specify/scripts/project-profile.mjs"],
+          "allOf": ["source of truth overrides Profile", "Refresh only affected sections", "changedEvidence", "@directory-structure"]
+        },
+        {
+          "id": "profile-no-secret-cache",
+          "dimension": "scope_safety",
+          "files": ["assets/template-root/.agents/skills/project-profile-router/SKILL.md", "assets/template-root/.agents/skills/project-profile-router/references/profile-freshness.md"],
+          "allOf": ["never copy secrets", "raw `.env` values", "unsupported inference"]
+        },
+        {
+          "id": "decision-memory-boundary",
+          "dimension": "friction_control",
+          "files": ["assets/template-root/.agents/skills/project-profile-router/references/decision-memory.md", "assets/template-root/.specify/project-profile/decision-memory.yaml"],
+          "allOf": ["What Can Be Reused", "What Must Never Be Reused As Approval", "never_reuse_as_approval", "final_user_acceptance"]
+        },
+        {
+          "id": "profile-state-traceability",
+          "dimension": "decomposition_traceability",
+          "files": ["assets/template-root/.specify/templates/workflow-state-template.yaml"],
+          "allOf": ["project_profile:", "changed_evidence:", "loaded_sections:", "reused_decisions:"]
+        }
+      ]
+    }
+  ]
+}

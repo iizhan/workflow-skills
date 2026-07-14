@@ -122,15 +122,71 @@ const v040ProgressiveReferencePaths = [
   ".agents/skills/project-superpowers-router/references/review-contract.md"
 ];
 
+const v050RoleWorkflowPaths = [
+  ".agents/skills/project-backend-standards/SKILL.md",
+  ".agents/skills/project-backend-standards/references/architecture-boundaries.md",
+  ".agents/skills/project-backend-standards/references/api-contracts.md",
+  ".agents/skills/project-backend-standards/references/data-consistency.md",
+  ".agents/skills/project-backend-standards/references/runtime-security-observability.md",
+  ".agents/skills/project-backend-standards/references/testing-delivery.md",
+  ".agents/skills/project-backend-standards/references/java-spring.md",
+  ".agents/skills/project-frontend-standards/references/experience-states.md",
+  ".agents/skills/project-frontend-standards/references/architecture-data-flow.md",
+  ".agents/skills/project-frontend-standards/references/accessibility-responsive-i18n.md",
+  ".agents/skills/project-frontend-standards/references/performance-security-observability.md",
+  ".agents/skills/project-frontend-standards/references/testing-delivery.md"
+];
+
+const v050RoleUpgradeRoutingPaths = [
+  "AGENTS.md",
+  ".agents/skills/project-dev-core/SKILL.md",
+  ".agents/skills/project-frontend-standards/SKILL.md",
+  "docs/Codex团队开发说明.md",
+  "docs/ClaudeCode团队开发说明.md",
+  "docs/AI协作架构.md",
+  "docs/AI能力地图.md"
+];
+
+const v060ProjectProfilePaths = [
+  ".agents/skills/project-profile-router/SKILL.md",
+  ".agents/skills/project-profile-router/references/profile-freshness.md",
+  ".agents/skills/project-profile-router/references/decision-memory.md",
+  ".specify/project-profile/.gitignore",
+  ".specify/project-profile/profile.yaml",
+  ".specify/project-profile/architecture.md",
+  ".specify/project-profile/decision-memory.yaml",
+  ".specify/scripts/project-profile.mjs"
+];
+
+const v060ProjectProfileRoutingPaths = [
+  "AGENTS.md",
+  ".agents/skills/project-requirement-gate/SKILL.md",
+  ".agents/skills/project-codebase-onboarding/SKILL.md",
+  ".agents/skills/project-stack-standards/SKILL.md",
+  ".agents/skills/project-dev-core/SKILL.md",
+  ".agents/skills/project-backend-standards/SKILL.md",
+  ".agents/skills/project-frontend-standards/SKILL.md",
+  ".agents/skills/project-memory-router/SKILL.md",
+  ".specify/memory/memory-policy.md",
+  ".specify/memory/constitution.md",
+  ".specify/templates/workflow-state-template.yaml",
+  "docs/Codex团队开发说明.md",
+  "docs/ClaudeCode团队开发说明.md",
+  "docs/AI协作架构.md",
+  "docs/AI能力地图.md"
+];
+
 const workflowOptionalPathsByVersion = {
   "0.2.0": [...v020OptionalPaths],
   "0.2.1": [...v020OptionalPaths],
   "0.3.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths.filter((path) => path !== ".specify/scripts/bash/release-doctor.sh")],
   "0.3.1": [...v020OptionalPaths, ...branchReleaseOptionalPaths],
-  "0.4.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths]
+  "0.4.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths],
+  "0.5.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths],
+  "0.6.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths]
 };
 
-const upgradeOptionalPaths = [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths];
+const upgradeOptionalPaths = [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths];
 
 const workflowContentContracts = [
   {
@@ -314,10 +370,112 @@ const workflowContentContracts = [
     requiredSnippets: ["task_lane:", "confirmation_gates:", "impact_assessment:", "scope_deltas:"]
   },
   {
+    minVersion: "0.5.0",
+    path: ".specify/templates/workflow-state-template.yaml",
+    label: "Role workflow state progression contract",
+    requiredSnippets: ["confirmation_history:", "child_tasks:"]
+  },
+  {
     minVersion: "0.4.0",
     path: ".specify/templates/delivery-summary-template.md",
     label: "User acceptance delivery artifact contract",
     requiredSnippets: ["awaiting_user_acceptance", "事项与影响证据矩阵", "不满意分类"]
+  },
+  {
+    minVersion: "0.5.0",
+    path: ".agents/skills/project-backend-standards/SKILL.md",
+    label: "Adaptive backend role workflow",
+    requiredSnippets: ["Adaptive Workflow", "Reference Router", "Do not read every reference by default"]
+  },
+  {
+    minVersion: "0.5.0",
+    path: ".agents/skills/project-backend-standards/references/data-consistency.md",
+    label: "Backend data consistency reference",
+    requiredSnippets: ["expand -> migrate/backfill -> verify -> switch -> contract", "Never describe a destructive migration as reversible without evidence"]
+  },
+  {
+    minVersion: "0.5.0",
+    path: ".agents/skills/project-backend-standards/references/runtime-security-observability.md",
+    label: "Backend runtime security and observability reference",
+    requiredSnippets: ["Authenticate identity and authorize", "Structured logs", "Measure representative latency"]
+  },
+  {
+    minVersion: "0.5.0",
+    path: ".agents/skills/project-frontend-standards/SKILL.md",
+    label: "Adaptive frontend role workflow",
+    requiredSnippets: ["Adaptive Workflow", "Reference Router", "Do not read every reference by default"]
+  },
+  {
+    minVersion: "0.5.0",
+    path: ".agents/skills/project-frontend-standards/references/experience-states.md",
+    label: "Frontend experience state reference",
+    requiredSnippets: ["Experience Contract", "Every actionable control needs an observable result"]
+  },
+  {
+    minVersion: "0.5.0",
+    path: ".agents/skills/project-frontend-standards/references/accessibility-responsive-i18n.md",
+    label: "Frontend accessibility responsive and language reference",
+    requiredSnippets: ["Accessibility", "Responsive Layout", "mixed CJK/Latin"]
+  },
+  {
+    minVersion: "0.5.0",
+    path: ".agents/skills/project-frontend-standards/references/testing-delivery.md",
+    label: "Frontend visible verification reference",
+    requiredSnippets: ["Risk-To-Evidence Matrix", "Start the actual app", "static checks alone"]
+  },
+  {
+    minVersion: "0.6.0",
+    path: ".agents/skills/project-profile-router/SKILL.md",
+    label: "Project Profile routing contract",
+    requiredSnippets: ["Project Profile Router", "status --json", "never task approval"]
+  },
+  {
+    minVersion: "0.6.0",
+    path: ".agents/skills/project-profile-router/references/profile-freshness.md",
+    label: "Project Profile freshness contract",
+    requiredSnippets: ["Freshness Rules", "source of truth overrides Profile", "Run `node .specify/scripts/project-profile.mjs capture --json`"]
+  },
+  {
+    minVersion: "0.6.0",
+    path: ".agents/skills/project-profile-router/references/decision-memory.md",
+    label: "Project decision memory contract",
+    requiredSnippets: ["What Can Be Reused", "What Must Never Be Reused As Approval", "Retrieve by module"]
+  },
+  {
+    minVersion: "0.6.0",
+    path: ".specify/project-profile/profile.yaml",
+    label: "Project Profile data contract",
+    requiredSnippets: ["status: pending_analysis", "detected_languages:", "freshness:"]
+  },
+  {
+    minVersion: "0.6.0",
+    path: ".specify/project-profile/decision-memory.yaml",
+    label: "Project decision memory data contract",
+    requiredSnippets: ["entries:", "never_reuse_as_approval:", "destructive_or_irreversible_actions"]
+  },
+  {
+    minVersion: "0.6.0",
+    path: ".specify/scripts/project-profile.mjs",
+    label: "Project Profile evidence script",
+    requiredSnippets: ["status", "capture", "changedEvidence"]
+  },
+  {
+    minVersion: "0.6.0",
+    path: "AGENTS.md",
+    label: "Project Profile first gate",
+    requiredSnippets: ["$project-profile-router", ".specify/project-profile/", "reuse a prior task's approval"]
+  },
+  {
+    minVersion: "0.6.0",
+    path: ".specify/memory/memory-policy.md",
+    label: "Project Profile memory boundary",
+    requiredSnippets: ["Project Profile Cache", "source-backed project context cache", "New decision-memory entries still require explicit confirmation"]
+  },
+  {
+    minVersion: "0.6.0",
+    path: ".specify/templates/workflow-state-template.yaml",
+    label: "Project Profile workflow state",
+    requiredSnippets: ["project_profile:", "evidence_state:", "reused_decisions:"]
   }
 ];
 
@@ -341,6 +499,10 @@ const upgradeModePaths = {
     ".agents/skills/project-evolution-router/SKILL.md",
     ".agents/skills/project-superpowers-router/SKILL.md",
     ...v040ProgressiveReferencePaths,
+    ...v050RoleWorkflowPaths,
+    ...v050RoleUpgradeRoutingPaths,
+    ...v060ProjectProfilePaths,
+    ...v060ProjectProfileRoutingPaths,
     ".specify/memory/memory-policy.md",
     ".specify/memory/evolution-policy.md",
     ".specify/memory/evolution-prefill-policy.md",
@@ -354,6 +516,7 @@ const upgradeModePaths = {
   ],
   templates: [
     ".specify/scripts/bash/create-feature.sh",
+    ".specify/scripts/bash/validate-workflow.sh",
     ".specify/scripts/bash/create-feature-branch.sh",
     ".specify/scripts/bash/prepare-release.sh",
     ".specify/scripts/bash/finalize-release.sh",
@@ -547,14 +710,14 @@ function normalizeMode(rawMode) {
 
 function selectedUpgradePaths(mode) {
   if (mode === "current") {
-    return [
+    return [...new Set([
       ...upgradeModePaths.governance,
       ...upgradeModePaths.capabilities,
       ...upgradeModePaths.templates,
       currentVersionMarker
-    ];
+    ])];
   }
-  return [...upgradeModePaths[mode]];
+  return [...new Set(upgradeModePaths[mode])];
 }
 
 function requireOptions(options, names) {
@@ -696,14 +859,15 @@ function init(options) {
 Target: ${outputDir}
 
 Next steps:
-1. Review ${join(outputDir, "AGENTS.md")}
-2. Review ${join(outputDir, ".agents/skills/project-stack-standards/SKILL.md")}
-3. Review ${join(outputDir, ".specify/memory/constitution.md")}
-4. Review ${join(outputDir, "docs/Codex团队开发说明.md")}
-5. Review ${join(outputDir, "docs/ClaudeCode团队开发说明.md")}
-6. Review ${join(outputDir, ".specify/memory/session-history.md")}
-7. Review ${join(outputDir, ".specify/memory/skill-upgrade-backlog.md")}
-8. Run: project-engineering-workflow doctor --output-dir "${outputDir}"`);
+1. Run: node ${join(outputDir, ".specify/scripts/project-profile.mjs")} status --output-dir "${outputDir}" --json
+2. On the first development task, analyze the project and complete ${join(outputDir, ".specify/project-profile/profile.yaml")}
+3. Review ${join(outputDir, ".specify/project-profile/architecture.md")}
+4. Review ${join(outputDir, "AGENTS.md")}
+5. Review ${join(outputDir, ".agents/skills/project-stack-standards/SKILL.md")}
+6. Review ${join(outputDir, ".specify/memory/constitution.md")}
+7. Review ${join(outputDir, "docs/Codex团队开发说明.md")}
+8. Review ${join(outputDir, "docs/ClaudeCode团队开发说明.md")}
+9. Run: project-engineering-workflow doctor --output-dir "${outputDir}"`);
 }
 
 function doctor(options) {

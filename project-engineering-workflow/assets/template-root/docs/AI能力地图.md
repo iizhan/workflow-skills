@@ -11,9 +11,11 @@
 
 ```mermaid
 flowchart TD
-  A["用户请求"] --> A1["fast / standard / controlled"]
+  A["用户请求"] --> P["Project Profile / Freshness"]
+  P --> A1["fast / standard / controlled"]
   A1 --> B["Requirement / Items / Impact / Confirmation"]
-  B --> C["Child Tasks / Implementation"]
+  B --> B1["Project Profile / Frontend or Backend Role Workflow"]
+  B1 --> C["Child Tasks / Implementation"]
   C --> D["Review / Test"]
   D --> D1["Impact-to-Evidence Report"]
   D1 --> E["User Acceptance / Reflection"]
@@ -26,7 +28,33 @@ flowchart TD
   H --> K["delivery-summary.md"]
 ```
 
-## 六条主链
+## 七条主链
+
+### 0. Project Context 主链
+
+用途：
+
+- 首次识别项目技术栈、目录结构、架构、关键链路、配置真值和验证命令
+- 把已验证事实保存到项目本地 Profile，后续按证据指纹复用
+- 只在证据变化、模块未知或缓存冲突时增量刷新
+
+入口：
+
+- `project-profile-router`
+- `.specify/scripts/project-profile.mjs`
+
+产物：
+
+- `.specify/project-profile/profile.yaml`
+- `.specify/project-profile/architecture.md`
+- `.specify/project-profile/decision-memory.yaml`
+- 忽略的 `local-state.json` 证据指纹
+
+门禁：
+
+- Profile 是项目事实缓存，不是权限或任务批准
+- 源码和配置真值优先于缓存
+- 只加载与当前模块和任务类型匹配的决策
 
 ### 1. Delivery 主链
 
@@ -43,6 +71,8 @@ flowchart TD
 - `project-codebase-onboarding`
 - `project-scope-impact-guard`
 - `project-tech-solution`
+- `project-backend-standards`，后端角色流程按架构、契约、数据、运行时和验证信号渐进加载
+- `project-frontend-standards`，前端角色流程按体验、状态、无障碍、性能和验证信号渐进加载
 - `project-code-generation`
 - `project-code-review`
 - `project-test-and-report`
@@ -61,6 +91,7 @@ flowchart TD
 - standard：确认需求、事项、验收和影响范围
 - controlled：再确认子任务、依赖、验证和回滚
 - 范围漂移：暂停并确认新增差异
+- 单一表面任务：只加载对应角色入口和命中的 references；全栈任务也不默认加载两个完整角色包
 
 ### 2. Memory 主链
 

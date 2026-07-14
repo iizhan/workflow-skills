@@ -88,7 +88,54 @@ Core Framework
 - `project-code-review`
 - `project-test-and-report`
 
-### B. Memory Governance Module
+### B. Project Context Module
+
+职责：
+
+- 首次分析项目技术栈、目录、模块、关键链路、配置真值、命令和工程约定
+- 把可重新验证的事实与架构摘要保存到项目本地
+- 用证据指纹判断 fresh / missing / stale，只刷新变化范围
+- 复用明确确认的稳定项目决策，同时隔离用户私有记忆和当前任务批准
+
+当前对应：
+
+- `project-profile-router`
+- `.specify/project-profile/profile.yaml`
+- `.specify/project-profile/architecture.md`
+- `.specify/project-profile/decision-memory.yaml`
+- `.specify/scripts/project-profile.mjs`
+- `workflow-state.yaml` 中的 `project_profile`
+
+边界：
+
+- Profile 是可复现缓存，源码与配置真值优先。
+- 决策记忆需要明确确认；Profile 事实刷新不重复要求记忆确认。
+- 不保存 secrets、原始环境值、私有数据或无证据推断。
+- 历史决定不能复用为权限、删除、远端写入、发布、范围或验收批准。
+
+### C. Engineering Role Workflow Module
+
+职责：
+
+- 用项目 Profile 把通用交付流适配到前端或后端真实技术表面
+- 让角色入口保持轻量，把架构、契约、数据、运行时、体验、无障碍、性能和测试细节按需加载
+- 让全栈任务分开记录两个表面的决策和证据，而不是加载一个庞大的“全能开发 Skill”
+
+当前对应：
+
+- `project-stack-standards`
+- `project-backend-standards` 及其 references
+- `project-frontend-standards` 及其 references
+- `project-frontend-js` / `project-frontend-react` / `project-frontend-vue` / `project-frontend-css`
+
+边界：
+
+- requirement、impact、confirmation 和 acceptance 仍由 Core Workflow 负责，角色 Workflow 不复制门禁。
+- 项目事实优先于通用 reference。
+- fast 只加载一个命中引用；standard 通常是一个主引用加测试引用；controlled 只加载已确认风险涉及的引用。
+- 角色入口和详细 references 必须分别计量 token，不能用“文件都安装在本地”冒充低成本。
+
+### D. Memory Governance Module
 
 职责：
 
@@ -105,7 +152,7 @@ Core Framework
 - `.specify/memory-store/*`
 - `workflow-state.yaml` 中的 session memory 字段
 
-### C. Evolution Governance Module
+### E. Evolution Governance Module
 
 职责：
 
@@ -118,7 +165,7 @@ Core Framework
 - `.specify/memory/evolution-policy.md`
 - `rule-change-proposal.md`
 
-### D. Execution Augmentation Module
+### F. Execution Augmentation Module
 
 职责：
 
@@ -130,7 +177,7 @@ Core Framework
 - `project-gsd-router`
 - `project-gstack-router`
 
-### E. Branch And Release Governance Module
+### G. Branch And Release Governance Module
 
 职责：
 
@@ -148,7 +195,7 @@ Core Framework
 - `release-checklist.md`
 - `release-notes.md`
 
-### F. Compatibility And Migration Module
+### H. Compatibility And Migration Module
 
 职责：
 

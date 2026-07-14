@@ -63,6 +63,46 @@ v030_optional_paths=(
   ".specify/templates/release-notes-template.md"
 )
 
+v040_optional_paths=(
+  "${v030_optional_paths[@]}"
+  ".agents/skills/project-memory-router/references/memory-governance.md"
+  ".agents/skills/project-memory-router/references/memory-data-roles.md"
+  ".agents/skills/project-memory-router/references/memory-retention-retrieval.md"
+  ".agents/skills/project-memory-router/references/memory-conflict-session.md"
+  ".agents/skills/project-evolution-router/references/evolution-governance.md"
+  ".agents/skills/project-superpowers-router/references/ui-automation-contract.md"
+  ".agents/skills/project-superpowers-router/references/implementation-contract.md"
+  ".agents/skills/project-superpowers-router/references/review-contract.md"
+)
+
+v050_optional_paths=(
+  "${v040_optional_paths[@]}"
+  ".agents/skills/project-backend-standards/SKILL.md"
+  ".agents/skills/project-backend-standards/references/architecture-boundaries.md"
+  ".agents/skills/project-backend-standards/references/api-contracts.md"
+  ".agents/skills/project-backend-standards/references/data-consistency.md"
+  ".agents/skills/project-backend-standards/references/runtime-security-observability.md"
+  ".agents/skills/project-backend-standards/references/testing-delivery.md"
+  ".agents/skills/project-backend-standards/references/java-spring.md"
+  ".agents/skills/project-frontend-standards/references/experience-states.md"
+  ".agents/skills/project-frontend-standards/references/architecture-data-flow.md"
+  ".agents/skills/project-frontend-standards/references/accessibility-responsive-i18n.md"
+  ".agents/skills/project-frontend-standards/references/performance-security-observability.md"
+  ".agents/skills/project-frontend-standards/references/testing-delivery.md"
+)
+
+v060_optional_paths=(
+  "${v050_optional_paths[@]}"
+  ".agents/skills/project-profile-router/SKILL.md"
+  ".agents/skills/project-profile-router/references/profile-freshness.md"
+  ".agents/skills/project-profile-router/references/decision-memory.md"
+  ".specify/project-profile/.gitignore"
+  ".specify/project-profile/profile.yaml"
+  ".specify/project-profile/architecture.md"
+  ".specify/project-profile/decision-memory.yaml"
+  ".specify/scripts/project-profile.mjs"
+)
+
 missing=0
 declared_workflow_version=""
 contract_issues=()
@@ -93,12 +133,21 @@ case "$declared_workflow_version" in
   0.2.0|0.2.1)
     version_required_paths=("${v020_optional_paths[@]}")
     ;;
-  0.3.0)
+  0.3.0|0.3.1)
     version_required_paths=("${v030_optional_paths[@]}")
+    ;;
+  0.4.0)
+    version_required_paths=("${v040_optional_paths[@]}")
+    ;;
+  0.5.0)
+    version_required_paths=("${v050_optional_paths[@]}")
+    ;;
+  0.6.0)
+    version_required_paths=("${v060_optional_paths[@]}")
     ;;
   *)
     if [[ -n "$declared_workflow_version" ]]; then
-      version_required_paths=("${v030_optional_paths[@]}")
+      version_required_paths=("${v060_optional_paths[@]}")
     fi
     ;;
 esac
@@ -111,18 +160,38 @@ for rel in "${version_required_paths[@]}"; do
 done
 
 if [[ -n "$declared_workflow_version" ]]; then
-  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Frontend / UI Interaction Contract" "Superpowers router UI contract"
-  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "problem collection" "Superpowers router repair loop"
-  check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Do not report a full UI pass from static checks alone" "Superpowers router blocked-automation rule"
   check_snippet ".agents/skills/project-test-and-report/SKILL.md" "UI / Interaction Reporting Rules" "Test report UI verification contract"
   check_snippet ".agents/skills/project-test-and-report/SKILL.md" "界面/交互验证" "Chinese UI verification report field"
   check_snippet "AGENTS.md" "Do not mark a UI path as fully verified" "AGENTS visible-interface verification rule"
   check_snippet ".specify/templates/delivery-summary-template.md" "截图或 UI 报告" "Delivery summary UI evidence field"
   check_snippet ".specify/memory/memory-policy.md" "Data Role Classification" "Memory data role policy"
   check_snippet ".specify/memory/memory-policy.md" "account_reference" "Memory account reference role"
-  check_snippet ".agents/skills/project-memory-router/SKILL.md" "Data Role Decision" "Memory router data role decision"
-  check_snippet ".agents/skills/project-memory-router/SKILL.md" "blocked_sensitive" "Memory blocked sensitive role"
   check_snippet ".specify/memory-store/memory-record.schema.json" "\"data_role\"" "Memory record data_role schema"
+
+  case "$declared_workflow_version" in
+    0.2.0|0.2.1|0.3.0|0.3.1)
+      check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "Frontend / UI Interaction Contract" "Legacy Superpowers router UI contract"
+      check_snippet ".agents/skills/project-memory-router/SKILL.md" "Data Role Decision" "Legacy memory router data role decision"
+      ;;
+    *)
+      check_snippet ".agents/skills/project-superpowers-router/SKILL.md" "references/ui-automation-contract.md" "Superpowers progressive disclosure"
+      check_snippet ".agents/skills/project-memory-router/SKILL.md" "references/memory-governance.md" "Memory progressive disclosure"
+      check_snippet ".agents/skills/project-requirement-gate/SKILL.md" "Task Lanes" "Adaptive task lanes"
+      ;;
+  esac
+
+  if [[ "$declared_workflow_version" == "0.5.0" || "$declared_workflow_version" == "0.6.0" ]]; then
+    check_snippet ".agents/skills/project-backend-standards/SKILL.md" "Adaptive Workflow" "Backend role workflow"
+    check_snippet ".agents/skills/project-frontend-standards/SKILL.md" "Adaptive Workflow" "Frontend role workflow"
+  fi
+
+  if [[ "$declared_workflow_version" == "0.6.0" ]]; then
+    check_snippet ".agents/skills/project-profile-router/SKILL.md" "Project Profile Router" "Project Profile router"
+    check_snippet ".specify/project-profile/profile.yaml" "status: pending_analysis" "Project Profile data"
+    check_snippet ".specify/project-profile/decision-memory.yaml" "never_reuse_as_approval:" "Decision approval boundary"
+    check_snippet ".specify/scripts/project-profile.mjs" "changedEvidence" "Profile evidence fingerprint"
+    check_snippet ".specify/templates/workflow-state-template.yaml" "project_profile:" "Profile workflow state"
+  fi
 fi
 
 if [[ ${#contract_issues[@]} -gt 0 ]]; then

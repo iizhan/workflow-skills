@@ -28,7 +28,7 @@ npx @workflow-skills/project-engineering-workflow doctor \
 ```bash
 npx @workflow-skills/project-engineering-workflow release-doctor \
   --output-dir "/absolute/path/to/your-repo" \
-  --release-version "0.4.0" \
+  --release-version "0.6.0" \
   --json \
   --json-out "docs/workflow-release-doctor.json"
 ```
@@ -70,9 +70,11 @@ npx @workflow-skills/project-engineering-workflow upgrade \
 如果项目还没接入 `.specify/memory-store`，先通过 `--mode capabilities` 补齐能力链。
 `0.3.x` 还新增了受治理的 git flow：默认跟踪型开发走 `feature/* -> release/* -> v<version> -> merge main`。
 `0.4.x` 新增 `fast / standard / controlled` 自适应任务通道、版本化确认门禁、完整影响范围、范围变化暂停机制，以及“事项/影响 → 验证证据 → 用户验收”闭环。
+`0.5.x` 新增后端和前端两条完整角色 Workflow。每条都覆盖需求到交付，但只按已确认的变更面加载架构、接口、数据、运行时、体验、无障碍、性能和测试引用。
+`0.6.x` 新增项目 Profile、架构摘要、已确认决策记忆和证据指纹。首次分析后，后续任务复用新鲜上下文，只有证据变化时才按范围刷新。
 远端 push 和 npm publish 仍然必须显式人工批准；内置 release 脚本会拒绝额外 push / publish 参数，避免把外部动作混进本地 release 准备。
 
-生成内容包含 `AGENTS.md`、项目本地 skills、spec-kit 风格工件、记忆治理、框架进化、分支与发布治理、Superpowers 路由、GSD 状态文件、gstack 角色评审、默认开发规范、前端栈规范、Codex / Claude Code 适配说明、安全审查、分阶段验证、代码审查和测试报告。
+生成内容包含 `AGENTS.md`、项目本地 skills、spec-kit 风格工件、记忆治理、框架进化、分支与发布治理、Superpowers 路由、GSD 状态文件、gstack 角色评审、后端/前端角色 Workflow、默认开发规范、前端栈规范、Codex / Claude Code 适配说明、安全审查、分阶段验证、代码审查和测试报告。
 
 workflow 变更通过仓库里的 `evaluations/skills-workflow` 验证。有效的 skill 升级不只看是否命中，还要看路由精度、任务结果、安全范围、验证强度、摩擦成本、输出清晰度、可维护性和学习闭环。
 
@@ -81,8 +83,10 @@ token 成本通过评估目录里的 token economics 模板和估算脚本记录
 完整方案说明见仓库根目录 README。
 如果你想从产品架构角度理解这套框架的内核、能力面和部署层，请看 `references/09-framework-modules-blueprint.md`。
 填好的收尾示例包见 `references/06-real-task-example-pack/`。
-`0.2.x` 与 `0.3.0` 的版本说明与发布清单见 `references/07-v0.2-release-pack/`。
+`0.2.x` 至 `0.6.x` 的版本说明与发布清单见 `references/07-v0.2-release-pack/`。
 六条主链的 onboarding 地图见生成后的 `docs/AI能力地图.md`。
 向后兼容升级规则见生成后的 `docs/升级兼容策略.md` 与 `references/08-upgrade-compatibility-pack/`。
 旧项目升级实操手册见 `references/08-upgrade-compatibility-pack/v0.1-to-v0.2-upgrade-manual.md` 与 `references/08-upgrade-compatibility-pack/v0.2-to-v0.3-upgrade-manual.md`。
 `0.3.x` 升级到自适应确认流程见 `references/08-upgrade-compatibility-pack/v0.3-to-v0.4-upgrade-manual.md`。
+`0.4.x` 升级到前端/后端角色 Workflow 见 `references/08-upgrade-compatibility-pack/v0.4-to-v0.5-upgrade-manual.md`。
+`0.5.x` 升级到项目 Profile 见 `references/08-upgrade-compatibility-pack/v0.5-to-v0.6-upgrade-manual.md`。

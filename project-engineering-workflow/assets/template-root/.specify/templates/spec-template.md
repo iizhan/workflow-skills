@@ -7,7 +7,7 @@
 **原始需求**: [ORIGINAL REQUEST]
 **任务通道**: fast / standard / controlled
 **需求版本**: v1
-**确认状态**: 待确认
+**确认状态**: fast: recorded_without_preapproval / standard|controlled: pending_confirmation
 
 ## 1. 业务背景与目标
 
@@ -85,5 +85,6 @@
 ## 11. 确认记录
 
 - v1：待确认
-- 用户选择：确认执行 / 修改事项 / 缩小范围 / 补充需求
+- fast：recorded_without_preapproval；无需执行前确认
+- standard / controlled 用户选择：确认执行 / 修改事项 / 缩小范围 / 补充需求
 - 变更摘要：

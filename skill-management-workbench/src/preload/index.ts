@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AuthorizationInput,
+  LocalToolTelemetrySource,
+  ProjectProfileSummary,
   SkillBundleExportInput,
   SkillBundleImportInput,
   WorkbenchApi
@@ -8,6 +10,12 @@ import type {
 
 const api: WorkbenchApi = {
   bootstrap: () => ipcRenderer.invoke("workbench:bootstrap"),
+  listManagedProjects: () => ipcRenderer.invoke("workbench:list-managed-projects"),
+  saveManagedProjects: (projects) => ipcRenderer.invoke("workbench:save-managed-projects", projects),
+  deleteManagedProject: (projectPath: string) =>
+    ipcRenderer.invoke("workbench:delete-managed-project", projectPath),
+  getProjectProfile: (projectRoot: string): Promise<ProjectProfileSummary> =>
+    ipcRenderer.invoke("workbench:get-project-profile", projectRoot),
   pickDirectory: () => ipcRenderer.invoke("workbench:pick-directory"),
   pickTelemetryFile: () => ipcRenderer.invoke("workbench:pick-telemetry-file"),
   pickBackupManifest: () => ipcRenderer.invoke("workbench:pick-backup-manifest"),
@@ -22,6 +30,12 @@ const api: WorkbenchApi = {
   previewBackupRestoreImpact: (manifestPath: string) =>
     ipcRenderer.invoke("workbench:preview-backup-restore-impact", manifestPath),
   scanSkills: () => ipcRenderer.invoke("workbench:scan-skills"),
+  scanProjectSkills: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:scan-project-skills", projectRoot),
+  previewRecommendedWorkflowStarter: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:preview-recommended-workflow-starter", projectRoot),
+  applyRecommendedWorkflowStarter: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:apply-recommended-workflow-starter", projectRoot),
   listSkills: () => ipcRenderer.invoke("workbench:list-skills"),
   generateSkillAnalysis: (skillId: string) =>
     ipcRenderer.invoke("workbench:generate-skill-analysis", skillId),
@@ -44,7 +58,19 @@ const api: WorkbenchApi = {
     ipcRenderer.invoke("workbench:list-marketplace-catalog", query),
   importTelemetryFile: (filePath: string) =>
     ipcRenderer.invoke("workbench:import-telemetry-file", filePath),
+  discoverLocalToolTelemetrySources: () =>
+    ipcRenderer.invoke("workbench:discover-local-tool-telemetry-sources"),
+  previewLocalToolTelemetrySource: (source: LocalToolTelemetrySource) =>
+    ipcRenderer.invoke("workbench:preview-local-tool-telemetry-source", source),
+  importLocalToolTelemetrySource: (source: LocalToolTelemetrySource) =>
+    ipcRenderer.invoke("workbench:import-local-tool-telemetry-source", source),
+  refreshProjectRuntimeEvidence: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:refresh-project-runtime-evidence", projectRoot),
+  checkProjectConnection: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:check-project-connection", projectRoot),
   listRecentRuns: (limit?: number) => ipcRenderer.invoke("workbench:list-recent-runs", limit),
+  listSkillRuns: (skillId: string, limit?: number) =>
+    ipcRenderer.invoke("workbench:list-skill-runs", skillId, limit),
   getDailySummary: (date?: string) => ipcRenderer.invoke("workbench:get-daily-summary", date),
   getWeeklySummary: (endDate?: string) =>
     ipcRenderer.invoke("workbench:get-weekly-summary", endDate),

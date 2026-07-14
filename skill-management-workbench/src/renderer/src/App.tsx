@@ -6,6 +6,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent,
   type ReactNode
 } from "react";
@@ -26,17 +27,26 @@ import type {
   LocalBackupSummary,
   LocalBackupValidationResult,
   LocalBackupValidationSeverity,
+  LocalToolTelemetryImportResult,
+  LocalToolTelemetryPreview,
+  LocalToolTelemetrySource,
+  ManagedProjectRecord,
   OptimizationProposal,
   OptimizationProposalRefreshResult,
   OptimizationProposalSeverity,
   OptimizationProposalStatus,
+  ProjectProfileSummary,
+  ProjectRuntimeEvidenceRefreshResult,
   RemoteMarketplaceCatalog,
   RemoteMarketplaceSkill,
+  RemoteSkillCheckStatus,
+  RemoteSkillRiskLevel,
   RemoteSkillActivationPreview,
   RemoteSkillCandidateDetail,
   RemoteSkillCandidateSummary,
   RemoteSkillImportResult,
   RemoteSkillSourceAnalysis,
+  RemoteSkillVerificationStatus,
   ScanResult,
   SkillApplyPreview,
   SkillApplyScope,
@@ -56,10 +66,12 @@ import type {
   SkillWasteLeader,
   TelemetryImportResult,
   TelemetryMode,
-  WeeklyMetricsSummary
+  WeeklyMetricsSummary,
+  WorkflowStarterApplyResult,
+  WorkflowStarterPreview
 } from "../../shared/types";
 
-type LanguageMode = "en" | "zh" | "both";
+type LanguageMode = "en" | "zh";
 type ProductMode = "guided" | "builder";
 
 type InteractionNoticeTone = "default" | "success" | "warning" | "info";
@@ -74,7 +86,56 @@ type InteractionNotice = {
 
 type LibraryStage = "summary" | "analysis" | "optimization" | "tuning" | "packaging";
 
+type ManagedProject = ManagedProjectRecord;
+
+type ProjectHeartbeatTone = "success" | "warning" | "error" | "info";
+
+type ProjectHeartbeatEntry = {
+  id: string;
+  projectPath: string;
+  observedAt: string;
+  tone: ProjectHeartbeatTone;
+  status: ProjectRuntimeEvidenceRefreshResult["status"] | "error";
+  importedRuns: number;
+  updatedRuns: number;
+  totalRuns: number;
+  sourceCount: number;
+  message: string;
+};
+
+type ProjectRepairFeedback = {
+  projectPath: string;
+  status:
+    | "running"
+    | "completed"
+    | "connected-awaiting-skill"
+    | "needs-action"
+    | "connection-required"
+    | "failed";
+  detail: string;
+};
+
+type ProjectOnboardingLogEntry = {
+  id: string;
+  projectPath: string;
+  occurredAt: string;
+  stage: "scan" | "skills" | "workflow" | "telemetry" | "connection" | "complete";
+  tone: "info" | "success" | "warning" | "error";
+  message: string;
+};
+
+type SkillLibrarySortKey = "priority" | "name" | "calls" | "tokens" | "score" | "latest";
+type SkillLibraryTypeFilter = "all" | SkillSummary["governance"]["role"];
+type RemoteLibrarySortKey = "name" | "risk" | "status" | "source";
+
 const defaultPolicyName = "Default local policy";
+const managedProjectsStorageKey = "skill-os-managed-projects-v1";
+const projectHeartbeatStorageKey = "skill-os-project-heartbeats-v1";
+const projectOnboardingLogsStorageKey = "skill-os-project-onboarding-logs-v1";
+const maxProjectHeartbeatEntries = 48;
+const maxProjectOnboardingLogEntries = 120;
+const runtimeRunFetchLimit = 500;
+const skillRunDetailLimit = 200;
 
 const healthScorePolicyPresets: SkillHealthScorePolicyPreset[] = [
   "balanced",
@@ -88,8 +149,9 @@ const productNavHrefs = [
   "#overview",
   "#discovery",
   "#local-skills",
-  "#remote-market",
+  "#evaluate",
   "#analysis",
+  "#remote-market",
   "#graph",
   "#proposals",
   "#apply-center",
@@ -108,7 +170,7 @@ const uiCopy: Record<string, string> = {
   "Added Top-level Entries": "新增顶层条目",
   "Affected Skills": "受影响 Skill",
   "All visible edges in the current snapshot are rendered in this map.": "当前快照中所有可见边都已渲染到这张图中。",
-  "Approved Roots": "已批准根目录",
+  "Approved Roots": "已授权项目",
   "Avg Duration": "平均耗时",
   "Avg Tokens/Run": "平均 Token/运行",
   "Back": "后退",
@@ -172,6 +234,7 @@ const uiCopy: Record<string, string> = {
   "Graph": "图谱",
   "Graph Focus Analysis": "图谱焦点分析",
   "Graph Navigation": "图谱导航",
+  "Governance": "治理",
   "Highest Waste Skills This Week": "本周最高浪费 Skill",
   "Import Strategy": "导入策略",
   "Imported Runs": "已导入运行",
@@ -190,6 +253,7 @@ const uiCopy: Record<string, string> = {
   "Latest Export": "最新导出",
   "Latest Import": "最新导入",
   "Latest scan": "最新扫描",
+  "Last Scan": "最近扫描",
   "Lifecycle": "生命周期",
   "Lineage History": "谱系历史",
   "Lineage Key": "谱系 Key",
@@ -248,11 +312,13 @@ const uiCopy: Record<string, string> = {
   "Running": "运行中",
   "Restore impact preview found a low-risk file replacement path": "恢复影响预览发现低风险文件替换路径",
   "Return To Snapshot": "返回快照",
-  "Root Summary": "根目录摘要",
-  "Root Type": "根目录类型",
+  "Root Summary": "项目摘要",
+  "Root Type": "项目来源类型",
   "Runs This Week": "本周运行",
   "Runs Today": "今日运行",
   "Safety Class": "安全分类",
+  "Scan Status": "扫描状态",
+  "Scan Time": "扫描时间",
   "Sample Adds": "新增样例",
   "Sample Overwrites": "覆盖样例",
   "Sample Removals": "移除样例",
@@ -263,11 +329,11 @@ const uiCopy: Record<string, string> = {
   "Show In Topology": "在拓扑中显示",
   "Skill": "Skill",
   "Skill Files": "Skill 文件",
-  "Skill Registry": "Skill 注册表",
+  "Skill Index": "技能索引",
   "Skills": "Skill",
   "Skills Found": "发现 Skill",
   "Skills On This Version": "此版本上的 Skill",
-  "Skills Under Root": "根目录下的 Skill",
+  "Skills Under Root": "项目内 Skill",
   "Skills Using This Model": "使用此模型的 Skill",
   "Slowest Skills This Week": "本周最慢 Skill",
   "Slowest Skills Today": "今日最慢 Skill",
@@ -277,6 +343,8 @@ const uiCopy: Record<string, string> = {
   "Source Type": "来源类型",
   "Started": "开始时间",
   "Status": "状态",
+  "Actions": "操作",
+  "Boundary": "边界",
   "Snapshot": "快照",
   "Snapshot Size": "快照大小",
   "Storage Path": "存储路径",
@@ -321,23 +389,351 @@ interface LanguageContextValue {
 }
 
 const LanguageContext = createContext<LanguageContextValue>({
-  mode: "both",
-  tx: (en, zh) => `${en} / ${zh}`,
-  t: (en) => `${en} / ${uiCopy[en] ?? en}`
+  mode: "zh",
+  tx: (_en, zh) => zh,
+  t: (en) => uiCopy[en] ?? en
 });
+
+function normalizeChineseCopy(zh: string) {
+  return zh
+    .replace(/Skill OS/g, "__SKILL_OS__")
+    .replace(/\bskills-workflow\b/gi, "技能工作流")
+    .replace(/\bSKILLS\b/g, "技能")
+    .replace(/\bSkills\b/g, "技能")
+    .replace(/\bSKILL\b/g, "技能")
+    .replace(/\bSkill\b/g, "技能")
+    .replace(/技能\s+(?=[\u4e00-\u9fa5])/g, "技能")
+    .replace(/(?<=[\u4e00-\u9fa5])\s+技能/g, "技能")
+    .replace(/__SKILL_OS__/g, "Skill OS");
+}
 
 function formatLocalizedText(mode: LanguageMode, en: string, zh: string) {
   if (mode === "zh") {
-    return zh;
-  }
-  if (mode === "both") {
-    return `${en} / ${zh}`;
+    return normalizeChineseCopy(zh);
   }
   return en;
 }
 
 function formatProductModeText(mode: ProductMode, guided: string, builder: string) {
   return mode === "builder" ? builder : guided;
+}
+
+function normalizeProjectPath(path: string) {
+  const trimmed = path.trim();
+  if (trimmed === "/") {
+    return trimmed;
+  }
+  return trimmed.replace(/\/+$/, "");
+}
+
+function getProjectDisplayName(path: string) {
+  const normalized = normalizeProjectPath(path);
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? normalized;
+}
+
+function isPathInsideProject(path: string, projectPath: string) {
+  const normalizedPath = normalizeProjectPath(path);
+  const normalizedProjectPath = normalizeProjectPath(projectPath);
+  return (
+    Boolean(normalizedPath && normalizedProjectPath) &&
+    (normalizedPath === normalizedProjectPath || normalizedPath.startsWith(`${normalizedProjectPath}/`))
+  );
+}
+
+function getLatestObservedWorkspace(result: ProjectRuntimeEvidenceRefreshResult | null) {
+  if (!result) {
+    return null;
+  }
+  const directWorkspace = result.matchedWorkspaceRef ?? result.latestObservedWorkspaceRef;
+  if (directWorkspace) {
+    return normalizeProjectPath(directWorkspace);
+  }
+  const workspaceWarning = result.warnings.find((warning) =>
+    warning.startsWith("No local session cwd matched")
+  );
+  const observedWorkspace = workspaceWarning?.match(/Latest observed workspace: (.+)\.$/)?.[1];
+  return observedWorkspace ? normalizeProjectPath(observedWorkspace) : null;
+}
+
+function getManagedProjectId(path: string) {
+  return `project:${normalizeProjectPath(path)}`;
+}
+
+function createManagedProject(path: string, now = new Date().toISOString()): ManagedProject {
+  const normalized = normalizeProjectPath(path);
+  return {
+    id: getManagedProjectId(normalized),
+    name: getProjectDisplayName(normalized),
+    path: normalized,
+    boundAt: now,
+    lastFocusedAt: now,
+    lastScanAt: null,
+    skillsFound: null,
+    filesSeen: null,
+    skillsChanged: null,
+    workflowApplied: false,
+    monitoringEnabled: false,
+    monitoringIntervalMs: 60000,
+    lastMonitorAt: null,
+    lastObservedWorkspaceRef: null,
+    lastConnectionCheckAt: null
+  };
+}
+
+function parseManagedProjects(value: string | null) {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<ManagedProject>[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((project) => typeof project.path === "string" && project.path.trim().length > 0)
+      .map((project) => ({
+        ...createManagedProject(project.path ?? ""),
+        ...project,
+        path: normalizeProjectPath(project.path ?? ""),
+        monitoringEnabled: Boolean(project.monitoringEnabled),
+        monitoringIntervalMs:
+          project.monitoringIntervalMs === 30000 ||
+          project.monitoringIntervalMs === 60000 ||
+          project.monitoringIntervalMs === 120000
+            ? project.monitoringIntervalMs
+            : 60000,
+        lastMonitorAt: typeof project.lastMonitorAt === "string" ? project.lastMonitorAt : null,
+        lastObservedWorkspaceRef:
+          typeof project.lastObservedWorkspaceRef === "string"
+            ? normalizeProjectPath(project.lastObservedWorkspaceRef)
+            : null,
+        lastConnectionCheckAt:
+          typeof project.lastConnectionCheckAt === "string" ? project.lastConnectionCheckAt : null
+      }))
+      .filter((project) => project.path.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function loadManagedProjects() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  return parseManagedProjects(window.localStorage.getItem(managedProjectsStorageKey));
+}
+
+function parseProjectHeartbeatEntries(value: string | null): ProjectHeartbeatEntry[] {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value) as Partial<ProjectHeartbeatEntry>[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((entry) => typeof entry.projectPath === "string" && typeof entry.observedAt === "string")
+      .map((entry) => ({
+        id: entry.id ?? `${entry.projectPath}:${entry.observedAt}`,
+        projectPath: normalizeProjectPath(entry.projectPath ?? ""),
+        observedAt: entry.observedAt ?? new Date().toISOString(),
+        tone:
+          entry.tone === "success" ||
+          entry.tone === "warning" ||
+          entry.tone === "error" ||
+          entry.tone === "info"
+            ? entry.tone
+            : "info",
+        status: entry.status ?? "error",
+        importedRuns: Number(entry.importedRuns ?? 0),
+        updatedRuns: Number(entry.updatedRuns ?? 0),
+        totalRuns: Number(entry.totalRuns ?? 0),
+        sourceCount: Number(entry.sourceCount ?? 0),
+        message: entry.message ?? ""
+      }))
+      .filter((entry) => entry.projectPath.length > 0)
+      .sort((left, right) => left.observedAt.localeCompare(right.observedAt));
+  } catch {
+    return [];
+  }
+}
+
+function loadProjectHeartbeats() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  return parseProjectHeartbeatEntries(window.localStorage.getItem(projectHeartbeatStorageKey));
+}
+
+function parseProjectOnboardingLogs(value: string | null): ProjectOnboardingLogEntry[] {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value) as Partial<ProjectOnboardingLogEntry>[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((entry) => typeof entry.projectPath === "string" && typeof entry.occurredAt === "string")
+      .map((entry) => ({
+        id: entry.id ?? `${entry.projectPath}:${entry.occurredAt}`,
+        projectPath: normalizeProjectPath(entry.projectPath ?? ""),
+        occurredAt: entry.occurredAt ?? new Date().toISOString(),
+        stage: entry.stage ?? "scan",
+        tone: entry.tone ?? "info",
+        message: entry.message ?? ""
+      }))
+      .filter((entry) => entry.projectPath && entry.message)
+      .slice(-maxProjectOnboardingLogEntries);
+  } catch {
+    return [];
+  }
+}
+
+function loadProjectOnboardingLogs() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  return parseProjectOnboardingLogs(window.localStorage.getItem(projectOnboardingLogsStorageKey));
+}
+
+function heartbeatToneForRuntimeStatus(
+  status: ProjectRuntimeEvidenceRefreshResult["status"]
+): ProjectHeartbeatTone {
+  if (status === "imported") {
+    return "success";
+  }
+  if (status === "no_importable_runs") {
+    return "warning";
+  }
+  if (status === "connected_no_skill_runs") {
+    return "info";
+  }
+  if (status === "telemetry_disabled" || status === "unauthorized" || status === "no_ready_sources") {
+    return "error";
+  }
+  return "info";
+}
+
+function upsertProjectHeartbeatEntry(
+  entries: ProjectHeartbeatEntry[],
+  entry: ProjectHeartbeatEntry
+) {
+  const normalizedPath = normalizeProjectPath(entry.projectPath);
+  const nextEntries = [
+    ...entries.filter((item) => item.id !== entry.id),
+    {
+      ...entry,
+      projectPath: normalizedPath
+    }
+  ];
+  const latestByProject = nextEntries
+    .filter((item) => item.projectPath === normalizedPath)
+    .sort((left, right) => left.observedAt.localeCompare(right.observedAt))
+    .slice(-maxProjectHeartbeatEntries);
+  return [
+    ...nextEntries.filter((item) => item.projectPath !== normalizedPath),
+    ...latestByProject
+  ].sort((left, right) => left.observedAt.localeCompare(right.observedAt));
+}
+
+function upsertManagedProject(
+  projects: ManagedProject[],
+  path: string,
+  updates: Partial<Omit<ManagedProject, "id" | "path" | "boundAt">> = {}
+) {
+  const normalized = normalizeProjectPath(path);
+  if (!normalized) {
+    return projects;
+  }
+
+  const now = new Date().toISOString();
+  const existing = projects.find((project) => project.path === normalized);
+  const nextProject: ManagedProject = {
+    ...(existing ?? createManagedProject(normalized, now)),
+    name: updates.name ?? existing?.name ?? getProjectDisplayName(normalized),
+    lastFocusedAt: updates.lastFocusedAt ?? now,
+    lastScanAt: updates.lastScanAt ?? existing?.lastScanAt ?? null,
+    skillsFound: updates.skillsFound ?? existing?.skillsFound ?? null,
+    filesSeen: updates.filesSeen ?? existing?.filesSeen ?? null,
+    skillsChanged: updates.skillsChanged ?? existing?.skillsChanged ?? null,
+    workflowApplied: updates.workflowApplied ?? existing?.workflowApplied ?? false,
+    monitoringEnabled: updates.monitoringEnabled ?? existing?.monitoringEnabled ?? false,
+    monitoringIntervalMs: updates.monitoringIntervalMs ?? existing?.monitoringIntervalMs ?? 60000,
+    lastMonitorAt: updates.lastMonitorAt ?? existing?.lastMonitorAt ?? null,
+    lastObservedWorkspaceRef:
+      updates.lastObservedWorkspaceRef ?? existing?.lastObservedWorkspaceRef ?? null,
+    lastConnectionCheckAt: updates.lastConnectionCheckAt ?? existing?.lastConnectionCheckAt ?? null
+  };
+  const withoutCurrent = projects.filter((project) => project.path !== normalized);
+
+  return [nextProject, ...withoutCurrent].sort((left, right) => {
+    const leftName = left.name.toLocaleLowerCase();
+    const rightName = right.name.toLocaleLowerCase();
+    if (leftName !== rightName) {
+      return leftName.localeCompare(rightName);
+    }
+    return left.path.localeCompare(right.path);
+  });
+}
+
+function buildChineseSkillReadingAid(skill: SkillSummary) {
+  const key = skill.displayName.toLowerCase();
+  const description = skill.description?.toLowerCase() ?? "";
+  const text = `${key} ${description}`;
+
+  const topic = (() => {
+    if (text.includes("branch") || text.includes("release") || text.includes("tag")) return "分支、发版和合并流程";
+    if (text.includes("code-review") || text.includes("review")) return "代码审查和风险检查";
+    if (text.includes("code-generation") || text.includes("implement")) return "按计划进行代码实现";
+    if (text.includes("codebase-onboarding") || text.includes("onboarding")) return "进入陌生代码库前的结构梳理";
+    if (text.includes("dev-core")) return "日常开发任务的基础规则";
+    if (text.includes("evolution") || text.includes("upgrade")) return "把重复经验沉淀为工作流改进";
+    if (text.includes("frontend-react")) return "React 前端开发规则";
+    if (text.includes("frontend-vue")) return "Vue 前端开发规则";
+    if (text.includes("frontend-css")) return "CSS、布局和视觉样式规则";
+    if (text.includes("frontend-js")) return "浏览器 JavaScript 开发规则";
+    if (text.includes("frontend")) return "前端开发通用规则";
+    if (text.includes("gsd") || text.includes("long-running")) return "长任务拆解和可恢复执行";
+    if (text.includes("gstack") || text.includes("role")) return "产品、设计、工程、QA 等角色分工";
+    if (text.includes("memory")) return "项目记忆的保存、更新和治理";
+    if (text.includes("requirement") || text.includes("acceptance")) return "需求澄清、约束和验收标准";
+    if (text.includes("scope") || text.includes("impact")) return "变更范围和影响面控制";
+    if (text.includes("security")) return "安全敏感改动审查";
+    if (text.includes("session-summary")) return "会话结束后的项目记忆沉淀";
+    if (text.includes("skill-upgrade")) return "根据重复摩擦提出技能升级建议";
+    if (text.includes("stack")) return "按当前项目技术栈约定实现";
+    if (text.includes("superpowers")) return "把高阶工具能力安全路由到项目内";
+    if (text.includes("tech-solution")) return "把已确认需求转成技术方案";
+    if (text.includes("test") || text.includes("verification")) return "变更后的验证和测试报告";
+    return "当前项目内可复用的工作流技能";
+  })();
+
+  const trigger = (() => {
+    if (text.includes("use when")) return "当任务命中对应场景时启用，帮助 Codex 按固定流程工作";
+    if (text.includes("after")) return "通常用于前置步骤完成之后，继续推进下一阶段";
+    if (text.includes("before")) return "通常用于动手修改前，先锁定规则、范围或风险";
+    return "用于让当前项目的 AI 工作流程更稳定、更可复用";
+  })();
+
+  return `中文辅助：这个技能主要用于${topic}。适用场景：${trigger}。`;
+}
+
+function formatSkillDescriptionForDisplay(
+  skill: SkillSummary,
+  mode: LanguageMode,
+  chineseAssistEnabled: boolean
+) {
+  if (mode === "zh" && chineseAssistEnabled) {
+    return buildChineseSkillReadingAid(skill);
+  }
+
+  return skill.description?.trim() ?? "";
 }
 
 function LocalizedCopy({
@@ -354,37 +750,31 @@ function LocalizedCopy({
   if (mode === "en") {
     return <span className={className}>{en}</span>;
   }
-  if (mode === "zh") {
-    return <span className={className}>{zh}</span>;
-  }
-  return (
-    <span className={["localized-copy", className ?? ""].filter(Boolean).join(" ")}>
-      <span>{en}</span>
-      <span lang="zh-CN">{zh}</span>
-    </span>
-  );
+  return <span className={className}>{normalizeChineseCopy(zh)}</span>;
 }
 
 function InteractionFeedback({ notice }: { notice: InteractionNotice }) {
+  const { tx } = useLanguage();
+
   return (
     <article
       className={`interaction-action-feedback tone-${notice.tone ?? "default"}`}
       aria-live="polite"
     >
       <div>
-        <span>Area / 区域</span>
+        <span>{tx("Area", "区域")}</span>
         <strong>{notice.area}</strong>
       </div>
       <div>
-        <span>Action / 动作</span>
+        <span>{tx("Action", "动作")}</span>
         <strong>{notice.action}</strong>
       </div>
       <div>
-        <span>Result / 结果</span>
+        <span>{tx("Result", "结果")}</span>
         <strong>{notice.result}</strong>
       </div>
       <div>
-        <span>Next / 下一步</span>
+        <span>{tx("Next", "下一步")}</span>
         <strong>{notice.nextStep}</strong>
       </div>
     </article>
@@ -399,13 +789,12 @@ function LanguageSwitcher({
   onChange: (nextMode: LanguageMode) => void;
 }) {
   const options: Array<{ value: LanguageMode; label: string }> = [
-    { value: "both", label: "EN / 中文" },
-    { value: "en", label: "English" },
-    { value: "zh", label: "中文" }
+    { value: "zh", label: "中" },
+    { value: "en", label: "EN" }
   ];
 
   return (
-    <div className="language-switcher" aria-label="Language mode">
+    <div className="language-switcher" aria-label={value === "zh" ? "语言" : "Language"}>
       {options.map((option) => (
         <button
           type="button"
@@ -465,6 +854,140 @@ function useLanguage() {
 function T({ en, zh, className }: { en: string; zh?: string; className?: string }) {
   const { mode } = useLanguage();
   return <LocalizedCopy mode={mode} en={en} zh={zh ?? uiCopy[en] ?? en} className={className} />;
+}
+
+function FolderIcon() {
+  return (
+    <svg className="button-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M3.75 6.75h6.1l1.65 2h8.75v8.5a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2v-10.5Z" />
+      <path d="M3.75 8.75h16.5" />
+    </svg>
+  );
+}
+
+function ScanIcon() {
+  return (
+    <svg className="button-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M5 7V5h2" />
+      <path d="M17 5h2v2" />
+      <path d="M19 17v2h-2" />
+      <path d="M7 19H5v-2" />
+      <path d="M7 12h10" />
+      <path d="M9 9h6" />
+      <path d="M9 15h6" />
+    </svg>
+  );
+}
+
+function ViewIcon() {
+  return (
+    <svg className="button-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M2.75 12s3.3-5.75 9.25-5.75S21.25 12 21.25 12s-3.3 5.75-9.25 5.75S2.75 12 2.75 12Z" />
+      <path d="M12 9.25a2.75 2.75 0 1 1 0 5.5 2.75 2.75 0 0 1 0-5.5Z" />
+    </svg>
+  );
+}
+
+function AnalysisIcon() {
+  return (
+    <svg className="button-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M4.75 18.25V5.75" />
+      <path d="M4.75 18.25h14.5" />
+      <path d="M8.25 15.25v-4" />
+      <path d="M12 15.25V7.75" />
+      <path d="M15.75 15.25v-6" />
+      <path d="M18.75 6.25v4h-4" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg className="button-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M4.75 7.25h14.5" />
+      <path d="M9.25 7.25v-2h5.5v2" />
+      <path d="M7.25 7.25l.7 11a2 2 0 0 0 2 1.85h4.1a2 2 0 0 0 2-1.85l.7-11" />
+      <path d="M10.25 10.75v5.75" />
+      <path d="M13.75 10.75v5.75" />
+    </svg>
+  );
+}
+
+function RepairIcon() {
+  return (
+    <svg className="button-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M14.5 6.25a4.25 4.25 0 0 0-5.75 5.5L4.5 16l3.5 3.5 4.25-4.25a4.25 4.25 0 0 0 5.5-5.75l-2.6 2.6-3.25-3.25 2.6-2.6Z" />
+    </svg>
+  );
+}
+
+function BindProjectButton({
+  busy,
+  onClick
+}: {
+  busy: boolean;
+  onClick: () => void;
+}) {
+  const { tx } = useLanguage();
+  return (
+    <button type="button" className="project-action-button" disabled={busy} onClick={onClick}>
+      <FolderIcon />
+      <span>{tx("Bind Project", "绑定项目")}</span>
+    </button>
+  );
+}
+
+function ScanProjectButton({
+  busy,
+  scanning,
+  primary = false,
+  onClick
+}: {
+  busy: boolean;
+  scanning: boolean;
+  primary?: boolean;
+  onClick: () => void;
+}) {
+  const { tx } = useLanguage();
+  return (
+    <button
+      type="button"
+      className={`project-action-button${primary ? " primary" : ""}`}
+      disabled={busy}
+      onClick={onClick}
+    >
+      <ScanIcon />
+      <span>{scanning ? tx("Scanning...", "扫描中...") : tx("Scan Project", "扫描项目")}</span>
+    </button>
+  );
+}
+
+function ChineseDescriptionSwitch({
+  checked,
+  disabled,
+  onChange
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onChange: () => void;
+}) {
+  const { tx } = useLanguage();
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      className="switch-control"
+      onClick={onChange}
+      disabled={disabled}
+    >
+      <span className="switch-track" aria-hidden="true">
+        <span className="switch-thumb" />
+      </span>
+      <span>{tx("Chinese descriptions", "中文说明")}</span>
+      <strong>{checked ? tx("On", "已开") : tx("Off", "已关")}</strong>
+    </button>
+  );
 }
 
 const bundleStrategyOptions: Array<{
@@ -542,6 +1065,24 @@ function formatPercent(value: number) {
     minimumFractionDigits: value > 0 && value < 0.1 ? 1 : 0,
     maximumFractionDigits: value > 0 && value < 0.1 ? 1 : 0
   }).format(value);
+}
+
+function buildSparklinePoints(values: number[], width = 132, height = 34) {
+  if (values.length === 0) {
+    return `0,${height} ${width},${height}`;
+  }
+
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, max);
+  const range = Math.max(max - min, 1);
+
+  return values
+    .map((value, index) => {
+      const x = values.length === 1 ? width : (index / (values.length - 1)) * width;
+      const y = height - ((value - min) / range) * (height - 6) - 3;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
 }
 
 function formatWasteScore(value: number) {
@@ -871,53 +1412,281 @@ function getSkillGovernanceTone(role: SkillSummary["governance"]["role"]) {
   }
 }
 
-function formatProposalStatus(status: OptimizationProposalStatus) {
+function formatReadableEnum(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatProposalStatus(status: OptimizationProposalStatus, mode: LanguageMode) {
   switch (status) {
     case "accepted":
-      return "Accepted";
+      return formatLocalizedText(mode, "Accepted", "已接受");
     case "dismissed":
-      return "Dismissed";
+      return formatLocalizedText(mode, "Dismissed", "已忽略");
     case "resolved":
-      return "Resolved";
+      return formatLocalizedText(mode, "Resolved", "已解决");
     default:
-      return "Open";
+      return formatLocalizedText(mode, "Open", "待处理");
   }
 }
 
-function formatProposalEvidenceType(type: OptimizationProposal["evidence"][number]["evidenceType"]) {
+function formatProposalEvidenceType(
+  type: OptimizationProposal["evidence"][number]["evidenceType"],
+  mode: LanguageMode
+) {
   switch (type) {
     case "daily_metric":
-      return "Daily Signal";
+      return formatLocalizedText(mode, "Daily Signal", "每日信号");
     case "weekly_metric":
-      return "Weekly Signal";
+      return formatLocalizedText(mode, "Weekly Signal", "每周信号");
     case "static_skill":
-      return "Static Signal";
+      return formatLocalizedText(mode, "Static Signal", "静态信号");
     default:
-      return type;
+      return formatReadableEnum(type);
   }
 }
 
-function formatProposalActionType(type: OptimizationProposal["actions"][number]["actionType"]) {
+function formatProposalActionType(
+  type: OptimizationProposal["actions"][number]["actionType"],
+  mode: LanguageMode
+) {
   switch (type) {
     case "created":
-      return "Created";
+      return formatLocalizedText(mode, "Created", "已创建");
     case "accepted":
-      return "Accepted";
+      return formatLocalizedText(mode, "Accepted", "已接受");
     case "dismissed":
-      return "Dismissed";
+      return formatLocalizedText(mode, "Dismissed", "已忽略");
     case "reopened":
-      return "Reopened";
+      return formatLocalizedText(mode, "Reopened", "已重新打开");
     case "resolved":
-      return "Resolved";
+      return formatLocalizedText(mode, "Resolved", "已解决");
     case "auto_resolved":
-      return "Auto Resolved";
+      return formatLocalizedText(mode, "Auto Resolved", "自动解决");
     default:
-      return type;
+      return formatReadableEnum(type);
   }
 }
 
-function formatSeverity(severity: OptimizationProposalSeverity) {
-  return severity.charAt(0).toUpperCase() + severity.slice(1);
+function formatProposalActorType(
+  actor: OptimizationProposal["actions"][number]["actorType"],
+  mode: LanguageMode
+) {
+  return actor === "system"
+    ? formatLocalizedText(mode, "System", "系统")
+    : formatLocalizedText(mode, "User", "用户");
+}
+
+function formatProposalType(type: string, mode: LanguageMode) {
+  switch (type) {
+    case "workflow":
+      return formatLocalizedText(mode, "Workflow", "工作流");
+    case "token_reduction":
+      return formatLocalizedText(mode, "Token Reduction", "Token 降本");
+    case "latency":
+      return formatLocalizedText(mode, "Latency", "延迟优化");
+    case "overlong_skill":
+      return formatLocalizedText(mode, "Overlong Skill", "超长 Skill");
+    case "high_latency":
+      return formatLocalizedText(mode, "High Latency", "高延迟");
+    case "high_failure_rate":
+      return formatLocalizedText(mode, "High Failure Rate", "高失败率");
+    case "high_token_cost":
+      return formatLocalizedText(mode, "High Token Cost", "高 Token 成本");
+    default:
+      return formatReadableEnum(type);
+  }
+}
+
+function formatProposalTitle(proposal: OptimizationProposal, mode: LanguageMode) {
+  if (mode !== "zh") {
+    return proposal.title;
+  }
+  if (proposal.proposalType === "high_latency") {
+    return `降低 ${proposal.skillName} 的执行延迟`;
+  }
+  if (proposal.proposalType === "high_token_cost") {
+    return `降低 ${proposal.skillName} 的 Token 成本`;
+  }
+  if (proposal.proposalType === "token_reduction") {
+    return `精简 ${proposal.skillName} 的上下文与 Token 使用`;
+  }
+  if (proposal.proposalType === "latency") {
+    return `优化 ${proposal.skillName} 的响应速度`;
+  }
+  if (proposal.proposalType === "workflow") {
+    return `完善 ${proposal.skillName} 的工作流程`;
+  }
+  if (proposal.proposalType === "overlong_skill") {
+    return `拆分 ${proposal.skillName} 的过长说明`;
+  }
+  if (proposal.proposalType === "high_failure_rate") {
+    return `降低 ${proposal.skillName} 的失败率`;
+  }
+  return `${proposal.skillName} 优化建议`;
+}
+
+function formatProposalSummary(proposal: OptimizationProposal, mode: LanguageMode) {
+  if (mode !== "zh") {
+    return proposal.summary;
+  }
+  if (proposal.proposalType === "high_latency") {
+    return "当前运行证据显示该技能响应偏慢，建议检查启动步骤、重复读取和等待链路。";
+  }
+  if (proposal.proposalType === "high_token_cost") {
+    return "当前运行证据显示该技能 Token 消耗偏高，建议压缩重复上下文并保留高价值步骤。";
+  }
+  if (proposal.proposalType === "token_reduction") {
+    return "当前证据显示首轮上下文读取偏多，建议把稳定规则拆到按需加载的引用中。";
+  }
+  if (proposal.proposalType === "latency") {
+    return "重复操作正在产生可避免的等待，建议复用已加载结果并减少重复计算。";
+  }
+  if (proposal.proposalType === "workflow") {
+    return "当前工作流仍有可简化或补强的环节，建议按实际运行证据调整步骤。";
+  }
+  if (proposal.proposalType === "overlong_skill") {
+    return "技能说明过长会增加首轮读取负担，建议保留核心入口并拆分详细参考。";
+  }
+  if (proposal.proposalType === "high_failure_rate") {
+    return "当前运行证据显示失败率偏高，建议检查前置条件、工具依赖与异常处理。";
+  }
+  return "根据当前项目的本地技能、运行和评测证据生成此优化建议。";
+}
+
+function formatProposalBenefit(proposal: OptimizationProposal, mode: LanguageMode) {
+  if (mode !== "zh") {
+    return proposal.estimatedBenefit;
+  }
+  return proposal.proposalType === "high_latency"
+    ? "更快获得首个有效结果，减少重复使用时的等待。"
+    : proposal.proposalType === "high_token_cost"
+      ? "在保留核心能力的同时降低持续运行成本。"
+      : proposal.proposalType === "token_reduction"
+        ? "减少首轮上下文与 Token 消耗，同时保留准确的按需检索路径。"
+        : proposal.proposalType === "latency"
+          ? "降低重复探索时的等待，让下探和切换更顺畅。"
+          : proposal.proposalType === "workflow"
+            ? "让执行路径更清楚、更稳定，也更容易评测和追踪。"
+            : proposal.proposalType === "overlong_skill"
+              ? "缩短首轮读取时间，并让维护和复用更简单。"
+              : proposal.proposalType === "high_failure_rate"
+                ? "提升运行成功率，减少重复尝试和人工排查。"
+                : "改善该技能在当前项目中的可用性、效率与可维护性。";
+}
+
+function formatProposalEvidenceSummary(
+  evidence: OptimizationProposal["evidence"][number],
+  mode: LanguageMode
+) {
+  if (mode !== "zh") {
+    return evidence.summary;
+  }
+  if (evidence.evidenceType === "weekly_metric") {
+    return "周运行指标显示该技能存在持续性的优化空间。";
+  }
+  if (evidence.evidenceType === "daily_metric") {
+    return "最近一天的运行指标触发了此优化建议。";
+  }
+  return "本地技能结构检查发现了需要关注的信号。";
+}
+
+function formatProposalActionSummary(
+  action: OptimizationProposal["actions"][number],
+  mode: LanguageMode
+) {
+  if (mode !== "zh") {
+    return action.summary;
+  }
+  if (action.actionType === "created") {
+    return "系统已根据本地技能与运行证据生成此建议。";
+  }
+  if (action.actionType === "accepted") {
+    return "用户已接受此优化建议。";
+  }
+  if (action.actionType === "resolved") {
+    return "系统已记录该建议的处理结果。";
+  }
+  return "用户已关闭此建议，记录仍保留在审计时间线中。";
+}
+
+function formatSeverity(severity: OptimizationProposalSeverity, mode: LanguageMode) {
+  switch (severity) {
+    case "high":
+      return formatLocalizedText(mode, "High", "高");
+    case "medium":
+      return formatLocalizedText(mode, "Medium", "中");
+    default:
+      return formatLocalizedText(mode, "Low", "低");
+  }
+}
+
+function formatProposalFilterStatus(status: OptimizationProposalStatus | "all", mode: LanguageMode) {
+  return status === "all"
+    ? formatLocalizedText(mode, "all proposals", "全部建议")
+    : formatProposalStatus(status, mode);
+}
+
+function formatApplyScope(scope: SkillApplyScope, mode: LanguageMode) {
+  switch (scope) {
+    case "system":
+      return formatLocalizedText(mode, "System Scope", "系统范围");
+    case "workspace":
+      return formatLocalizedText(mode, "Workspace Scope", "工作区范围");
+    case "folder":
+      return formatLocalizedText(mode, "Folder Scope", "文件夹范围");
+    default:
+      return formatLocalizedText(mode, "Project Scope", "项目范围");
+  }
+}
+
+function formatRemoteRiskLevel(level: RemoteSkillRiskLevel, mode: LanguageMode) {
+  switch (level) {
+    case "blocked":
+      return formatLocalizedText(mode, "Blocked", "已阻断");
+    case "high":
+      return formatLocalizedText(mode, "High Risk", "高风险");
+    case "medium":
+      return formatLocalizedText(mode, "Review", "需审查");
+    default:
+      return formatLocalizedText(mode, "Low Risk", "低风险");
+  }
+}
+
+function formatRemoteVerificationStatus(status: RemoteSkillVerificationStatus, mode: LanguageMode) {
+  switch (status) {
+    case "verified":
+      return formatLocalizedText(mode, "Verified", "已验证");
+    case "review_required":
+      return formatLocalizedText(mode, "Review Required", "需要复核");
+    default:
+      return formatLocalizedText(mode, "Unverified", "未验证");
+  }
+}
+
+function formatRemoteCheckStatus(status: RemoteSkillCheckStatus, mode: LanguageMode) {
+  switch (status) {
+    case "pass":
+      return formatLocalizedText(mode, "Pass", "通过");
+    case "warn":
+      return formatLocalizedText(mode, "Warning", "警告");
+    default:
+      return formatLocalizedText(mode, "Blocked", "已阻断");
+  }
+}
+
+function formatDiffPreviewStatus(
+  status: RemoteSkillCandidateDetail["diffPreview"]["status"] | null | undefined,
+  mode: LanguageMode
+) {
+  if (status === "preview_required") {
+    return formatLocalizedText(mode, "Required", "必需");
+  }
+  if (status === "not_available") {
+    return formatLocalizedText(mode, "Not Available", "不可用");
+  }
+  return formatLocalizedText(mode, "Pending", "待处理");
 }
 
 function formatValidationSeverity(severity: BundleValidationSeverity) {
@@ -1272,14 +2041,14 @@ function buildGraphTopologyScene(graph: GraphSelectionGraph | null): GraphTopolo
     return leftIndex - rightIndex;
   });
 
-  const nodeWidth = 176;
-  const nodeHeight = 64;
-  const laneGap = 52;
-  const rowGap = 28;
-  const leftPad = 44;
-  const rightPad = 44;
-  const topPad = 74;
-  const bottomPad = 36;
+  const nodeWidth = 142;
+  const nodeHeight = 50;
+  const laneGap = 34;
+  const rowGap = 16;
+  const leftPad = 34;
+  const rightPad = 34;
+  const topPad = 58;
+  const bottomPad = 28;
 
   const lanes = sortedNodeTypes.map((nodeType, index) => ({
     nodeType,
@@ -1407,6 +2176,10 @@ function mergeGraphSelectionGraph(
     nodes: [...nodeMap.values()],
     edges: [...edgeMap.values()]
   };
+}
+
+function getGraphNeighborhoodCacheKey(nodeId: string, generatedAt: string | null) {
+  return `${generatedAt ?? "no-snapshot"}::${nodeId}`;
 }
 
 function mergeGraphVisibleGraph(
@@ -1654,10 +2427,10 @@ function getAuditEventGraphHint(event: LocalAuditEvent, targetCount: number) {
       return null;
     }
     if (targetCount === 0) {
-      return "Approved roots appear in the graph after a successful scan refreshes the current snapshot.";
+      return "The selected project appears in the graph after a successful project scan refreshes the current snapshot.";
     }
     if (targetCount < rootCount) {
-      return `${targetCount}/${rootCount} approved root${rootCount === 1 ? "" : "s"} currently visible in the graph snapshot.`;
+      return `${targetCount}/${rootCount} selected project source${rootCount === 1 ? "" : "s"} currently visible in the graph snapshot.`;
     }
     return null;
   }
@@ -2039,26 +2812,28 @@ function StatusPill({ status }: { status: SkillRunSummary["status"] }) {
 }
 
 function ProposalStatusPill({ status }: { status: OptimizationProposalStatus }) {
-  const { t } = useLanguage();
+  const { mode } = useLanguage();
   return (
     <span className={`proposal-status-pill proposal-status-${status}`}>
-      {t(formatProposalStatus(status))}
+      {formatProposalStatus(status, mode)}
     </span>
   );
 }
 
 function SeverityPill({ severity }: { severity: OptimizationProposalSeverity }) {
-  const { t } = useLanguage();
-  return <span className={`severity-pill severity-${severity}`}>{t(formatSeverity(severity))}</span>;
+  const { mode } = useLanguage();
+  return <span className={`severity-pill severity-${severity}`}>{formatSeverity(severity, mode)}</span>;
 }
 
 function SkillTable({
   skills,
+  chineseAssistEnabled,
   selectedGraphNodeId,
   resolveGraphNode,
   onInspectGraphNode
 }: {
   skills: SkillSummary[];
+  chineseAssistEnabled: boolean;
   selectedGraphNodeId: string | null;
   resolveGraphNode: (nodeType: string, refId: string | null | undefined) => GraphNodeSummary | null;
   onInspectGraphNode: (node: GraphNodeSummary) => void;
@@ -2071,8 +2846,8 @@ function SkillTable({
         <h3>{t("No skills indexed yet")}</h3>
         <p>
           <T
-            en="Authorize one or more roots, then run a scan to populate the registry."
-            zh="授权一个或多个根目录后运行扫描，即可填充注册表。"
+            en="Bind a project folder, then run a project scan to populate the skill index."
+            zh="绑定项目目录并运行扫描后，即可填充技能索引。"
           />
         </p>
       </div>
@@ -2097,12 +2872,13 @@ function SkillTable({
             const governanceTone = getSkillGovernanceTone(skill.governance.role);
             const governanceSignal = formatSkillGovernanceSignal(skill.governance, mode);
             const governanceDataSummary = formatSkillGovernanceDataSummary(skill.governance, mode);
+            const displayDescription = formatSkillDescriptionForDisplay(skill, mode, chineseAssistEnabled);
 
             return (
               <tr key={skill.id}>
                 <td>
                   <strong>{skill.displayName}</strong>
-                  {skill.description ? <div className="muted">{skill.description}</div> : null}
+                  {displayDescription ? <div className="muted">{displayDescription}</div> : null}
                   <div className="registry-skill-meta">
                     <span>{skill.sourceType}</span>
                     <span>
@@ -2381,7 +3157,7 @@ function RecentRunsTable({
       <table>
         <thead>
           <tr>
-            <th>{tx("Skill", "Skill")}</th>
+            <th>{tx("Skill", "技能")}</th>
             <th>{tx("Status", "状态")}</th>
             <th>{tx("Started", "开始时间")}</th>
             <th>{tx("Latency", "延迟")}</th>
@@ -2423,7 +3199,7 @@ function RecentRunsTable({
                       targetNode={skillNode}
                       selectedNodeId={selectedGraphNodeId}
                       onInspectNode={onInspectGraphNode}
-                      label={tx("Skill", "Skill")}
+                      label={tx("Skill", "技能")}
                     />
                     <GraphPanelInspectAction
                       targetNode={modelNode}
@@ -2439,6 +3215,1339 @@ function RecentRunsTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ProjectLibraryPanel({
+  projects,
+  recentRuns,
+  telemetryReady,
+  repairFeedback,
+  onboardingLogs,
+  currentProjectRoot,
+  busyAction,
+  busy,
+  onBindProject,
+  onInspectProject,
+  onAnalyzeProject,
+  onScanProject,
+  onRepairProject,
+  onViewOnboardingLog,
+  onToggleMonitoring,
+  onUnbindProject
+}: {
+  projects: ManagedProject[];
+  recentRuns: SkillRunSummary[];
+  telemetryReady: boolean;
+  repairFeedback: ProjectRepairFeedback | null;
+  onboardingLogs: ProjectOnboardingLogEntry[];
+  currentProjectRoot: string;
+  busyAction: string | null;
+  busy: boolean;
+  onBindProject: () => void;
+  onInspectProject: (project: ManagedProject) => void;
+  onAnalyzeProject: (project: ManagedProject) => void;
+  onScanProject: (project: ManagedProject) => void;
+  onRepairProject: (project: ManagedProject) => void;
+  onViewOnboardingLog: (project: ManagedProject) => void;
+  onToggleMonitoring: (project: ManagedProject, enabled: boolean) => void;
+  onUnbindProject: (project: ManagedProject) => void;
+}) {
+  const { tx } = useLanguage();
+  const currentPath = normalizeProjectPath(currentProjectRoot);
+
+  return (
+    <article className="project-library-panel entity-project">
+      <div className="project-library-head">
+        <div>
+          <span className="os-module-kicker">{tx("Project Management", "项目管理")}</span>
+          <h3>{tx("Bound Projects", "已绑定项目")}</h3>
+          <p>
+            {tx(
+              "Bound projects are managed here. Scanning and analysis still run on one selected project only.",
+              "已绑定项目在这里统一管理。扫描和分析仍然一次只作用于一个选中项目。"
+            )}
+          </p>
+        </div>
+        <BindProjectButton busy={busy} onClick={onBindProject} />
+      </div>
+
+      {projects.length === 0 ? (
+        <div className="project-library-empty">
+          <strong>{tx("No bound projects yet", "还没有已绑定项目")}</strong>
+          <p>{tx("Bind a project folder to add it to the Project Library.", "绑定一个项目文件夹后，它会加入项目库。")}</p>
+        </div>
+      ) : (
+        <div className="project-library-table-shell">
+          <table className="project-library-table">
+            <colgroup>
+              <col style={{ width: "28%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "25%" }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>{tx("Project", "项目")}</th>
+                <th>{tx("Scan Time", "扫描时间")}</th>
+                <th>{tx("Skills", "技能")}</th>
+                <th>{tx("Onboarding Status", "接入状态")}</th>
+                <th>{tx("Monitor", "监控")}</th>
+                <th>{tx("Actions", "操作")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projects.map((project) => {
+                const isCurrent = project.path === currentPath;
+                const isScanningProject = busyAction === "project-scan" && isCurrent;
+                const projectRepairFeedback =
+                  repairFeedback?.projectPath === project.path ? repairFeedback : null;
+                const isRepairingProject = projectRepairFeedback?.status === "running";
+                const projectLogCount = onboardingLogs.filter((entry) => entry.projectPath === project.path).length;
+                const matchingWorkspaceRuns = recentRuns.filter(
+                  (run) =>
+                    run.workspaceRef &&
+                    isPathInsideProject(run.workspaceRef, project.path)
+                );
+                const hasExplicitSkillRun = matchingWorkspaceRuns.some((run) => run.confidenceScore > 0.68);
+                const latestMatchingWorkspaceRef = matchingWorkspaceRuns
+                  .slice()
+                  .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0]?.workspaceRef;
+                const detectedWorkspaceRef = latestMatchingWorkspaceRef ?? project.lastObservedWorkspaceRef;
+                const workspaceMatchesProject = Boolean(
+                  detectedWorkspaceRef && isPathInsideProject(detectedWorkspaceRef, project.path)
+                );
+                const onboardingStatus = projectRepairFeedback?.status === "running"
+                  ? "repairing"
+                  : projectRepairFeedback?.status === "completed"
+                    ? "repair-completed"
+                    : projectRepairFeedback?.status === "connected-awaiting-skill"
+                      ? "connected-awaiting-skill"
+                    : projectRepairFeedback?.status === "needs-action"
+                      ? "repair-needs-action"
+                      : projectRepairFeedback?.status === "connection-required"
+                        ? "repair-connection-required"
+                      : projectRepairFeedback?.status === "failed"
+                        ? "repair-failed"
+                  : isScanningProject
+                    ? "scanning"
+                  : !project.lastScanAt
+                    ? "pending"
+                    : (project.skillsFound ?? 0) === 0 || !project.workflowApplied
+                      ? "needs-repair"
+                      : !telemetryReady
+                        ? "needs-authorization"
+                      : hasExplicitSkillRun
+                        ? "healthy"
+                        : workspaceMatchesProject
+                          ? "connected-awaiting-skill"
+                          : "needs-connection";
+                const statusText =
+                  onboardingStatus === "repairing"
+                    ? tx("Repairing", "修正中")
+                    : onboardingStatus === "repair-completed"
+                      ? tx("Repair complete", "修正完成")
+                      : onboardingStatus === "repair-needs-action"
+                        ? tx("Action required", "需要确认")
+                        : onboardingStatus === "repair-connection-required"
+                          ? tx("Connection incomplete", "连接未完成")
+                        : onboardingStatus === "repair-failed"
+                          ? tx("Repair failed", "修正失败")
+                  : onboardingStatus === "scanning"
+                    ? tx("Checking", "检测中")
+                    : onboardingStatus === "pending"
+                      ? tx("Pending scan", "待扫描")
+                      : onboardingStatus === "needs-repair"
+                        ? tx("Needs repair", "需要修正")
+                        : onboardingStatus === "needs-authorization"
+                          ? tx("Needs authorization", "需要授权")
+                        : onboardingStatus === "connected-awaiting-skill"
+                          ? tx("Connected, awaiting Skill", "已连接待触发")
+                        : onboardingStatus === "healthy"
+                          ? tx("Running normally", "运行正常")
+                          : tx("Ready, not connected", "已配置待连接");
+                const statusDetail =
+                  projectRepairFeedback?.detail ??
+                  (onboardingStatus === "needs-repair"
+                    ? tx("Skills or workflow configuration is incomplete.", "技能或工作流配置不完整。")
+                    : onboardingStatus === "needs-authorization"
+                      ? tx("Runtime telemetry permission is required before connection checks can run.", "执行连接检查前，需要先授权运行遥测。")
+                    : onboardingStatus === "needs-connection"
+                      ? detectedWorkspaceRef
+                        ? tx(
+                            `Detected Codex directory: ${detectedWorkspaceRef}. Expected: ${project.path}.`,
+                            `检测到 Codex 目录：${detectedWorkspaceRef}；期望目录：${project.path}。`
+                          )
+                        : tx(
+                            `No Codex task directory was detected. Expected: ${project.path}.`,
+                            `尚未检测到 Codex 任务目录；期望目录：${project.path}。`
+                          )
+                      : onboardingStatus === "connected-awaiting-skill"
+                        ? tx(
+                            `Codex directory matches ${project.path}, but no explicit Skill invocation has been detected yet.`,
+                            `Codex 目录已匹配 ${project.path}，但尚未检测到明确的技能调用。`
+                          )
+                      : onboardingStatus === "healthy"
+                        ? tx("A matching workspace and explicit Skill evidence were detected.", "已检测到匹配的工作目录和明确 Skill 证据。")
+                        : tx("Run project detection to verify this binding.", "请运行项目检测以验证绑定。"))
+
+                return (
+                  <tr className={isCurrent ? "is-current" : undefined} key={project.id}>
+                    <td data-label={tx("Project", "项目")}>
+                      <div className="project-name-cell">
+                        <strong>{project.name}</strong>
+                        <span>{project.path}</span>
+                      </div>
+                    </td>
+                    <td data-label={tx("Scan Time", "扫描时间")}>{formatDateTime(project.lastScanAt)}</td>
+                    <td data-label={tx("Skills", "技能")}>
+                      <button
+                        type="button"
+                        className="project-skill-count-button"
+                        onClick={() => onInspectProject(project)}
+                      >
+                        {project.skillsFound == null ? tx("Not scanned", "未扫描") : formatCount(project.skillsFound)}
+                      </button>
+                    </td>
+                    <td data-label={tx("Onboarding Status", "接入状态")}>
+                      <div className="project-onboarding-status-cell">
+                        <span
+                          className={`project-status-pill status-${onboardingStatus}${isScanningProject ? " is-scanning" : ""}`}
+                          title={statusDetail}
+                        >
+                          {statusText}
+                        </span>
+                        {projectRepairFeedback ? <small>{projectRepairFeedback.detail}</small> : null}
+                        {!projectRepairFeedback && onboardingStatus === "needs-connection" ? (
+                          <small className="project-connection-workspace" title={statusDetail}>
+                            {detectedWorkspaceRef
+                              ? tx(
+                                  `Codex: ${getProjectDisplayName(detectedWorkspaceRef)} (mismatch)`,
+                                  `Codex：${getProjectDisplayName(detectedWorkspaceRef)}（不匹配）`
+                                )
+                              : tx("Codex directory not detected", "未检测到 Codex 目录")}
+                          </small>
+                        ) : null}
+                        {onboardingStatus === "connected-awaiting-skill" ? (
+                          <small className="project-connection-workspace is-matched" title={statusDetail}>
+                            {tx("Codex directory matched; Skill not triggered", "Codex 目录已匹配，技能待触发")}
+                          </small>
+                        ) : null}
+                        {onboardingStatus === "healthy" ? (
+                          <small className="project-connection-workspace is-matched">
+                            {tx("Codex directory matched", "Codex 目录已匹配")}
+                          </small>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="project-onboarding-log-link"
+                          onClick={() => onViewOnboardingLog(project)}
+                        >
+                          {tx("View log", "查看日志")} {projectLogCount > 0 ? `(${projectLogCount})` : ""}
+                        </button>
+                      </div>
+                    </td>
+                    <td data-label={tx("Monitor", "监控")}>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={project.monitoringEnabled}
+                        aria-label={project.monitoringEnabled ? tx("Turn monitoring off", "关闭项目监控") : tx("Turn monitoring on", "开启项目监控")}
+                        title={project.monitoringEnabled ? tx("Monitoring is on", "项目监控已开启") : tx("Monitoring is off", "项目监控已关闭")}
+                        className="switch-control table-switch"
+                        onClick={() => onToggleMonitoring(project, !project.monitoringEnabled)}
+                        disabled={busy}
+                      >
+                        <span className="switch-track" aria-hidden="true">
+                          <span className="switch-thumb" />
+                        </span>
+                      </button>
+                    </td>
+                    <td data-label={tx("Actions", "操作")}>
+                      <div className="project-library-actions">
+                        <button
+                          type="button"
+                          className="project-table-icon-action"
+                          aria-label={tx("View project detail", "查看项目详情")}
+                          title={tx("View project detail", "查看项目详情")}
+                          onClick={() => onInspectProject(project)}
+                          disabled={busy}
+                        >
+                          <ViewIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="project-table-icon-action"
+                          aria-label={tx("Open analysis report", "打开分析报告")}
+                          title={tx("Open analysis report", "打开分析报告")}
+                          onClick={() => onAnalyzeProject(project)}
+                          disabled={busy}
+                        >
+                          <AnalysisIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="project-table-icon-action primary"
+                          aria-label={tx("Scan Project", "扫描项目")}
+                          title={tx("Scan Project", "扫描项目")}
+                          onClick={() => onScanProject(project)}
+                          disabled={busy}
+                        >
+                          <ScanIcon />
+                        </button>
+                        {onboardingStatus !== "healthy" ? (
+                          <button
+                            type="button"
+                            className={`project-table-icon-action repair${isRepairingProject ? " is-loading" : ""}`}
+                            aria-label={isRepairingProject
+                              ? tx("Project repair in progress", "项目修正进行中")
+                              : tx("Detect and repair project", "检测并修正项目")}
+                            aria-busy={isRepairingProject}
+                            title={isRepairingProject
+                              ? tx("Project repair in progress", "项目修正进行中")
+                              : tx("Detect and repair project", "检测并修正项目")}
+                            onClick={() => onRepairProject(project)}
+                            disabled={busy}
+                          >
+                            {isRepairingProject ? <span className="project-action-spinner" aria-hidden="true" /> : <RepairIcon />}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="project-table-icon-action danger"
+                          aria-label={tx("Unbind Project", "解绑项目")}
+                          title={tx("Unbind Project", "解绑项目")}
+                          onClick={() => onUnbindProject(project)}
+                          disabled={busy}
+                        >
+                          <TrashIcon />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ProjectHeartbeatChart({
+  entries,
+  latestRunCount,
+  totalTokens
+}: {
+  entries: ProjectHeartbeatEntry[];
+  latestRunCount: number;
+  totalTokens: number;
+}) {
+  const { tx } = useLanguage();
+  const [hoveredPointId, setHoveredPointId] = useState<string | null>(null);
+  const visibleEntries = entries.slice(-24);
+  const width = 360;
+  const height = 118;
+  const chartPaddingX = 30;
+  const chartPaddingTop = 18;
+  const chartPaddingBottom = 24;
+  const entryValue = (entry: ProjectHeartbeatEntry) =>
+    Math.max(entry.importedRuns + entry.updatedRuns, entry.totalRuns, 1);
+  const maxValue = Math.max(1, latestRunCount, ...visibleEntries.map(entryValue));
+  const points = visibleEntries.map((entry, index) => {
+    const x =
+      visibleEntries.length <= 1
+        ? width - chartPaddingX
+        : chartPaddingX + (index / (visibleEntries.length - 1)) * (width - chartPaddingX * 2);
+    const value = entryValue(entry);
+    const y =
+      height -
+      chartPaddingBottom -
+      (value / maxValue) * (height - chartPaddingTop - chartPaddingBottom);
+    return {
+      entry,
+      value,
+      x,
+      y: Number.isFinite(y) ? y : height - chartPaddingBottom
+    };
+  });
+  const polyline = points.map((point) => `${point.x},${point.y}`).join(" ");
+  const successCount = visibleEntries.filter((entry) => entry.tone === "success").length;
+  const warningCount = visibleEntries.filter((entry) => entry.tone === "warning").length;
+  const errorCount = visibleEntries.filter((entry) => entry.tone === "error").length;
+  const latestEntry = visibleEntries.length > 0 ? visibleEntries[visibleEntries.length - 1] : null;
+  const latestValue = latestEntry ? entryValue(latestEntry) : 0;
+  const peakValue = Math.max(0, ...visibleEntries.map(entryValue));
+  const firstEntry = visibleEntries[0] ?? null;
+  const hoveredPoint =
+    (hoveredPointId ? points.find((point) => point.entry.id === hoveredPointId) : null) ?? null;
+  const timeRangeLabel =
+    firstEntry && latestEntry
+      ? `${formatDateTime(firstEntry.observedAt)} - ${formatDateTime(latestEntry.observedAt)}`
+      : "n/a";
+
+  return (
+    <div className="project-heartbeat-chart-panel">
+      <div className="project-heartbeat-chart-head">
+        <div>
+          <strong>{tx("Heartbeat Trend", "心跳趋势")}</strong>
+          <small>
+            {latestEntry
+              ? tx(
+                  "Shows recent project Skill calls and runtime refresh pulses.",
+                  "展示最近的项目 Skill 调用和运行证据刷新脉冲。"
+                )
+              : tx("No runtime heartbeat yet", "还没有运行心跳记录")}
+          </small>
+        </div>
+        <div className="project-heartbeat-chart-legend">
+          <span className="tone-success">{tx("OK", "正常")} {successCount}</span>
+          <span className="tone-warning">{tx("Warn", "提醒")} {warningCount}</span>
+          <span className="tone-error">{tx("Error", "异常")} {errorCount}</span>
+        </div>
+      </div>
+      <div className="project-heartbeat-chart-metrics" aria-label={tx("Heartbeat metrics", "心跳指标")}>
+        <div>
+          <span>{tx("Latest Pulse", "最近脉冲")}</span>
+          <strong>{formatCount(latestValue)}</strong>
+        </div>
+        <div>
+          <span>{tx("Peak Pulse", "峰值脉冲")}</span>
+          <strong>{formatCount(peakValue)}</strong>
+        </div>
+        <div>
+          <span>{tx("Recent Points", "近期点位")}</span>
+          <strong>{formatCount(visibleEntries.length)}</strong>
+        </div>
+        <div>
+          <span>{tx("Total Runs", "总调用")}</span>
+          <strong>{formatCount(latestRunCount)}</strong>
+        </div>
+        <div>
+          <span>{tx("Total Tokens", "总 Token")}</span>
+          <strong>{formatCount(totalTokens)}</strong>
+        </div>
+      </div>
+      {visibleEntries.length > 0 ? (
+        <div className="project-heartbeat-chart-frame" onMouseLeave={() => setHoveredPointId(null)}>
+          <svg
+            className="project-heartbeat-chart"
+            viewBox={`0 0 ${width} ${height}`}
+            role="img"
+            aria-label={tx("Recent heartbeat status chart", "最近心跳状态图")}
+          >
+            <line
+              x1={chartPaddingX}
+              y1={height - chartPaddingBottom}
+              x2={width - chartPaddingX}
+              y2={height - chartPaddingBottom}
+            />
+            <line x1={chartPaddingX} y1={chartPaddingTop} x2={chartPaddingX} y2={height - chartPaddingBottom} />
+            <line
+              className="grid-line"
+              x1={chartPaddingX}
+              y1={chartPaddingTop}
+              x2={width - chartPaddingX}
+              y2={chartPaddingTop}
+            />
+            <text x={4} y={chartPaddingTop + 4}>{formatCount(maxValue)}</text>
+            <text x={12} y={height - chartPaddingBottom + 4}>0</text>
+            <polyline points={polyline} />
+            {points.map((point) => (
+              <circle
+                key={point.entry.id}
+                className={`tone-${point.entry.tone}${hoveredPointId === point.entry.id ? " active" : ""}`}
+                cx={point.x}
+                cy={point.y}
+                r={hoveredPointId === point.entry.id ? 5.5 : 4}
+                tabIndex={0}
+                onFocus={() => setHoveredPointId(point.entry.id)}
+                onMouseEnter={() => setHoveredPointId(point.entry.id)}
+              />
+            ))}
+          </svg>
+          <div className="project-heartbeat-chart-range">
+            <span>{timeRangeLabel}</span>
+            <span>{tx("Value = calls or imported/updated runs per pulse", "数值 = 单次调用或本次导入/更新运行数")}</span>
+          </div>
+          {hoveredPoint ? (
+            <div
+              className="project-heartbeat-tooltip"
+              style={{
+                left: `${(hoveredPoint.x / width) * 100}%`,
+                top: `${Math.max(10, hoveredPoint.y - 6)}px`
+              }}
+            >
+              <strong>{formatDateTime(hoveredPoint.entry.observedAt)}</strong>
+              <span>{tx("Value", "数值")} {formatCount(hoveredPoint.value)} · {hoveredPoint.entry.status}</span>
+              <p>{hoveredPoint.entry.message}</p>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="project-heartbeat-chart-empty">
+          {tx("Refresh runtime evidence once to start the heartbeat timeline.", "刷新一次运行证据后，这里会开始记录心跳时间线。")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function buildProjectRunHeartbeatEntries(
+  projectPath: string,
+  projectRuns: SkillRunSummary[],
+  formatMessage: (run: SkillRunSummary) => string
+): ProjectHeartbeatEntry[] {
+  return projectRuns.map((run) => ({
+    id: `${projectPath}:run:${run.runId}`,
+    projectPath,
+    observedAt: run.finishedAt ?? run.startedAt,
+    tone: run.status === "failed" ? "error" : run.status === "completed" ? "success" : "info",
+    status: run.status === "failed" ? "no_importable_runs" : "imported",
+    importedRuns: 0,
+    updatedRuns: 0,
+    totalRuns: 1,
+    sourceCount: 0,
+    message: formatMessage(run)
+  }));
+}
+
+function SkillRunDetailModal({
+  skill,
+  runs,
+  loading,
+  onClose
+}: {
+  skill: SkillSummary;
+  runs: SkillRunSummary[];
+  loading: boolean;
+  onClose: () => void;
+}) {
+  const { tx } = useLanguage();
+  const completedRuns = runs.filter((run) => run.status === "completed").length;
+  const totalToolCalls = runs.reduce((sum, run) => sum + run.toolCallCount, 0);
+  const visibleRunTokens = runs.reduce((sum, run) => sum + run.totalTokens, 0);
+  const totalTokens = Math.max(skill.runtime.totalTokens, visibleRunTokens);
+  const latestRunAt = runs[0]?.startedAt ?? null;
+
+  return (
+    <div className="skill-run-modal-backdrop" role="presentation" onClick={onClose}>
+      <article
+        className="skill-run-modal entity-skill"
+        role="dialog"
+        aria-modal="true"
+        aria-label={tx("Skill run details", "技能调用详情")}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="skill-run-modal-head">
+          <div>
+            <span className="os-module-kicker">{tx("Run Details", "调用详情")}</span>
+            <h2>{skill.displayName}</h2>
+            <p>{skill.sourcePath}</p>
+          </div>
+          <button type="button" className="icon-button" aria-label={tx("Close", "关闭")} onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <div className="skill-run-modal-metrics">
+          <div>
+            <span>{tx("Calls", "调用")}</span>
+            <strong>{loading ? "..." : formatCount(runs.length)}</strong>
+          </div>
+          <div>
+            <span>{tx("Success", "成功")}</span>
+            <strong>{loading || runs.length === 0 ? "n/a" : `${Math.round((completedRuns / runs.length) * 100)}%`}</strong>
+          </div>
+          <div>
+            <span>{tx("Tool Calls", "工具调用")}</span>
+            <strong>{loading ? "..." : formatCount(totalToolCalls)}</strong>
+          </div>
+          <div>
+            <span>{tx("Tokens", "Token")}</span>
+            <strong>{loading ? "..." : formatCount(totalTokens)}</strong>
+          </div>
+          <div>
+            <span>{tx("Latest", "最近")}</span>
+            <strong>{formatDateTime(latestRunAt)}</strong>
+          </div>
+        </div>
+
+        <div className="skill-run-detail-table-shell">
+          <table className="skill-run-detail-table">
+            <thead>
+              <tr>
+                <th>{tx("Time", "时间")}</th>
+                <th>{tx("Status", "状态")}</th>
+                <th>{tx("Duration", "耗时")}</th>
+                <th>{tx("Tools", "工具")}</th>
+                <th>{tx("Tokens", "Token")}</th>
+                <th>{tx("Model", "模型")}</th>
+                <th>{tx("Source", "来源")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => (
+                <tr key={run.runId}>
+                  <td>
+                    <strong>{formatDateTime(run.startedAt)}</strong>
+                    <span>{run.finishedAt ? `${tx("Finished", "结束")} ${formatDateTime(run.finishedAt)}` : tx("Running", "运行中")}</span>
+                  </td>
+                  <td><StatusPill status={run.status} /></td>
+                  <td>{formatDuration(run.durationMs)}</td>
+                  <td>{formatCount(run.toolCallCount)}</td>
+                  <td>{formatCount(run.totalTokens)}</td>
+                  <td>{run.modelName ?? "n/a"}</td>
+                  <td>
+                    <strong>{run.captureMode}</strong>
+                    <span>{run.sourceType}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {loading ? (
+            <p className="skill-run-detail-empty">{tx("Loading run details...", "正在加载调用详情...")}</p>
+          ) : runs.length === 0 ? (
+            <p className="skill-run-detail-empty">{tx("No run detail has been imported for this Skill yet.", "这个技能还没有导入调用明细。")}</p>
+          ) : null}
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function ProjectProfileSummaryPanel({ profile }: { profile: ProjectProfileSummary | null }) {
+  const { tx } = useLanguage();
+
+  if (!profile) {
+    return (
+      <section className="project-profile-summary project-profile-loading">
+        <strong>{tx("Loading project Profile...", "正在读取项目 Profile...")}</strong>
+      </section>
+    );
+  }
+
+  const profileStatus =
+    profile.status === "ready"
+      ? profile.evidenceState === "changed"
+        ? tx("Refresh needed", "需要刷新")
+        : profile.evidenceState === "fresh"
+          ? tx("Ready · Fresh", "已就绪 · 新鲜")
+          : tx("Ready · Capture pending", "已就绪 · 待捕获")
+      : profile.status === "pending_analysis"
+        ? tx("Analysis pending", "待项目分析")
+        : profile.status === "invalid"
+          ? tx("Invalid Profile", "Profile 配置无效")
+          : tx("Not created", "未创建");
+  const profileTone =
+    profile.status === "ready" && profile.evidenceState === "fresh"
+      ? "ready"
+      : profile.status === "ready"
+        ? "attention"
+        : "pending";
+  const stackItems = [
+    ...profile.detectedLanguages,
+    ...profile.frameworks,
+    ...profile.runtimes
+  ].filter((item, index, items) => items.indexOf(item) === index);
+  const commandEntries = Object.entries(profile.commands).filter(([, values]) => values.length > 0);
+  const conventionEntries = Object.entries(profile.conventions).filter(([, values]) => values.length > 0);
+
+  return (
+    <section className="project-profile-summary">
+      <div className="project-profile-head">
+        <div>
+          <span className="os-module-kicker">{tx("Project Profile", "项目 Profile")}</span>
+          <strong>{profile.projectName ?? tx("Project facts", "项目事实")}</strong>
+          <small>
+            {tx(
+              "Cached project facts reused by the Skills Workflow.",
+              "供 skills-workflow 复用的项目事实缓存。"
+            )}
+          </small>
+        </div>
+        <span className={`project-profile-status tone-${profileTone}`}>{profileStatus}</span>
+      </div>
+
+      <div className="project-profile-meta-grid">
+        <div>
+          <span>{tx("Declared stack", "声明技术栈")}</span>
+          <strong>{profile.declaredStack ?? tx("Not analyzed", "尚未分析")}</strong>
+        </div>
+        <div>
+          <span>{tx("Evidence", "证据")}</span>
+          <strong>{profile.evidenceCount ? formatCount(profile.evidenceCount) : "-"}</strong>
+          <small>{formatDateTime(profile.capturedAt ?? profile.lastCheckedAt)}</small>
+        </div>
+        <div>
+          <span>{tx("Decisions", "决策记忆")}</span>
+          <strong>{formatCount(profile.activeDecisionCount)} / {formatCount(profile.decisionCount)}</strong>
+          <small>{tx("active / total", "有效 / 总数")}</small>
+        </div>
+      </div>
+
+      {stackItems.length > 0 ? (
+        <div className="project-profile-chip-group">
+          <span>{tx("Stack signals", "技术栈信号")}</span>
+          <div>{stackItems.slice(0, 8).map((item) => <span key={item}>{item}</span>)}</div>
+        </div>
+      ) : null}
+
+      {profile.modules.length > 0 ? (
+        <div className="project-profile-modules">
+          <div className="project-profile-subhead">
+            <strong>{tx("Architecture modules", "架构模块")}</strong>
+            <span>{formatCount(profile.modules.length)}</span>
+          </div>
+          <div className="project-profile-module-list">
+            {profile.modules.slice(0, 4).map((module) => (
+              <div key={`${module.name}-${module.entry ?? "module"}`}>
+                <strong>{module.name}</strong>
+                <span>{module.responsibility ?? module.entry ?? tx("No summary", "暂无摘要")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {(commandEntries.length > 0 || conventionEntries.length > 0) ? (
+        <div className="project-profile-footer-grid">
+          <div>
+            <span>{tx("Known commands", "已知命令")}</span>
+            <p>
+              {commandEntries.slice(0, 3).map(([name, values]) => `${name}: ${values[0]}`).join(" · ") ||
+                tx("Not recorded", "未记录")}
+            </p>
+          </div>
+          <div>
+            <span>{tx("Unknowns", "待确认项")}</span>
+            <p>
+              {profile.unknowns.slice(0, 2).join(" · ") || tx("No open unknowns recorded", "没有记录待确认项")}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {profile.changedEvidence.length > 0 ? (
+        <div className="project-profile-change-notice">
+          <strong>{tx("Changed evidence", "发生变化的证据")}</strong>
+          <span>{profile.changedEvidence.slice(0, 3).join(" · ")}</span>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ProjectAssetDetailPanel({
+  project,
+  profile,
+  currentProjectRoot,
+  localSkills,
+  recentRuns,
+  heartbeatEntries,
+  telemetryMode,
+  backgroundWatchAllowed,
+  runtimeRefreshResult,
+  busyAction,
+  busy,
+  onScanProject,
+  onRefreshRuntimeEvidence,
+  onEnableTelemetry,
+  onToggleMonitoring,
+  onUpdateMonitoringInterval,
+  onRenameProject,
+  onClose
+}: {
+  project: ManagedProject | null;
+  profile: ProjectProfileSummary | null;
+  currentProjectRoot: string;
+  localSkills: SkillSummary[];
+  recentRuns: SkillRunSummary[];
+  heartbeatEntries: ProjectHeartbeatEntry[];
+  telemetryMode: TelemetryMode | "missing";
+  backgroundWatchAllowed: boolean;
+  runtimeRefreshResult: ProjectRuntimeEvidenceRefreshResult | null;
+  busyAction: string | null;
+  busy: boolean;
+  onScanProject: (project: ManagedProject) => void;
+  onRefreshRuntimeEvidence: (project: ManagedProject) => void;
+  onEnableTelemetry: (project: ManagedProject) => void;
+  onToggleMonitoring: (project: ManagedProject, enabled: boolean) => void;
+  onUpdateMonitoringInterval: (project: ManagedProject, intervalMs: number) => void;
+  onRenameProject: (project: ManagedProject, name: string) => void;
+  onClose?: () => void;
+}) {
+  const { tx } = useLanguage();
+  const [projectNameDraft, setProjectNameDraft] = useState(project?.name ?? "");
+  const [lastHeartbeatAt, setLastHeartbeatAt] = useState<string | null>(project?.lastScanAt ?? null);
+  const projectPath = normalizeProjectPath(project?.path ?? "");
+  const visibleSkills = projectPath
+    ? localSkills.filter((skill) => isPathInsideProject(skill.sourcePath, projectPath))
+    : [];
+  const isLoadedProject = visibleSkills.length > 0 || Boolean(project && project.path === normalizeProjectPath(currentProjectRoot));
+  const projectSkillIds = new Set(visibleSkills.map((skill) => skill.id));
+  const projectRuns = visibleSkills.length > 0
+    ? recentRuns.filter((run) => projectSkillIds.has(run.skillId))
+    : [];
+  const projectTotalRuns = visibleSkills.reduce((sum, skill) => sum + skill.runtime.totalRuns, 0);
+  const projectTotalTokens = visibleSkills.reduce((sum, skill) => sum + skill.runtime.totalTokens, 0);
+  const projectCompletedRuns = projectRuns.filter((run) => run.status === "completed").length;
+  const projectSuccessRate = projectRuns.length > 0 ? `${Math.round((projectCompletedRuns / projectRuns.length) * 100)}%` : "n/a";
+  const workflowStatus = project?.workflowApplied
+    ? tx("Recommended workflow applied", "推荐工作流已应用")
+    : tx("Workflow not applied", "未应用工作流");
+  const projectRuntimeResult =
+    runtimeRefreshResult?.projectRoot === projectPath ? runtimeRefreshResult : null;
+  const detectedWorkspaceRef = getLatestObservedWorkspace(projectRuntimeResult) ?? project?.lastObservedWorkspaceRef ?? null;
+  const workspaceMatchesProject = Boolean(
+    detectedWorkspaceRef && isPathInsideProject(detectedWorkspaceRef, projectPath)
+  );
+  const connectionCheckedAt = projectRuntimeResult?.refreshedAt ?? project?.lastConnectionCheckAt ?? null;
+  const projectHeartbeatEntries = heartbeatEntries.filter((entry) => entry.projectPath === projectPath);
+  const telemetryReady = telemetryMode !== "missing" && telemetryMode !== "disabled";
+  const runtimeRefreshBusy = busyAction === "runtime-refresh";
+  const projectScanBusy = busyAction === "project-scan";
+  const skillCount = isLoadedProject
+    ? visibleSkills.length
+    : project?.skillsFound ?? 0;
+  const projectRunTimes = projectRuns
+    .map((run) => run.finishedAt ?? run.startedAt)
+    .filter(Boolean)
+    .sort();
+  const latestProjectRunAt = projectRunTimes.length > 0 ? projectRunTimes[projectRunTimes.length - 1] : null;
+  const projectRunHeartbeatEntries = buildProjectRunHeartbeatEntries(projectPath, projectRuns, (run) =>
+    tx(
+      `${run.skillName} · ${run.status} · ${formatCount(run.toolCallCount)} tool call(s)`,
+      `${run.skillName} · ${run.status} · ${formatCount(run.toolCallCount)} 次工具调用`
+    )
+  );
+  const combinedHeartbeatEntries = [...projectRunHeartbeatEntries, ...projectHeartbeatEntries].sort(
+    (left, right) => new Date(left.observedAt).getTime() - new Date(right.observedAt).getTime()
+  );
+  const heartbeatObservedAt = latestProjectRunAt ?? project?.lastScanAt ?? lastHeartbeatAt;
+  const heartbeatIntervalLabel =
+    project?.monitoringIntervalMs === 30000
+      ? tx("30 seconds", "30 秒")
+      : project?.monitoringIntervalMs === 120000
+        ? tx("2 minutes", "2 分钟")
+      : tx("1 minute", "1 分钟");
+  const runtimeDiagnostics = (() => {
+    if (!project) {
+      return [];
+    }
+    if (skillCount === 0) {
+      return [
+        {
+          tone: "warning",
+          title: tx("No project Skills indexed", "尚未索引项目技能"),
+          detail: tx(
+            "Scan this project first. If the folder is empty, apply the recommended skills-workflow.",
+            "请先扫描该项目。如果目录为空，可应用推荐技能工作流。"
+          )
+        }
+      ];
+    }
+    if (!telemetryReady) {
+      return [
+        {
+          tone: "warning",
+          title: tx("Runtime telemetry is not enabled", "运行遥测未开启"),
+          detail: tx(
+            `${skillCount} Skill(s) were indexed, but usage counts cannot refresh until telemetry is enabled.`,
+            `已索引 ${skillCount} 个技能，但开启遥测前无法刷新调用次数。`
+          )
+        }
+      ];
+    }
+    if (detectedWorkspaceRef && !workspaceMatchesProject) {
+      return [
+        {
+          tone: "warning",
+          title: tx("Codex directory does not match", "Codex 目录不匹配"),
+          detail: tx(
+            `Detected ${detectedWorkspaceRef}; expected ${projectPath}. Start a new Codex task from the expected directory, then refresh runtime evidence.`,
+            `检测目录：${detectedWorkspaceRef}；期望目录：${projectPath}。请从期望目录新建 Codex 任务，再刷新运行证据。`
+          )
+        }
+      ];
+    }
+    if (projectRuntimeResult?.errors.length) {
+      return [
+        {
+          tone: "warning",
+          title: tx("Runtime import needs attention", "运行导入需要处理"),
+          detail: projectRuntimeResult.errors[0]
+        }
+      ];
+    }
+    if (projectRuntimeResult?.status === "no_ready_sources") {
+      return [
+        {
+          tone: "warning",
+          title: tx("No readable local session source", "没有可读取的本地会话来源"),
+          detail: tx(
+            "Codex or Claude Code session logs were not found. Open a session in this project, then refresh again.",
+            "未找到 Codex 或 Claude Code 会话日志。请在该项目中打开会话后再次刷新。"
+          )
+        }
+      ];
+    }
+    if (projectRuntimeResult?.status === "no_importable_runs") {
+      return [
+        {
+          tone: "warning",
+          title: tx("No project Skill run detected", "未检测到项目技能运行"),
+          detail: tx(
+            "The sessions were readable, but no imported event matched this project and its local Skills. Check whether Codex loaded or referenced the project Skill names.",
+            "会话可读取，但没有事件同时命中该项目和本地技能。请检查 Codex 是否加载或引用了项目技能名称。"
+          )
+        }
+      ];
+    }
+    if (projectRuntimeResult?.status === "connected_no_skill_runs") {
+      return [
+        {
+          tone: "info",
+          title: tx("Codex directory connected", "Codex 目录已连接"),
+          detail: tx(
+            "A Codex session matches this project. No project Skill invocation has been detected yet.",
+            "已检测到该项目的 Codex 会话，但尚未检测到项目技能调用。"
+          )
+        }
+      ];
+    }
+    if (projectTotalRuns === 0) {
+      return [
+        {
+          tone: "info",
+          title: tx("Runtime evidence not imported yet", "尚未导入运行证据"),
+          detail: tx(
+            "Refresh runtime evidence to read local Codex sessions for this project.",
+            "刷新运行证据，读取该项目对应的本地 Codex 会话。"
+          )
+        }
+      ];
+    }
+    return [
+      {
+        tone: "success",
+        title: tx("Runtime evidence is linked", "运行证据已关联"),
+        detail: tx(
+          `${projectTotalRuns} run(s) are linked to this project's Skills.`,
+          `已有 ${projectTotalRuns} 条运行关联到该项目技能。`
+        )
+      }
+    ];
+  })();
+
+  useEffect(() => {
+    setProjectNameDraft(project?.name ?? "");
+    setLastHeartbeatAt(project?.lastScanAt ?? null);
+  }, [project?.id, project?.name]);
+
+  useEffect(() => {
+    setLastHeartbeatAt(project?.lastScanAt ?? null);
+  }, [project?.lastScanAt]);
+
+  function refreshProjectHeartbeat() {
+    if (!project || busy) {
+      return;
+    }
+    setLastHeartbeatAt(new Date().toISOString());
+    onRefreshRuntimeEvidence(project);
+  }
+
+  return (
+    <article className="project-asset-detail-panel entity-project">
+      <div className="project-asset-detail-head">
+        <div>
+          <span className="os-module-kicker">{tx("Project Detail", "项目详情")}</span>
+          <h3>{project ? project.name : tx("Select a project", "选择一个项目")}</h3>
+          <p>
+            {project
+              ? tx("Review this project's collected Skills, workflow state, and heartbeat summary.", "查看这个项目已收集的技能、工作流状态和心跳摘要。")
+              : tx("Click the Skills column or View action in the bound project table.", "点击已绑定项目表里的技能列或查看按钮。")}
+          </p>
+        </div>
+        {project ? (
+          <div className="project-asset-detail-actions">
+            <button type="button" className="primary" disabled={busy} onClick={() => onScanProject(project)}>
+              {projectScanBusy ? tx("Scanning...", "扫描中...") : tx("Scan Project", "扫描项目")}
+            </button>
+            {onClose ? (
+              <button type="button" className="icon-button" aria-label={tx("Close project detail", "关闭项目详情")} onClick={onClose}>
+                ×
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {project ? (
+        <>
+          <ProjectProfileSummaryPanel profile={profile} />
+          <form
+            className="project-detail-rename-panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onRenameProject(project, projectNameDraft);
+            }}
+          >
+            <label>
+              <span>{tx("Display Name", "显示名称")}</span>
+              <input
+                value={projectNameDraft}
+                onChange={(event) => setProjectNameDraft(event.currentTarget.value)}
+                placeholder={tx("Project display name", "项目显示名称")}
+              />
+            </label>
+            <button type="submit" disabled={busy || !projectNameDraft.trim()}>
+              {tx("Save Name", "保存名称")}
+            </button>
+          </form>
+          <div className="project-heartbeat-panel">
+            <div className="project-heartbeat-status">
+              <span className={`heartbeat-dot${project.monitoringEnabled ? " live" : ""}`} aria-hidden="true" />
+              <div>
+                <strong>{tx("Heartbeat Monitor", "心跳监控")}</strong>
+                <small>
+                  {tx(
+                    "Imports local Codex or Claude session evidence for this project.",
+                    "导入该项目对应的本地 Codex 或 Claude 会话证据。"
+                  )}
+                </small>
+              </div>
+            </div>
+            <div className="project-heartbeat-metrics">
+              <div>
+                <span>{tx("Latest data", "最新数据")}</span>
+                <strong>{formatDateTime(heartbeatObservedAt)}</strong>
+              </div>
+              <div>
+                <span>{tx("Interval", "刷新间隔")}</span>
+                <strong>{heartbeatIntervalLabel}</strong>
+              </div>
+              <div>
+                <span>{tx("Runs", "运行")}</span>
+                <strong>{formatCount(projectTotalRuns)}</strong>
+              </div>
+              <div>
+                <span>{tx("Tokens", "Token")}</span>
+                <strong>{formatCount(projectTotalTokens)}</strong>
+              </div>
+              <div>
+                <span>{tx("Mode", "模式")}</span>
+                <strong>{telemetryMode}</strong>
+              </div>
+            </div>
+            <div className="project-heartbeat-controls">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={Boolean(project.monitoringEnabled)}
+                className="switch-control compact"
+                onClick={() => onToggleMonitoring(project, !project.monitoringEnabled)}
+                disabled={busy || !telemetryReady || !backgroundWatchAllowed}
+              >
+                <span className="switch-track" aria-hidden="true">
+                  <span className="switch-thumb" />
+                </span>
+                <span>{tx("Auto refresh", "自动刷新")}</span>
+                <strong>{project.monitoringEnabled ? tx("On", "已开") : tx("Off", "已关")}</strong>
+              </button>
+              <label className="project-heartbeat-select">
+                <span>{tx("Refresh every", "刷新时间")}</span>
+                <select
+                  value={project.monitoringIntervalMs}
+                  onChange={(event) => onUpdateMonitoringInterval(project, Number(event.currentTarget.value))}
+                  disabled={busy}
+                >
+                  <option value={30000}>{tx("30 seconds", "30 秒")}</option>
+                  <option value={60000}>{tx("1 minute", "1 分钟")}</option>
+                  <option value={120000}>{tx("2 minutes", "2 分钟")}</option>
+                </select>
+              </label>
+              <button type="button" className="primary" disabled={busy} onClick={refreshProjectHeartbeat}>
+                {runtimeRefreshBusy ? tx("Refreshing...", "刷新中...") : tx("Refresh Runtime", "刷新运行")}
+              </button>
+              {!telemetryReady ? (
+                <button type="button" disabled={busy} onClick={() => onEnableTelemetry(project)}>
+                  {tx("Enable Telemetry", "开启遥测")}
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className={`project-connection-check${workspaceMatchesProject ? " is-matched" : " needs-connection"}`}>
+            <div>
+              <span>{tx("Codex connection", "Codex 连接检测")}</span>
+              <strong>
+                {workspaceMatchesProject
+                  ? tx("Project directory matched", "项目目录已匹配")
+                  : detectedWorkspaceRef
+                    ? tx("Directory mismatch", "目录不匹配")
+                    : tx("No project task detected", "未检测到项目任务")}
+              </strong>
+            </div>
+            <div>
+              <span>{tx("Detected directory", "检测目录")}</span>
+              <code title={detectedWorkspaceRef ?? undefined}>
+                {detectedWorkspaceRef ?? tx("No Codex task directory detected", "尚未检测到 Codex 任务目录")}
+              </code>
+            </div>
+            <div>
+              <span>{tx("Expected directory", "期望目录")}</span>
+              <code title={project.path}>{project.path}</code>
+            </div>
+            <div>
+              <span>{tx("Last checked", "最近检查")}</span>
+              <strong>{formatDateTime(connectionCheckedAt)}</strong>
+            </div>
+          </div>
+          <ProjectHeartbeatChart
+            entries={combinedHeartbeatEntries}
+            latestRunCount={projectTotalRuns}
+            totalTokens={projectTotalTokens}
+          />
+          <div className="project-runtime-diagnostic-list">
+            {runtimeDiagnostics.map((item) => (
+              <div className={`project-runtime-diagnostic tone-${item.tone}`} key={item.title}>
+                <strong>{item.title}</strong>
+                <p>{item.detail}</p>
+              </div>
+            ))}
+            {projectRuntimeResult?.warnings.slice(0, 3).map((warning) => (
+              <div className="project-runtime-diagnostic tone-info" key={warning}>
+                <strong>{tx("Configuration hint", "配置提示")}</strong>
+                <p>{warning}</p>
+              </div>
+            ))}
+          </div>
+          <div className="project-asset-detail-metrics">
+            <div>
+              <span>{tx("Skills", "技能")}</span>
+              <strong>{formatCount(skillCount)}</strong>
+              <small>{isLoadedProject ? tx("Detailed list loaded", "已加载明细") : tx("Last scan summary", "最近扫描摘要")}</small>
+            </div>
+            <div>
+              <span>{tx("Workflow", "工作流")}</span>
+              <strong>{workflowStatus}</strong>
+              <small>{tx("Project-level skills-workflow", "项目级 skills-workflow")}</small>
+            </div>
+            <div>
+              <span>{tx("Heartbeat", "心跳")}</span>
+              <strong>{formatCount(projectTotalRuns)}</strong>
+              <small>{formatCount(projectTotalTokens)} {tx("tokens", "Token")}</small>
+            </div>
+            <div>
+              <span>{tx("Last Scan", "最近扫描")}</span>
+              <strong>{formatDateTime(project.lastScanAt)}</strong>
+              <small>{project.path}</small>
+            </div>
+          </div>
+
+          <div className="project-asset-detail-body">
+            <section>
+              <div className="project-asset-detail-subhead">
+                <strong>{tx("Project Skills", "项目技能")}</strong>
+                <span>{formatCount(skillCount)}</span>
+              </div>
+              {visibleSkills.length > 0 ? (
+                <div className="project-skill-detail-list">
+                  {visibleSkills.slice(0, 8).map((skill) => (
+                    <div className="project-skill-detail-row" key={skill.id}>
+                      <strong>{skill.displayName}</strong>
+                      <span>{skill.sourceType}</span>
+                      <span>{tx("Health", "健康")} {skill.health.score}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="project-asset-detail-empty">
+                  {project.skillsFound
+                    ? tx("This project has a scan summary. Scan it again to load the full Skill list in this session.", "这个项目已有扫描摘要。再次扫描该项目后，可在当前会话加载完整技能列表。")
+                    : tx("No Skills recorded yet. Scan this project to collect Skills.", "还没有记录技能。扫描该项目后会收集技能。")}
+                </p>
+              )}
+            </section>
+
+            <section>
+              <div className="project-asset-detail-subhead">
+                <strong>{tx("Workflow & Evaluation", "工作流与评测")}</strong>
+                <span>{isLoadedProject ? tx("Live", "当前") : tx("Summary", "摘要")}</span>
+              </div>
+              <div className="project-workflow-detail-list">
+                <div>
+                  <span>{tx("Workflow process", "工作流流程")}</span>
+                  <strong>{workflowStatus}</strong>
+                </div>
+                <div>
+                  <span>{tx("Run count", "运行次数")}</span>
+                  <strong>{formatCount(projectTotalRuns)}</strong>
+                </div>
+                <div>
+                  <span>{tx("Evaluation effect", "评测效果")}</span>
+                  <strong>{projectSuccessRate}</strong>
+                </div>
+              </div>
+            </section>
+          </div>
+        </>
+      ) : null}
+    </article>
+  );
+}
+
+function WorkflowStarterCard({
+  projectRoot,
+  preview,
+  result,
+  busyAction,
+  highlighted,
+  onPreview,
+  onApply,
+  onOpenLibrary,
+  onOpenEvaluate
+}: {
+  projectRoot: string;
+  preview: WorkflowStarterPreview | null;
+  result: WorkflowStarterApplyResult | null;
+  busyAction: string | null;
+  highlighted?: boolean;
+  onPreview: () => void;
+  onApply: () => void;
+  onOpenLibrary: () => void;
+  onOpenEvaluate: () => void;
+}) {
+  const { tx } = useLanguage();
+  const visibleConflicts = preview?.fileConflicts.slice(0, 4) ?? [];
+  const visibleFiles = preview?.filesToCreate.slice(0, 6) ?? [];
+  const isApplied = result !== null;
+
+  return (
+    <article className={`workflow-starter-card entity-project ${highlighted ? "is-highlighted" : ""}`}>
+      <div className="workflow-starter-head">
+        <div>
+          <span className="os-module-kicker">{tx("Recommended skills-workflow", "推荐 skills-workflow")}</span>
+          <h3>
+            {isApplied
+              ? tx("Recommended Skills Workflow Applied", "推荐 skills-workflow 已应用")
+              : tx("Apply Recommended Skills Workflow", "应用推荐 skills-workflow")}
+          </h3>
+          <p>
+            {isApplied
+              ? tx(
+                  "This project now has a local skills-workflow. Review its project Skills in the asset library whenever needed.",
+                  "这个项目现在已经有本地 skills-workflow。需要时可在技能库查看它的项目技能。"
+                )
+              : tx(
+                  "This project has no indexed Skills yet. Preview the bundled skills-workflow before adding it into this project folder.",
+                  "这个项目还没有已索引 Skill。可以先预览内置 skills-workflow，再应用到该项目文件夹。"
+                )}
+          </p>
+        </div>
+        <span className="remote-safety-pill">
+          {isApplied ? tx("Ready", "已就绪") : tx("Project only", "仅此项目")}
+        </span>
+      </div>
+
+      <p className="inline-code">
+        {projectRoot || tx("Choose a project folder first.", "请先选择项目文件夹。")}
+      </p>
+
+      <div className="workflow-starter-metrics">
+        <div>
+          <span className="stat-label">{tx("Skills", "技能")}</span>
+          <strong>{preview ? preview.skillCount : "24"}</strong>
+        </div>
+        <div>
+          <span className="stat-label">{tx("Files", "文件")}</span>
+          <strong>{preview ? preview.totalFileCount : "..."}</strong>
+        </div>
+        <div>
+          <span className="stat-label">{tx("Conflicts", "冲突")}</span>
+          <strong>{preview ? preview.fileConflicts.length : "..."}</strong>
+        </div>
+      </div>
+
+      {preview ? (
+        <div className={`workflow-starter-preview ${preview.canApply ? "ready" : "blocked"}`}>
+          <strong>
+            {preview.canApply
+              ? tx("Preview ready", "预览可应用")
+              : tx("Conflicts detected", "检测到冲突")}
+          </strong>
+          <p>
+            {preview.canApply
+              ? tx(
+                  `${preview.filesToCreate.length} file(s) will be created without overwriting existing files.`,
+                  `将创建 ${preview.filesToCreate.length} 个文件，不会覆盖已有文件。`
+                )
+              : tx(
+                  "Existing files must be resolved before this starter can write anything.",
+                  "应用前必须先处理已有文件冲突。"
+                )}
+          </p>
+          <div className="workflow-starter-file-list">
+            {(visibleConflicts.length > 0 ? visibleConflicts : visibleFiles).map((file) => (
+              <span key={file}>{file}</span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {result ? (
+        <div className="workflow-starter-applied">
+          <strong>{tx("Workflow applied", "工作流已应用")}</strong>
+          <p>
+            {tx(
+              `${result.copiedFileCount} file(s) copied into the selected project.`,
+              `已复制 ${result.copiedFileCount} 个文件到所选项目。`
+            )}
+          </p>
+          <div className="workflow-starter-next">
+            <span>{tx("Next", "下一步")}</span>
+            <strong>{tx("Review the indexed project Skills or open the project report.", "查看已索引的项目技能，或打开项目报告。")}</strong>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="os-card-actions">
+        {isApplied ? (
+          <>
+            <button type="button" onClick={onOpenLibrary} disabled={busyAction !== null}>
+              {tx("Review Project Skills", "查看项目技能")}
+            </button>
+            <button type="button" className="primary" onClick={onOpenEvaluate} disabled={busyAction !== null}>
+              {tx("Open Reports", "打开评测报告")}
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" onClick={onPreview} disabled={busyAction !== null}>
+              {busyAction === "workflow-preview"
+                ? tx("Previewing...", "预览中...")
+                : tx("Preview skills-workflow", "预览 skills-workflow")}
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={onApply}
+              disabled={busyAction !== null || !preview?.canApply}
+            >
+              {busyAction === "workflow-apply"
+                ? tx("Applying...", "应用中...")
+                : preview
+                  ? tx("Apply skills-workflow", "应用 skills-workflow")
+                  : tx("Preview First", "先预览")}
+            </button>
+          </>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -2481,6 +4590,14 @@ function ProposalCards({
       {proposals.map((proposal) => {
         const isActive = busy && activeProposalId === proposal.id;
         const proposalSkillNode = resolveGraphNode("skill", proposal.skillId);
+        const nextStep =
+          proposal.status === "open"
+            ? tx("Next: inspect evidence, then accept or dismiss this work.", "下一步：先看证据，再接受或忽略这项工作。")
+            : proposal.status === "accepted"
+              ? tx("Next: implement through Apply Center or a manual code change, then verify.", "下一步：通过应用中心或手动代码变更实现，然后验证。")
+              : proposal.status === "resolved"
+                ? tx("Closed: keep it for audit; reopen only if new telemetry says it regressed.", "已关闭：保留审计；只有新遥测显示回退时再重新打开。")
+                : tx("Dismissed: evidence is retained locally and can be reopened later.", "已忽略：证据仍保留在本地，后续可重新打开。");
 
         return (
           <article className="proposal-card" key={proposal.id}>
@@ -2490,7 +4607,7 @@ function ProposalCards({
                   <SeverityPill severity={proposal.severity} />
                   <ProposalStatusPill status={proposal.status} />
                 </div>
-                <h3>{proposal.title}</h3>
+                <h3>{formatProposalTitle(proposal, mode)}</h3>
                 <p className="muted">
                   {proposal.skillName} · {tx("updated", "更新于")} {formatDateTime(proposal.updatedAt)}
                 </p>
@@ -2503,16 +4620,21 @@ function ProposalCards({
               />
             </div>
 
-            <p>{proposal.summary}</p>
+            <p>{formatProposalSummary(proposal, mode)}</p>
+
+            <div className="proposal-next-step">
+              <span>{tx("Workflow State", "流程状态")}</span>
+              <strong>{nextStep}</strong>
+            </div>
 
             <div className="proposal-meta">
               <div>
                 <span className="stat-label">{tx("Expected Benefit", "预期收益")}</span>
-                <strong>{proposal.estimatedBenefit}</strong>
+                <strong>{formatProposalBenefit(proposal, mode)}</strong>
               </div>
               <div>
                 <span className="stat-label">{tx("Proposal Type", "建议类型")}</span>
-                <strong>{proposal.proposalType}</strong>
+                <strong>{formatProposalType(proposal.proposalType, mode)}</strong>
               </div>
             </div>
 
@@ -2523,12 +4645,12 @@ function ProposalCards({
                   {proposal.evidence.map((evidence) => (
                     <div className="proposal-evidence-item" key={evidence.id}>
                       <div className="proposal-evidence-head">
-                        <span className="mini-pill">{formatProposalEvidenceType(evidence.evidenceType)}</span>
+                        <span className="mini-pill">{formatProposalEvidenceType(evidence.evidenceType, mode)}</span>
                         <span className="muted">
                           {evidence.refId ?? tx("local evidence", "本地证据")} · {formatDateTime(evidence.createdAt)}
                         </span>
                       </div>
-                      <p>{evidence.summary}</p>
+                      <p>{formatProposalEvidenceSummary(evidence, mode)}</p>
                     </div>
                   ))}
                 </div>
@@ -2543,13 +4665,13 @@ function ProposalCards({
                     <div className="proposal-timeline-item" key={action.id}>
                       <div className="proposal-timeline-head">
                         <span className="mini-pill mini-pill-strong">
-                          {formatProposalActionType(action.actionType)}
+                          {formatProposalActionType(action.actionType, mode)}
                         </span>
                         <span className="muted">
-                          {action.actorType} · {formatDateTime(action.createdAt)}
+                          {formatProposalActorType(action.actorType, mode)} · {formatDateTime(action.createdAt)}
                         </span>
                       </div>
-                      <p>{action.summary}</p>
+                      <p>{formatProposalActionSummary(action, mode)}</p>
                     </div>
                   ))}
                 </div>
@@ -3249,6 +5371,7 @@ function GraphTopologyView({
 }) {
   const { mode } = useLanguage();
   const tx = (en: string, zh: string) => formatLocalizedText(mode, en, zh);
+  const [topologyZoom, setTopologyZoom] = useState(0.82);
   const scene = buildGraphTopologyScene(visibleGraph);
   const selection = getGraphSelectionContext(visibleGraph, selectedNodeId);
 
@@ -3285,6 +5408,10 @@ function GraphTopologyView({
   ).length;
   const hiddenNodeCountFromBase = Math.max(snapshot.totalNodes - visibleNodeCount, 0);
   const hiddenEdgeCountFromBase = Math.max(snapshot.totalEdges - visibleEdgeCount, 0);
+  const topologyZoomPercent = Math.round(topologyZoom * 100);
+  const setBoundedTopologyZoom = (nextZoom: number) => {
+    setTopologyZoom(Math.min(1.4, Math.max(0.55, Number(nextZoom.toFixed(2)))));
+  };
 
   return (
     <div className="graph-topology-shell">
@@ -3346,11 +5473,50 @@ function GraphTopologyView({
         </div>
       </div>
 
+      <div className="graph-topology-toolbar" aria-label={tx("Topology view controls", "拓扑视图控制")}>
+        <div className="graph-topology-zoom-control">
+          <button
+            type="button"
+            aria-label={tx("Zoom out", "缩小")}
+            title={tx("Zoom out", "缩小")}
+            onClick={() => setBoundedTopologyZoom(topologyZoom - 0.1)}
+          >
+            −
+          </button>
+          <input
+            aria-label={tx("Topology zoom", "拓扑缩放")}
+            type="range"
+            min="0.55"
+            max="1.4"
+            step="0.05"
+            value={topologyZoom}
+            onChange={(event) => setBoundedTopologyZoom(Number(event.target.value))}
+          />
+          <button
+            type="button"
+            aria-label={tx("Zoom in", "放大")}
+            title={tx("Zoom in", "放大")}
+            onClick={() => setBoundedTopologyZoom(topologyZoom + 0.1)}
+          >
+            +
+          </button>
+          <strong>{topologyZoomPercent}%</strong>
+        </div>
+        <div className="graph-topology-view-actions">
+          <button type="button" onClick={() => setBoundedTopologyZoom(0.82)}>
+            {tx("Fit", "适配")}
+          </button>
+          <button type="button" onClick={() => setBoundedTopologyZoom(1)}>
+            1:1
+          </button>
+        </div>
+      </div>
+
       <div className="graph-topology-scroll">
         <svg
           className="graph-topology-svg"
-          width={scene.width}
-          height={scene.height}
+          width={Math.round(scene.width * topologyZoom)}
+          height={Math.round(scene.height * topologyZoom)}
           viewBox={`0 0 ${scene.width} ${scene.height}`}
           role="img"
           aria-label={tx("Skill graph topology view", "Skill 图谱拓扑视图")}
@@ -3504,10 +5670,10 @@ function GraphTopologyView({
                   fill={entry.tone.accent}
                 />
                 <text className="graph-topology-node-title" x={18} y={26}>
-                  {truncateGraphLabel(entry.node.displayName, 18)}
+                  {truncateGraphLabel(entry.node.displayName, 15)}
                 </text>
                 <text className="graph-topology-node-meta" x={18} y={45}>
-                  {truncateGraphLabel(formatGraphLabel(entry.node.nodeType), 16)} · {tx("degree", "度")}{" "}
+                  {truncateGraphLabel(formatGraphLabel(entry.node.nodeType), 12)} · {tx("degree", "度")}{" "}
                   {entry.node.degree}
                 </text>
               </g>
@@ -4065,8 +6231,8 @@ function GraphFocusAnalysis({
             <h3>{tx("Graph Focus Analysis", "图谱焦点分析")}</h3>
             <p className="section-copy">
               {tx(
-                "Select a topology node to connect the graph snapshot with already-loaded local runs, proposals, bundle history, approved root context, and an on-demand local neighborhood drill-down.",
-                "选择拓扑节点后，可把图谱快照与已加载的本地运行、建议、Bundle 历史、已批准根目录上下文，以及按需本地邻域钻取连接起来。"
+                "Select a topology node to connect the graph snapshot with loaded local runs, proposals, bundle history, project context, and an on-demand local neighborhood drill-down.",
+                "选择拓扑节点后，可把图谱快照与已加载的本地运行、建议、Bundle 历史、项目上下文，以及按需本地邻域钻取连接起来。"
               )}
             </p>
           </div>
@@ -4075,11 +6241,11 @@ function GraphFocusAnalysis({
         <div className="empty-inline graph-focus-empty">
           <div className="graph-focus-primer">
             <span className="os-module-kicker">{tx("How to read it", "如何理解")}</span>
-            <strong>{tx("This is your local Skill relationship map", "这是你的本地 Skill 关系地图")}</strong>
+            <strong>{tx("This is your local Skill relationship map", "这是你的本地技能关系地图")}</strong>
             <p>
               {tx(
-                "It is generated from authorized roots, indexed Skills, recent local telemetry, proposals, bundles, and model references stored in the app-local SQLite database.",
-                "它由已授权根目录、已索引 Skill、最近本地遥测、建议、Bundle 和模型引用生成，并存储在应用本地 SQLite 数据库中。"
+                "It is generated from the selected project, indexed Skills, recent local telemetry, proposals, bundles, and model references stored in the app-local SQLite database.",
+                "它由已选择项目、已索引技能、最近本地遥测、建议、Bundle 和模型引用生成，并存储在应用本地 SQLite 数据库中。"
               )}
             </p>
           </div>
@@ -4087,7 +6253,7 @@ function GraphFocusAnalysis({
             <div>
               <span>01</span>
               <strong>{tx("Click a node", "点击节点")}</strong>
-              <small>{tx("Show local runs, proposals, bundles, roots, and connected models.", "查看本地运行、建议、Bundle、根目录和关联模型。")}</small>
+              <small>{tx("Show local runs, proposals, bundles, projects, and connected models.", "查看本地运行、建议、Bundle、项目和关联模型。")}</small>
             </div>
             <div>
               <span>02</span>
@@ -4097,7 +6263,7 @@ function GraphFocusAnalysis({
             <div>
               <span>03</span>
               <strong>{tx("Trace workflow", "追踪工作流")}</strong>
-              <small>{tx("Explain how a Skill connects to models, proposals, bundles, or roots.", "解释 Skill 如何连接模型、建议、Bundle 或根目录。")}</small>
+              <small>{tx("Explain how a Skill connects to models, proposals, bundles, or projects.", "解释 Skill 如何连接模型、建议、Bundle 或项目。")}</small>
             </div>
           </div>
         </div>
@@ -4268,8 +6434,8 @@ function GraphFocusAnalysis({
                     </div>
                     <span className="muted">{formatDateTime(proposal.updatedAt)}</span>
                   </div>
-                  <strong>{proposal.title}</strong>
-                  <p className="muted">{proposal.estimatedBenefit}</p>
+                  <strong>{formatProposalTitle(proposal, mode)}</strong>
+                  <p className="muted">{formatProposalBenefit(proposal, mode)}</p>
                   <GraphFocusInspectAction
                     targetNode={getNavigableGraphNode("proposal", proposal.id)}
                     selectedNodeId={selectedNodeId}
@@ -4316,8 +6482,8 @@ function GraphFocusAnalysis({
         </GraphFocusCard>,
         <GraphFocusCard
           key="skill-registry"
-          title={tl("Registry Context", "注册表上下文")}
-          caption={tl("Indexed source metadata from approved roots.", "来自已批准根目录的索引源元数据。")}
+          title={tl("Skill Index Context", "技能索引上下文")}
+          caption={tl("Indexed source metadata from the current project scan.", "来自当前项目扫描的索引源元数据。")}
         >
           <dl className="graph-topology-meta-list">
             <div>
@@ -4459,7 +6625,7 @@ function GraphFocusAnalysis({
                     <ProposalStatusPill status={proposal.status} />
                   </div>
                   <p className="muted">
-                    {proposal.title} · {formatSeverity(proposal.severity)}
+                    {formatProposalTitle(proposal, mode)} · {formatSeverity(proposal.severity, mode)}
                   </p>
                   <GraphFocusInspectAction
                     targetNode={getNavigableGraphNode("proposal", proposal.id)}
@@ -4670,12 +6836,12 @@ function GraphFocusAnalysis({
       metrics = [
         {
           label: tl("Status"),
-          value: proposal ? formatProposalStatus(proposal.status) : String(node.metadata.status ?? "n/a")
+          value: proposal ? formatProposalStatus(proposal.status, mode) : String(node.metadata.status ?? "n/a")
         },
         {
           label: tl("Severity", "严重级别"),
           value: proposal
-            ? formatSeverity(proposal.severity)
+            ? formatSeverity(proposal.severity, mode)
             : String(node.metadata.severity ?? "n/a")
         },
         { label: tl("Evidence Items"), value: formatCount(evidenceItems.length) },
@@ -4693,14 +6859,14 @@ function GraphFocusAnalysis({
               <div className="proposal-pills">
                 <SeverityPill severity={proposal.severity} />
                 <ProposalStatusPill status={proposal.status} />
-                <span className="mini-pill">{proposal.proposalType}</span>
+                <span className="mini-pill">{formatProposalType(proposal.proposalType, mode)}</span>
               </div>
-              <strong>{proposal.title}</strong>
-              <p className="muted">{proposal.summary}</p>
+              <strong>{formatProposalTitle(proposal, mode)}</strong>
+              <p className="muted">{formatProposalSummary(proposal, mode)}</p>
               <dl className="graph-topology-meta-list">
                 <div>
                   <dt>{tl("Expected Benefit")}</dt>
-                  <dd>{proposal.estimatedBenefit}</dd>
+                  <dd>{formatProposalBenefit(proposal, mode)}</dd>
                 </div>
                 <div>
                   <dt>{tl("Updated")}</dt>
@@ -4770,11 +6936,11 @@ function GraphFocusAnalysis({
                 <div className="graph-focus-item" key={evidence.id}>
                   <div className="graph-focus-item-head">
                     <span className="mini-pill">
-                      {formatProposalEvidenceType(evidence.evidenceType)}
+                      {formatProposalEvidenceType(evidence.evidenceType, mode)}
                     </span>
                     <span className="muted">{formatDateTime(evidence.createdAt)}</span>
                   </div>
-                  <p className="muted">{evidence.summary}</p>
+                  <p className="muted">{formatProposalEvidenceSummary(evidence, mode)}</p>
                 </div>
               ))}
             </div>
@@ -4795,11 +6961,11 @@ function GraphFocusAnalysis({
                 <div className="graph-focus-item" key={action.id}>
                   <div className="graph-focus-item-head">
                     <span className="mini-pill mini-pill-strong">
-                      {formatProposalActionType(action.actionType)}
+                      {formatProposalActionType(action.actionType, mode)}
                     </span>
                     <span className="muted">{formatDateTime(action.createdAt)}</span>
                   </div>
-                  <p className="muted">{action.summary}</p>
+                  <p className="muted">{formatProposalActionSummary(action, mode)}</p>
                 </div>
               ))}
             </div>
@@ -4833,8 +6999,8 @@ function GraphFocusAnalysis({
       cards = [
         <GraphFocusCard
           key="root-summary"
-          title={tl("Root Summary")}
-          caption={tl("Approved scan-root details in the current local policy.", "当前本地策略中的已批准扫描根目录详情。")}
+          title={tl("Project Summary", "项目摘要")}
+          caption={tl("Selected project details in the current local policy.", "当前本地策略中的已选择项目详情。")}
         >
           <dl className="graph-topology-meta-list">
             <div>
@@ -4842,7 +7008,7 @@ function GraphFocusAnalysis({
               <dd>{rootPath ?? "n/a"}</dd>
             </div>
             <div>
-              <dt>{tl("Root Type")}</dt>
+              <dt>{tl("Project Source Type", "项目来源类型")}</dt>
               <dd>{root?.rootType ?? String(node.metadata.rootType ?? "n/a")}</dd>
             </div>
             <div>
@@ -4853,12 +7019,12 @@ function GraphFocusAnalysis({
         </GraphFocusCard>,
         <GraphFocusCard
           key="root-skills"
-          title={tl("Skills Under Root")}
-          caption={tl("Indexed skills that resolve inside this approved path scope.", "解析到该已批准路径范围内的已索引 Skill。")}
+          title={tl("Skills In Project", "项目内 Skill")}
+          caption={tl("Indexed skills that resolve inside the selected project path.", "解析到已选择项目路径内的已索引 Skill。")}
         >
           {rootSkills.length === 0 ? (
             <div className="empty-inline graph-focus-empty">
-              <span className="muted">{tl("No indexed skill currently maps into this root scope.", "当前没有已索引 Skill 映射到该根目录范围。")}</span>
+              <span className="muted">{tl("No indexed skill currently maps into this project.", "当前没有已索引 Skill 映射到该项目。")}</span>
             </div>
           ) : (
             <div className="graph-focus-list">
@@ -4882,11 +7048,11 @@ function GraphFocusAnalysis({
         <GraphFocusCard
           key="root-runs"
           title={tl("Runtime Activity", "运行活动")}
-          caption={tl("Recent runs for skills that belong to this root.", "属于该根目录的 Skill 最近运行记录。")}
+          caption={tl("Recent runs for skills that belong to this project.", "属于该项目的 Skill 最近运行记录。")}
         >
           {rootRuns.length === 0 ? (
             <div className="empty-inline graph-focus-empty">
-              <span className="muted">{tl("No recent run is loaded for this root scope.", "该根目录范围尚未加载最近运行。")}</span>
+              <span className="muted">{tl("No recent run is loaded for this project.", "该项目尚未加载最近运行。")}</span>
             </div>
           ) : (
             <div className="graph-focus-list">
@@ -4908,11 +7074,11 @@ function GraphFocusAnalysis({
         <GraphFocusCard
           key="root-bundles"
           title={tl("Bundle Coverage")}
-          caption={tl("Bundles whose primary skill lives under this root.", "主 Skill 位于该根目录下的 Bundle。")}
+          caption={tl("Bundles whose primary skill lives under this project.", "主 Skill 位于该项目下的 Bundle。")}
         >
           {rootBundles.length === 0 ? (
             <div className="empty-inline graph-focus-empty">
-              <span className="muted">{tl("No bundle currently traces back to this root scope.", "当前没有 Bundle 可追溯到该根目录范围。")}</span>
+              <span className="muted">{tl("No bundle currently traces back to this project.", "当前没有 Bundle 可追溯到该项目。")}</span>
             </div>
           ) : (
             <div className="graph-focus-list">
@@ -5272,8 +7438,8 @@ function GraphFocusAnalysis({
           <h3>{tx("Graph Focus Analysis", "图谱焦点分析")}</h3>
           <p className="section-copy">
             {tx(
-              "Read-only contextual rollup for the selected node. This panel reuses the current graph snapshot, runtime tables, proposal inventory, bundle history, and approved roots that are already loaded locally, then pulls a bounded neighborhood only for the node you select.",
-              "选中节点的只读上下文汇总。此面板会复用已在本地加载的当前图谱快照、运行表、建议清单、Bundle 历史和已批准根目录，并只为你选择的节点拉取有界邻域。"
+              "Read-only contextual rollup for the selected node. This panel reuses the current graph snapshot, runtime tables, proposal inventory, bundle history, and selected project index already loaded locally, then pulls a bounded neighborhood only for the node you select.",
+              "选中节点的只读上下文汇总。此面板会复用已在本地加载的当前图谱快照、运行表、建议清单、Bundle 历史和当前项目索引，并只为你选择的节点拉取有界邻域。"
             )}
           </p>
         </div>
@@ -5477,7 +7643,7 @@ function AuditTrail({
                 <span className="mini-pill mini-pill-strong">
                   {formatAuditEventType(event.eventType)}
                 </span>
-                <span className="mini-pill">{event.actorType}</span>
+                <span className="mini-pill">{formatProposalActorType(event.actorType, mode)}</span>
               </div>
               <strong>{event.eventSummary}</strong>
               {metaSummary ? <div className="muted">{metaSummary}</div> : null}
@@ -6314,7 +8480,7 @@ function BundleValidationPanel({
         ) : null}
         {validation.matchingSkill ? (
           <div>
-            <dt>{tx("Matching Local Skill", "匹配本地 Skill")}</dt>
+            <dt>{tx("Matching Local Skill", "匹配本地技能")}</dt>
             <dd>
               {validation.matchingSkill.skillName} ·{" "}
               {validation.matchingSkill.currentVersionFingerprint ?? "n/a"}
@@ -6441,19 +8607,27 @@ function BundleValidationPanel({
 export default function App() {
   const skillGraphSectionRef = useRef<HTMLElement | null>(null);
   const productWorkspaceRef = useRef<HTMLDivElement | null>(null);
+  const graphNeighborhoodCacheRef = useRef<Map<string, GraphNeighborhood>>(new Map());
   const pendingNavigationHrefRef = useRef<(typeof productNavHrefs)[number] | null>(null);
   const productNavLinkRefs = useRef<
     Partial<Record<(typeof productNavHrefs)[number], HTMLAnchorElement>>
   >({});
   const [boot, setBoot] = useState<BootstrapState | null>(null);
   const [loading, setLoading] = useState(true);
-  const [languageMode, setLanguageMode] = useState<LanguageMode>("both");
+  const [languageMode, setLanguageMode] = useState<LanguageMode>("zh");
   const [productMode, setProductMode] = useState<ProductMode>("guided");
   const [activeSectionHref, setActiveSectionHref] = useState<(typeof productNavHrefs)[number]>("#overview");
   const [busyAction, setBusyAction] = useState<
     | "authorize"
     | "scan"
+    | "project-scan"
+    | "workflow-preview"
+    | "workflow-apply"
     | "import"
+    | "local-tool-discovery"
+    | "local-tool-preview"
+    | "local-tool-import"
+    | "runtime-refresh"
     | "proposals"
     | "proposal-status"
     | "graph"
@@ -6473,7 +8647,32 @@ export default function App() {
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [scanResultDialog, setScanResultDialog] = useState<ScanResult | null>(null);
+  const [scanResultProjectName, setScanResultProjectName] = useState("");
+  const [targetProjectRoot, setTargetProjectRoot] = useState("");
+  const [pendingBindProjectRoot, setPendingBindProjectRoot] = useState("");
+  const [managedProjects, setManagedProjects] = useState<ManagedProject[]>(() => loadManagedProjects());
+  const [projectRepairFeedback, setProjectRepairFeedback] = useState<ProjectRepairFeedback | null>(null);
+  const [projectOnboardingLogs, setProjectOnboardingLogs] =
+    useState<ProjectOnboardingLogEntry[]>(() => loadProjectOnboardingLogs());
+  const [selectedProjectLogPath, setSelectedProjectLogPath] = useState("");
+  const [projectHeartbeatEntries, setProjectHeartbeatEntries] =
+    useState<ProjectHeartbeatEntry[]>(() => loadProjectHeartbeats());
+  const [inspectedProjectPath, setInspectedProjectPath] = useState("");
+  const [workflowStarterPreview, setWorkflowStarterPreview] =
+    useState<WorkflowStarterPreview | null>(null);
+  const [workflowStarterResult, setWorkflowStarterResult] =
+    useState<WorkflowStarterApplyResult | null>(null);
+  const [workflowStarterHighlighted, setWorkflowStarterHighlighted] = useState(false);
   const [telemetryResult, setTelemetryResult] = useState<TelemetryImportResult | null>(null);
+  const [localToolSources, setLocalToolSources] = useState<LocalToolTelemetrySource[]>([]);
+  const [selectedLocalToolSourceId, setSelectedLocalToolSourceId] = useState("");
+  const [localToolPreview, setLocalToolPreview] = useState<LocalToolTelemetryPreview | null>(null);
+  const [localToolImportResult, setLocalToolImportResult] =
+    useState<LocalToolTelemetryImportResult | null>(null);
+  const [projectRuntimeRefreshResult, setProjectRuntimeRefreshResult] =
+    useState<ProjectRuntimeEvidenceRefreshResult | null>(null);
+  const [projectProfile, setProjectProfile] = useState<ProjectProfileSummary | null>(null);
   const [proposalRefreshResult, setProposalRefreshResult] =
     useState<OptimizationProposalRefreshResult | null>(null);
   const [backupResult, setBackupResult] = useState<LocalBackupSummary | null>(null);
@@ -6515,6 +8714,11 @@ export default function App() {
     useState<"idle" | "loading" | "ready" | "error">("idle");
   const [graphPathTraceError, setGraphPathTraceError] = useState<string | null>(null);
   const [recentRuns, setRecentRuns] = useState<SkillRunSummary[]>([]);
+  const [skillRunDetail, setSkillRunDetail] = useState<{
+    skill: SkillSummary;
+    runs: SkillRunSummary[];
+    loading: boolean;
+  } | null>(null);
   const [auditEvents, setAuditEvents] = useState<LocalAuditEvent[]>([]);
   const [proposals, setProposals] = useState<OptimizationProposal[]>([]);
   const [skillAnalysis, setSkillAnalysis] = useState<SkillIntelligenceAnalysis | null>(null);
@@ -6528,10 +8732,16 @@ export default function App() {
   const [scanRoots, setScanRoots] = useState<string[]>([]);
   const [scanExclusions, setScanExclusions] = useState<string[]>([]);
   const [onboardingStep, setOnboardingStep] = useState(0);
-  const [scanScopeMode, setScanScopeMode] = useState<"selected" | "full">("selected");
-  const [unifiedDiscoveryQuery, setUnifiedDiscoveryQuery] = useState("");
   const [selectedSkillAnalysisSkillId, setSelectedSkillAnalysisSkillId] = useState("");
   const [selectedLibraryStage, setSelectedLibraryStage] = useState<LibraryStage>("summary");
+  const [activeSkillAssetTab, setActiveSkillAssetTab] = useState<"local" | "remote">("local");
+  const [skillLibraryQuery, setSkillLibraryQuery] = useState("");
+  const [skillLibraryProjectFilter, setSkillLibraryProjectFilter] = useState("all");
+  const [skillLibraryTypeFilter, setSkillLibraryTypeFilter] = useState<SkillLibraryTypeFilter>("all");
+  const [skillLibrarySortKey, setSkillLibrarySortKey] = useState<SkillLibrarySortKey>("priority");
+  const [remoteLibraryQuery, setRemoteLibraryQuery] = useState("");
+  const [remoteLibrarySortKey, setRemoteLibrarySortKey] = useState<RemoteLibrarySortKey>("name");
+  const [skillChineseAssistEnabled, setSkillChineseAssistEnabled] = useState(true);
   const [remoteRepositoryUrl, setRemoteRepositoryUrl] = useState("");
   const [remoteSourceAnalysis, setRemoteSourceAnalysis] =
     useState<RemoteSkillSourceAnalysis | null>(null);
@@ -6605,15 +8815,21 @@ export default function App() {
   } | null>(null);
   const [interactionNotice, setInteractionNotice] = useState<InteractionNotice | null>(null);
   const interactionNoticeRef = useRef<InteractionNotice | null>(null);
+  const monitoringRefreshInFlightRef = useRef<Set<string>>(new Set());
+  const monitoringSessionStartedAtRef = useRef(Date.now());
+  const projectDatabaseHydratedRef = useRef(false);
 
   const busy = busyAction !== null;
   const tx = (en: string, zh: string) => formatLocalizedText(languageMode, en, zh);
+  const compactTx = (en: string, zh: string) => tx(en, zh);
   const t = (en: string) => (uiCopy[en] ? formatLocalizedText(languageMode, en, uiCopy[en]) : en);
   const languageContextValue: LanguageContextValue = {
     mode: languageMode,
     tx,
     t
   };
+  const selectedLocalToolSource =
+    localToolSources.find((source) => source.id === selectedLocalToolSourceId) ?? null;
   const baseGraph = getSnapshotGraph(graphSnapshot);
   const deferredGraphSearchQuery = useDeferredValue(graphSearchQuery);
   const baseVisibleGraph = mergeGraphVisibleGraph(
@@ -6763,9 +8979,13 @@ export default function App() {
         skill.governance,
         languageMode
       );
-      const purposeSummary =
+      const rawPurposeSummary =
         skill.description ??
-        tx("Indexed local Skill ready for analysis and scoped apply.", "已索引本地 Skill，可分析并按范围应用。");
+        tx("Indexed local Skill ready for analysis and scoped apply.", "已索引本地技能，可分析并按范围应用。");
+      const purposeSummary =
+        languageMode === "zh" && skillChineseAssistEnabled
+          ? buildChineseSkillReadingAid(skill)
+          : rawPurposeSummary;
       const developmentBoost =
         skill.governance.role === "development" && skill.governance.preferredHarness === "superpowers"
           ? 18
@@ -6801,13 +9021,98 @@ export default function App() {
         orchestrationSummary,
         moduleCountLabel,
         governanceBoundary,
+        rawPurposeSummary,
         purposeSummary,
         priorityScore
       };
     })
     .sort((left, right) => right.priorityScore - left.priorityScore);
+  const filteredLibrarySkillRows = librarySkillRows
+    .filter((row) => {
+      const query = skillLibraryQuery.trim().toLocaleLowerCase();
+      const sourceProject = managedProjects.find((project) =>
+        isPathInsideProject(row.skill.sourcePath, project.path)
+      );
+      const queryMatches =
+        query.length === 0 ||
+        [
+          row.skill.displayName,
+          row.skill.canonicalName,
+          row.skill.sourcePath,
+          row.purposeSummary,
+          sourceProject?.name ?? ""
+        ]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query);
+      const projectMatches =
+        skillLibraryProjectFilter === "all" ||
+        (skillLibraryProjectFilter === "unbound" && !sourceProject) ||
+        sourceProject?.path === skillLibraryProjectFilter;
+      const typeMatches =
+        skillLibraryTypeFilter === "all" ||
+        row.skill.governance.role === skillLibraryTypeFilter;
+
+      return queryMatches && projectMatches && typeMatches;
+    })
+    .sort((left, right) => {
+      if (skillLibrarySortKey === "name") {
+        return left.skill.displayName.localeCompare(right.skill.displayName);
+      }
+      if (skillLibrarySortKey === "calls") {
+        return right.skill.runtime.totalRuns - left.skill.runtime.totalRuns;
+      }
+      if (skillLibrarySortKey === "tokens") {
+        return right.skill.runtime.totalTokens - left.skill.runtime.totalTokens;
+      }
+      if (skillLibrarySortKey === "score") {
+        return right.skill.health.score - left.skill.health.score;
+      }
+      if (skillLibrarySortKey === "latest") {
+        return (right.skill.runtime.latestRunAt ?? right.skill.lastSeenAt).localeCompare(
+          left.skill.runtime.latestRunAt ?? left.skill.lastSeenAt
+        );
+      }
+      return right.priorityScore - left.priorityScore;
+    });
+  const filteredRemoteCandidates = remoteCandidates
+    .filter((candidate) => {
+      const query = remoteLibraryQuery.trim().toLocaleLowerCase();
+      return (
+        query.length === 0 ||
+        [
+          candidate.displayName,
+          candidate.normalizedUrl,
+          candidate.catalogSkillId ?? "",
+          candidate.sourceType,
+          candidate.status
+        ]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query)
+      );
+    })
+    .sort((left, right) => {
+      if (remoteLibrarySortKey === "risk") {
+        const riskRank: Record<RemoteSkillRiskLevel, number> = {
+          low: 1,
+          medium: 2,
+          high: 3,
+          blocked: 4
+        };
+        return riskRank[right.riskLevel] - riskRank[left.riskLevel];
+      }
+      if (remoteLibrarySortKey === "status") {
+        return right.status.localeCompare(left.status);
+      }
+      if (remoteLibrarySortKey === "source") {
+        return left.normalizedUrl.localeCompare(right.normalizedUrl);
+      }
+      return left.displayName.localeCompare(right.displayName);
+    });
   const primaryLibrarySkill =
     librarySkillRows.find((row) => row.skill.id === selectedSkillAnalysisSkillId)?.skill ??
+    filteredLibrarySkillRows[0]?.skill ??
     librarySkillRows[0]?.skill ??
     null;
   const topLibrarySkillRows = librarySkillRows.slice(0, 3);
@@ -6822,6 +9127,238 @@ export default function App() {
           proposal.skillId === selectedLibrarySkillRow.skill.id && proposal.status === "open"
       )
     : [];
+  const evaluationTargetRow = selectedLibrarySkillRow ?? librarySkillRows[0] ?? null;
+  const evaluationTargetHasAnalysis =
+    Boolean(skillAnalysis && evaluationTargetRow && skillAnalysis.skillId === evaluationTargetRow.skill.id);
+  const evaluationRoutingScore = evaluationTargetRow
+    ? Math.min(100, Math.max(38, evaluationTargetRow.skill.health.score + (evaluationTargetRow.skillRuns.length > 0 ? 8 : -8)))
+    : 0;
+  const evaluationCostScore = evaluationTargetRow
+    ? Math.min(
+        100,
+        Math.max(
+          35,
+          88 -
+            Math.round(
+              (evaluationTargetRow.skillRuns.reduce((sum, run) => sum + run.totalTokens, 0) /
+                Math.max(evaluationTargetRow.skillRuns.length, 1)) /
+                220
+            )
+        )
+      )
+    : 0;
+  const evaluationDeveloperFitScore = evaluationTargetRow
+    ? Math.min(
+        100,
+        evaluationTargetRow.skill.health.score +
+          (evaluationTargetRow.skill.governance.role === "development" ? 10 : 0) +
+          (evaluationTargetHasAnalysis ? 6 : 0)
+      )
+    : 0;
+  const evaluationSafetyScore = evaluationTargetRow
+    ? Math.min(
+        100,
+        Math.max(
+          40,
+          92 -
+            (evaluationTargetRow.skill.governance.containsSensitiveOperationalData ? 18 : 0) -
+            evaluationTargetRow.openProposalCount * 6
+        )
+      )
+    : 0;
+  const evaluationOverallScore = evaluationTargetRow
+    ? Math.round(
+        (evaluationRoutingScore +
+          evaluationCostScore +
+          evaluationDeveloperFitScore +
+          evaluationSafetyScore) /
+          4
+      )
+    : 0;
+  const overviewActionItems = [
+    ...managedProjects
+      .filter((project) => !project.lastScanAt)
+      .map((project) => ({
+        id: `project-scan-${project.id}`,
+        tone: "project",
+        projectName: project.name,
+        title: tx("Scan this project", "扫描这个项目"),
+        detail: tx("Project is bound but has no scan result yet.", "项目已绑定，但还没有扫描结果。"),
+        href: "#discovery" as const,
+        onClick: () => {
+          setInspectedProjectPath(project.path);
+          navigateToProductSection("#discovery");
+        }
+      })),
+    ...managedProjects
+      .filter((project) => project.lastScanAt && !project.monitoringEnabled)
+      .map((project) => ({
+        id: `project-monitor-${project.id}`,
+        tone: "agent",
+        projectName: project.name,
+        title: tx("Enable heartbeat monitor", "开启心跳监控"),
+        detail: tx("Runtime evidence will not keep refreshing until monitoring is enabled.", "开启监控后，运行证据才会持续刷新。"),
+        href: "#discovery" as const,
+        onClick: () => {
+          setInspectedProjectPath(project.path);
+          navigateToProductSection("#discovery");
+        }
+      })),
+    ...proposals
+      .filter(
+        (proposal) =>
+          proposal.status === "open" &&
+          boot?.skills.some(
+            (skill) =>
+              skill.id === proposal.skillId &&
+              managedProjects.some((project) => isPathInsideProject(skill.sourcePath, project.path))
+          )
+      )
+      .map((proposal) => {
+        const skill = boot?.skills.find((entry) => entry.id === proposal.skillId) ?? null;
+        const project = skill
+          ? managedProjects.find((entry) => isPathInsideProject(skill.sourcePath, entry.path)) ?? null
+          : null;
+        return {
+          id: `proposal-${proposal.id}`,
+          tone: proposal.severity === "high" ? "proposal" : "skill",
+          projectName: project?.name ?? tx("Unbound", "未绑定"),
+          title: formatProposalTitle(proposal, languageMode),
+          detail: formatProposalBenefit(proposal, languageMode),
+          href: "#proposals" as const,
+          onClick: () => {
+            setProposalFilter("open");
+            setActiveProposalId(proposal.id);
+            navigateToProductSection("#proposals");
+          }
+        };
+      }),
+    ...librarySkillRows
+      .filter(
+        (row) =>
+          row.skill.runtime.totalRuns > 0 &&
+          row.skill.health.score < 70 &&
+          managedProjects.some((project) => isPathInsideProject(row.skill.sourcePath, project.path))
+      )
+      .map((row) => {
+        const project = managedProjects.find((entry) => isPathInsideProject(row.skill.sourcePath, entry.path)) ?? null;
+        return {
+          id: `skill-health-${row.skill.id}`,
+          tone: "skill",
+          projectName: project?.name ?? tx("Unbound", "未绑定"),
+          title: tx("Review low-score Skill", "复查低分技能"),
+          detail: `${row.skill.displayName} · ${row.skill.health.score}`,
+          href: "#local-skills" as const,
+          onClick: () => {
+            setActiveSkillAssetTab("local");
+            setSelectedSkillAnalysisSkillId(row.skill.id);
+            navigateToProductSection("#local-skills");
+          }
+        };
+      })
+  ];
+  const guidedFlowSteps = [
+    {
+      href: "#discovery" as const,
+      label: tx("Projects", "项目管理"),
+      compactLabel: compactTx("Projects", "项目"),
+      title: tx("Manage one project", "管理一个项目"),
+      instruction: tx(
+        "Bind one project folder, scan only that directory, and use the project list as the main entry.",
+        "绑定一个项目文件夹，只扫描该目录，并把项目列表作为主入口。"
+      ),
+      cta: tx("Open Projects", "进入项目管理"),
+      doneWhen: tx("Done when one project directory has been scanned.", "完成标准：已扫描一个项目目录。"),
+      isDone: managedProjects.some((project) => Boolean(project.lastScanAt))
+    },
+    {
+      href: "#local-skills" as const,
+      label: tx("Library", "技能库"),
+      compactLabel: compactTx("Library", "技能库"),
+      title: tx("Manage the Skill assets", "管理技能资产"),
+      instruction: tx(
+        "Store scanned local Skills and imported remote candidates in one asset library.",
+        "把扫描到的本地技能和远程导入候选统一收纳到技能库。"
+      ),
+      cta: tx("Open Library", "进入技能库"),
+      doneWhen: tx("Done when one Skill is selected as the evaluation target.", "完成标准：选中一个 Skill 作为评测对象。"),
+      isDone: Boolean(
+        evaluationTargetRow &&
+        targetProjectRoot &&
+        isPathInsideProject(evaluationTargetRow.skill.sourcePath, targetProjectRoot)
+      )
+    },
+    {
+      href: "#evaluate" as const,
+      label: tx("Reports", "评测报告"),
+      compactLabel: compactTx("Reports", "报告"),
+      title: tx("Read project and Skill reports", "查看项目与技能报告"),
+      instruction: tx(
+        "Review project health, Skill quality, heartbeat monitoring, and workflow effect.",
+        "查看项目健康、技能质量、心跳监控和工作流效果。"
+      ),
+      cta: tx("Open Reports", "进入评测报告"),
+      doneWhen: tx("Done when the selected Skill has an analysis snapshot or baseline score.", "完成标准：选中 Skill 有分析快照或基线评分。"),
+      isDone: Boolean(
+        evaluationTargetHasAnalysis &&
+        evaluationTargetRow &&
+        targetProjectRoot &&
+        isPathInsideProject(evaluationTargetRow.skill.sourcePath, targetProjectRoot)
+      )
+    },
+    {
+      href: "#analysis" as const,
+      label: tx("Runtime", "运行链路"),
+      compactLabel: compactTx("Runtime", "链路"),
+      title: tx("Verify real Codex / Claude value", "验证真实 Codex / Claude 价值"),
+      instruction: tx(
+        "Discover local tool sources, preview measurable sessions, then import normalized runtime evidence.",
+        "发现本地工具来源，预览可测会话，再导入规范化运行证据。"
+      ),
+      cta: tx("Open Runtime", "进入运行链路"),
+      doneWhen: tx("Done when recent runs or local tool telemetry are available.", "完成标准：已有最近运行或本地工具遥测。"),
+      isDone: Boolean(
+        targetProjectRoot &&
+        recentRuns.some((run) => {
+          const skill = boot?.skills.find((entry) => entry.id === run.skillId);
+          return Boolean(skill && isPathInsideProject(skill.sourcePath, targetProjectRoot));
+        })
+      )
+    }
+  ];
+  const activeFlowStepIndex = guidedFlowSteps.findIndex((step) => step.href === activeSectionHref);
+  const firstIncompleteFlowStepIndex = guidedFlowSteps.findIndex((step) => !step.isDone);
+  const isGuidedFlowComplete = firstIncompleteFlowStepIndex < 0;
+  const recommendedFlowStep =
+    guidedFlowSteps[
+      activeFlowStepIndex >= 0
+        ? activeFlowStepIndex
+        : firstIncompleteFlowStepIndex >= 0
+          ? firstIncompleteFlowStepIndex
+          : guidedFlowSteps.length - 1
+    ];
+  const recommendedFlowTitle = isGuidedFlowComplete
+    ? tx("Core workflow ready", "核心流程已就绪")
+    : recommendedFlowStep.title;
+  const recommendedFlowInstruction = isGuidedFlowComplete
+    ? tx(
+        "Project assets, reports, and runtime evidence are available. Review monitoring signals or pick one Skill to improve.",
+        "项目资产、报告与运行证据都已具备。建议查看监控信号，或挑一个技能继续打磨。"
+      )
+    : recommendedFlowStep.instruction;
+  const recommendedFlowCta = isGuidedFlowComplete
+    ? tx("Review Runtime", "查看运行链路")
+    : recommendedFlowStep.cta;
+  const getGuidedFlowStepState = (step: (typeof guidedFlowSteps)[number], index: number) => {
+    const isActive =
+      step.href === activeSectionHref || (activeSectionHref === "#overview" && step.href === recommendedFlowStep.href);
+    const firstIncompleteIndex =
+      firstIncompleteFlowStepIndex >= 0 ? firstIncompleteFlowStepIndex : guidedFlowSteps.length - 1;
+    if (isActive) return "active";
+    if (step.isDone) return "done";
+    if (index === firstIncompleteIndex) return "next";
+    return "pending";
+  };
   const selectedDevelopmentSkillRow =
     (selectedLibrarySkillRow?.skill.governance.role === "development"
       ? selectedLibrarySkillRow
@@ -6912,14 +9449,243 @@ export default function App() {
           ? tx("Install", "安装")
           : tx("Preview", "预览");
   const currentProductSection = activeSectionHref.slice(1);
-  const activeDiscoveryRoots =
-    scanRoots.length > 0 ? scanRoots : (boot?.roots.map((root) => root.path) ?? []);
-  const activeDiscoveryExclusions =
-    scanExclusions.length > 0 ? scanExclusions : (boot?.exclusions.map((entry) => entry.path) ?? []);
+  const hasSelectedProject = targetProjectRoot.trim().length > 0;
+  const normalizedTargetProjectRoot = normalizeProjectPath(targetProjectRoot);
+  const focusedManagedProject = managedProjects.find((project) => project.path === normalizedTargetProjectRoot) ?? null;
+  const focusedProjectDisplayName = targetProjectRoot
+    ? focusedManagedProject?.name ?? getProjectDisplayName(targetProjectRoot)
+    : "";
+  const inspectedProject = inspectedProjectPath
+    ? managedProjects.find((project) => project.path === normalizeProjectPath(inspectedProjectPath)) ?? null
+    : null;
+  const selectedProjectLog = selectedProjectLogPath
+    ? managedProjects.find((project) => project.path === normalizeProjectPath(selectedProjectLogPath)) ?? null
+    : null;
+  const selectedProjectLogEntries = selectedProjectLog
+    ? projectOnboardingLogs
+        .filter((entry) => entry.projectPath === selectedProjectLog.path)
+        .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
+    : [];
+  const currentProjectSkills = hasSelectedProject
+    ? (boot?.skills ?? []).filter((skill) =>
+        isPathInsideProject(skill.sourcePath, normalizedTargetProjectRoot)
+      )
+    : [];
+  const currentProjectSkillIds = new Set(currentProjectSkills.map((skill) => skill.id));
+  const currentProjectSkillCount = currentProjectSkills.length;
+  const currentProjectRuns = hasSelectedProject
+    ? recentRuns.filter((run) => currentProjectSkillIds.has(run.skillId))
+    : [];
+  const activeScanTargetLabel =
+    scanResult?.scanScope === "project"
+      ? tx("Project scan", "项目扫描")
+      : tx("Project workspace", "项目工作区");
+  const isEmptyTargetProject =
+    scanResult?.scanScope === "project" &&
+    scanResult.skillsFound === 0 &&
+    scanResult.rootPaths.length > 0;
+  const workflowStarterProjectRoot =
+    scanResult?.scanScope === "project" && scanResult.rootPaths[0]
+      ? scanResult.rootPaths[0]
+      : targetProjectRoot;
+  const isEmptyScanDialogProject =
+    scanResultDialog?.scanScope === "project" &&
+    scanResultDialog.skillsFound === 0;
+  const isWorkflowAppliedToScanDialogProject =
+    scanResultDialog?.scanScope === "project" &&
+    workflowStarterResult?.preview.projectRoot === scanResultDialog.rootPaths[0];
+  const scanResultDialogProjectRoot = scanResultDialog?.rootPaths[0]
+    ? normalizeProjectPath(scanResultDialog.rootPaths[0])
+    : "";
+  const scanResultDialogProject =
+    managedProjects.find((project) => project.path === scanResultDialogProjectRoot) ?? null;
+
+  useEffect(() => {
+    if (!inspectedProject) {
+      setProjectProfile(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setProjectProfile(null);
+    void window.workbench
+      .getProjectProfile(inspectedProject.path)
+      .then((nextProfile) => {
+        if (!cancelled) {
+          setProjectProfile(nextProfile);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProjectProfile(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [inspectedProject?.path]);
 
   useEffect(() => {
     interactionNoticeRef.current = interactionNotice;
   }, [interactionNotice]);
+
+  useEffect(() => {
+    window.localStorage.setItem(managedProjectsStorageKey, JSON.stringify(managedProjects));
+  }, [managedProjects]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const localProjects = loadManagedProjects();
+    if (typeof window.workbench.listManagedProjects !== "function") {
+      projectDatabaseHydratedRef.current = true;
+      return undefined;
+    }
+    void window.workbench
+      .listManagedProjects()
+      .then(async (storedProjects) => {
+        if (cancelled) {
+          return;
+        }
+        const projects =
+          storedProjects.length > 0
+            ? storedProjects
+            : localProjects.length > 0
+              ? await window.workbench.saveManagedProjects(localProjects)
+              : [];
+        if (cancelled) {
+          return;
+        }
+        projectDatabaseHydratedRef.current = true;
+        setManagedProjects(projects);
+      })
+      .catch(() => {
+        projectDatabaseHydratedRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !projectDatabaseHydratedRef.current ||
+      typeof window.workbench.saveManagedProjects !== "function"
+    ) {
+      return;
+    }
+    void window.workbench.saveManagedProjects(managedProjects).catch((nextError) => {
+      setError(nextError instanceof Error ? nextError.message : "Failed to save project library");
+    });
+  }, [managedProjects]);
+
+  useEffect(() => {
+    window.localStorage.setItem(projectHeartbeatStorageKey, JSON.stringify(projectHeartbeatEntries));
+  }, [projectHeartbeatEntries]);
+
+  useEffect(() => {
+    window.localStorage.setItem(projectOnboardingLogsStorageKey, JSON.stringify(projectOnboardingLogs));
+  }, [projectOnboardingLogs]);
+
+  useEffect(() => {
+    if (targetProjectRoot.trim() || managedProjects.length === 0) {
+      return;
+    }
+
+    const restoredProject = managedProjects[0];
+    setTargetProjectRoot(restoredProject.path);
+    setScanRoots([restoredProject.path]);
+  }, [managedProjects, targetProjectRoot]);
+
+  useEffect(() => {
+    if (!scanResultDialog) {
+      return;
+    }
+
+    const projectRoot = normalizeProjectPath(scanResultDialog.rootPaths[0] ?? "");
+    const projectName =
+      managedProjects.find((project) => project.path === projectRoot)?.name ??
+      getProjectDisplayName(projectRoot);
+    setScanResultProjectName(projectName);
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setScanResultDialog(null);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [scanResultDialog]);
+
+  useEffect(() => {
+    if (!inspectedProjectPath) {
+      return;
+    }
+
+    function closeProjectDetailOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setInspectedProjectPath("");
+      }
+    }
+
+    window.addEventListener("keydown", closeProjectDetailOnEscape);
+    return () => window.removeEventListener("keydown", closeProjectDetailOnEscape);
+  }, [inspectedProjectPath]);
+
+  useEffect(() => {
+    if (!pendingBindProjectRoot || busyAction === "project-scan") {
+      return;
+    }
+
+    function closeBindDialogOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setPendingBindProjectRoot("");
+      }
+    }
+
+    window.addEventListener("keydown", closeBindDialogOnEscape);
+    return () => window.removeEventListener("keydown", closeBindDialogOnEscape);
+  }, [pendingBindProjectRoot, busyAction]);
+
+  useEffect(() => {
+    const monitoredProjects = managedProjects.filter((project) => project.monitoringEnabled);
+    if (
+      monitoredProjects.length === 0 ||
+      boot?.policy?.telemetryMode === "disabled" ||
+      !boot?.policy?.allowBackgroundWatch
+    ) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      monitoredProjects.forEach((project) => {
+        if (now - monitoringSessionStartedAtRef.current < project.monitoringIntervalMs) {
+          return;
+        }
+        const lastMonitorAt = project.lastMonitorAt ?? project.lastScanAt ?? project.boundAt;
+        const elapsedMs = lastMonitorAt ? now - new Date(lastMonitorAt).getTime() : Number.POSITIVE_INFINITY;
+        if (
+          elapsedMs < project.monitoringIntervalMs ||
+          monitoringRefreshInFlightRef.current.has(project.path)
+        ) {
+          return;
+        }
+
+        monitoringRefreshInFlightRef.current.add(project.path);
+        void checkProjectConnectionHeartbeat(project).finally(() => {
+          monitoringRefreshInFlightRef.current.delete(project.path);
+        });
+      });
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [
+    boot?.policy?.allowBackgroundWatch,
+    boot?.policy?.telemetryMode,
+    managedProjects
+  ]);
 
   useEffect(() => {
     if (remoteCandidates.length === 0) {
@@ -6933,6 +9699,15 @@ export default function App() {
       setSelectedRemoteCandidateId(remoteCandidates[0].candidateId);
     }
   }, [remoteCandidates, selectedRemoteCandidateId]);
+
+  useEffect(() => {
+    if (activeSkillAssetTab !== "local" || filteredLibrarySkillRows.length === 0) {
+      return;
+    }
+    if (!filteredLibrarySkillRows.some((row) => row.skill.id === selectedSkillAnalysisSkillId)) {
+      setSelectedSkillAnalysisSkillId(filteredLibrarySkillRows[0].skill.id);
+    }
+  }, [activeSkillAssetTab, filteredLibrarySkillRows, selectedSkillAnalysisSkillId]);
 
   useEffect(() => {
     if (!selectedRemoteCandidateId) {
@@ -7125,6 +9900,12 @@ export default function App() {
   }, [primaryLibrarySkill?.id]);
 
   useEffect(() => {
+    if (activeSectionHref !== "#apply-center") {
+      setApplyPreview(null);
+      setApplyPreviewError(null);
+      return;
+    }
+
     const previewInput = remoteApplyCandidate
       ? { remoteCandidateId: remoteApplyCandidate.candidateId, scope: applyScope }
       : primaryLibrarySkill
@@ -7167,7 +9948,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [applyScope, boot?.status, primaryLibrarySkill?.id, remoteApplyCandidate?.candidateId]);
+  }, [activeSectionHref, applyScope, boot?.status, primaryLibrarySkill?.id, remoteApplyCandidate?.candidateId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -7265,6 +10046,10 @@ export default function App() {
       });
     }
   }, [graphSnapshot, pinnedGraphNeighborhood]);
+
+  useEffect(() => {
+    graphNeighborhoodCacheRef.current.clear();
+  }, [graphSnapshot?.generatedAt]);
 
   useEffect(() => {
     if (!graphSearchScopeEnabled) {
@@ -7647,6 +10432,17 @@ export default function App() {
       return;
     }
 
+    const cacheKey = getGraphNeighborhoodCacheKey(selectedGraphNodeId, graphSnapshot.generatedAt);
+    const cachedNeighborhood = graphNeighborhoodCacheRef.current.get(cacheKey);
+    if (cachedNeighborhood) {
+      startTransition(() => {
+        setGraphNeighborhood(cachedNeighborhood);
+        setGraphNeighborhoodStatus("ready");
+        setGraphNeighborhoodError(null);
+      });
+      return;
+    }
+
     let cancelled = false;
     setGraphNeighborhoodStatus("loading");
     setGraphNeighborhood(null);
@@ -7660,6 +10456,7 @@ export default function App() {
         }
 
         startTransition(() => {
+          graphNeighborhoodCacheRef.current.set(cacheKey, nextNeighborhood);
           setGraphNeighborhood(nextNeighborhood);
           setGraphNeighborhoodStatus("ready");
           setGraphNeighborhoodError(null);
@@ -7799,7 +10596,7 @@ export default function App() {
           await Promise.all([
             window.workbench.getDailySummary(),
             window.workbench.getWeeklySummary(),
-            window.workbench.listRecentRuns(12),
+            window.workbench.listRecentRuns(runtimeRunFetchLimit),
             window.workbench.listOptimizationProposals("all"),
             window.workbench.getGraphSnapshot(),
             window.workbench.listBundles()
@@ -7863,6 +10660,7 @@ export default function App() {
         });
       });
       await refreshWorkbench(false);
+      return result;
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Backup creation failed");
     } finally {
@@ -7882,8 +10680,8 @@ export default function App() {
         setGraphActionNotice({
           action: tx("Graph Refreshed", "图谱已刷新"),
           scope: tx(
-            `${nextGraph.totalNodes} node(s) and ${nextGraph.totalEdges} edge(s) were regenerated from local registry, telemetry, proposals, and bundle state.`,
-            `${nextGraph.totalNodes} 个节点和 ${nextGraph.totalEdges} 条边已从本地注册表、遥测、建议和 Bundle 状态重新生成。`
+            `${nextGraph.totalNodes} node(s) and ${nextGraph.totalEdges} edge(s) were regenerated from the local skill index, telemetry, proposals, and bundle state.`,
+            `${nextGraph.totalNodes} 个节点和 ${nextGraph.totalEdges} 条边已从本地技能索引、遥测、建议和 Bundle 状态重新生成。`
           ),
           nextStep: tx(
             "Search, select a node, or inspect the scope stack to continue graph exploration.",
@@ -7925,139 +10723,12 @@ export default function App() {
         });
       });
       await refreshWorkbench(false);
+      return result;
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Proposal refresh failed");
     } finally {
       setBusyAction(null);
     }
-  }
-
-  async function addRoot() {
-    const picked = await window.workbench.pickDirectory();
-    if (!picked) {
-      showInteractionNotice({
-        area: currentAreaLabel(),
-        action: tx("Choose Folder", "选择文件夹"),
-        result: tx("Folder selection was cancelled; no scan root changed.", "已取消选择文件夹；扫描根目录未变化。"),
-        nextStep: tx("Choose a folder again or continue with the existing approved roots.", "可重新选择文件夹，或继续使用现有已批准根目录。"),
-        tone: "info"
-      });
-      return;
-    }
-
-    if (scanRoots.includes(picked)) {
-      showInteractionNotice({
-        area: currentAreaLabel(),
-        action: tx("Add Scan Root", "添加扫描根目录"),
-        result: tx(
-          `${picked} is already staged as an approved scan root.`,
-          `${picked} 已经在待授权扫描根目录中。`
-        ),
-        nextStep: tx(
-          "Choose another folder or continue with scan and authorization.",
-          "请选择其他目录，或继续扫描与授权。"
-        ),
-        tone: "info"
-      });
-      return;
-    }
-
-    startTransition(() => {
-      setScanRoots((current) => [...current, picked]);
-      setScanExclusions((current) => current.filter((path) => path !== picked));
-      setInteractionNotice({
-        area: currentAreaLabel(),
-        action: tx("Add Scan Root", "添加扫描根目录"),
-        result: tx(`Selected ${picked}`, `已选择 ${picked}`),
-        nextStep: tx(
-          "Scan now or finish authorization to index this local folder. Any staged exclusion for the same path was cleared.",
-          "可立即扫描，或完成授权后索引此本地目录。同一路径上的待排除项已自动清除。"
-        ),
-        tone: "success"
-      });
-    });
-  }
-
-  function removeRoot(path: string) {
-    startTransition(() => {
-      setScanRoots((current) => current.filter((root) => root !== path));
-      setInteractionNotice({
-        area: currentAreaLabel(),
-        action: tx("Remove Scan Root", "移除扫描根目录"),
-        result: tx(`Removed ${path}`, `已移除 ${path}`),
-        nextStep: tx("The original folder is untouched; only the pending scan scope changed.", "原始目录未受影响；仅待扫描范围发生变化。"),
-        tone: "warning"
-      });
-    });
-  }
-
-  async function addExclusion() {
-    const picked = await window.workbench.pickDirectory();
-    if (!picked) {
-      showInteractionNotice({
-        area: currentAreaLabel(),
-        action: tx("Choose Exclusion", "选择排除项"),
-        result: tx("Exclusion selection was cancelled; no path changed.", "已取消选择排除项；路径未变化。"),
-        nextStep: tx("Choose a heavy folder such as node_modules, dist, or .cache if needed.", "如有需要，可选择 node_modules、dist 或 .cache 等重目录。"),
-        tone: "info"
-      });
-      return;
-    }
-
-    if (scanExclusions.includes(picked)) {
-      showInteractionNotice({
-        area: currentAreaLabel(),
-        action: tx("Add Exclusion", "添加排除项"),
-        result: tx(`${picked} is already staged as an exclusion.`, `${picked} 已经在待排除列表中。`),
-        nextStep: tx(
-          "Choose another heavy folder such as node_modules, dist, or .cache.",
-          "请选择其他重目录，例如 node_modules、dist 或 .cache。"
-        ),
-        tone: "info"
-      });
-      return;
-    }
-
-    if (scanRoots.includes(picked)) {
-      showInteractionNotice({
-        area: currentAreaLabel(),
-        action: tx("Add Exclusion", "添加排除项"),
-        result: tx(
-          `${picked} is already staged as a scan root, so it cannot be excluded at the same time.`,
-          `${picked} 已在待授权扫描根目录中，不能同时作为排除项。`
-        ),
-        nextStep: tx(
-          "Remove it from scan roots first, or choose a nested heavy folder to exclude.",
-          "请先从扫描根目录中移除，或改选其内部的重目录作为排除项。"
-        ),
-        tone: "warning"
-      });
-      return;
-    }
-
-    startTransition(() => {
-      setScanExclusions((current) => [...current, picked]);
-      setInteractionNotice({
-        area: currentAreaLabel(),
-        action: tx("Add Exclusion", "添加排除项"),
-        result: tx(`Excluded ${picked}`, `已排除 ${picked}`),
-        nextStep: tx("Future scans will skip this path while leaving the folder unchanged.", "后续扫描会跳过此路径，文件夹本身不会改变。"),
-        tone: "success"
-      });
-    });
-  }
-
-  function removeExclusion(path: string) {
-    startTransition(() => {
-      setScanExclusions((current) => current.filter((entry) => entry !== path));
-      setInteractionNotice({
-        area: currentAreaLabel(),
-        action: tx("Remove Exclusion", "移除排除项"),
-        result: tx(`Removed ${path}`, `已移除 ${path}`),
-        nextStep: tx("The path can be included again during the next approved scan.", "下次已授权扫描时可重新包含该路径。"),
-        tone: "warning"
-      });
-    });
   }
 
   async function chooseTelemetryFile() {
@@ -8187,7 +10858,7 @@ export default function App() {
       startTransition(() => {
         setRemoteSourceAnalysis(analysis);
         setInteractionNotice({
-          area: tx("Discovery / Remote", "发现 / 远程"),
+          area: tx("Remote Market", "远程市场"),
           action: tx("Analyze Repository", "分析仓库"),
           result: tx(
             `${analysis.displayName} was analyzed locally as an inactive remote candidate.`,
@@ -8206,7 +10877,7 @@ export default function App() {
         nextError instanceof Error ? nextError.message : tx("Remote source analysis failed.", "远程来源分析失败。")
       );
       showInteractionNotice({
-        area: tx("Discovery / Remote", "发现 / 远程"),
+        area: tx("Remote Market", "远程市场"),
         action: tx("Analyze Repository", "分析仓库"),
         result: tx("Remote source analysis failed in local preflight.", "远程来源本地预检失败。"),
         nextStep: tx("Check the GitHub URL format, then run analysis again.", "检查 GitHub URL 格式后重新分析。"),
@@ -8253,13 +10924,13 @@ export default function App() {
   }
 
   async function grantAuthorization() {
-    if (scanRoots.length === 0) {
-      setError("Choose at least one scan root before authorizing.");
+    if (!targetProjectRoot.trim()) {
+      setError("Choose one project directory before authorizing.");
       showInteractionNotice({
         area: tx("First-Run Authorization", "首次授权"),
         action: tx("Authorize and Initialize", "授权并初始化"),
-        result: tx("Initialization needs at least one approved scan root.", "初始化前至少需要一个已批准扫描根目录。"),
-        nextStep: tx("Go to Scope, choose a folder, then initialize again.", "回到范围步骤，选择文件夹后再初始化。"),
+        result: tx("Initialization needs one selected project directory.", "初始化前需要选择一个项目目录。"),
+        nextStep: tx("Go to Project, choose one folder, then initialize again.", "回到项目步骤，选择一个文件夹后再初始化。"),
         tone: "warning"
       });
       return;
@@ -8287,8 +10958,8 @@ export default function App() {
         setInteractionNotice({
           area: tx("First-Run Authorization", "首次授权"),
           action: tx("Authorize and Initialize", "授权并初始化"),
-          result: tx(`${scanRoots.length} scan root(s) authorized locally.`, `已在本地授权 ${scanRoots.length} 个扫描根目录。`),
-          nextStep: tx("Open Discovery to scan, or Skill Library to review indexed Skills.", "打开发现进行扫描，或进入 Skill 库查看已索引 Skill。"),
+          result: tx("The selected project directory is authorized locally.", "已在本地授权所选项目目录。"),
+          nextStep: tx("Open Project Management to scan this project, or Skill Library to review indexed Skills.", "打开项目管理扫描该项目，或进入技能库查看已索引技能。"),
           tone: "success"
         });
       });
@@ -8301,35 +10972,1050 @@ export default function App() {
   }
 
   async function scanSkills() {
-    setBusyAction("scan");
+    if (targetProjectRoot.trim()) {
+      showInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("Scan Project", "扫描项目"),
+        result: tx("Skill OS v1 scans only the selected project directory.", "Skill OS v1 只扫描已选择的项目目录。"),
+        nextStep: tx("The project scan is starting now.", "项目扫描正在开始。"),
+        tone: "info"
+      });
+      await scanTargetProject();
+      return;
+    }
+
+    showInteractionNotice({
+      area: tx("Project Management", "项目管理"),
+      action: tx("Scan Project", "扫描项目"),
+      result: tx("There is no project folder selected yet.", "尚未选择项目文件夹。"),
+      nextStep: tx("Choose one project folder first; full-computer scan is reserved for a later version.", "请先选择一个项目文件夹；全电脑扫描会在后续版本单独开发。"),
+      tone: "warning"
+    });
+  }
+
+  function inspectManagedProject(project: ManagedProject) {
+    startTransition(() => {
+      setInspectedProjectPath(project.path);
+      setInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("View Project", "查看项目"),
+        result: tx(`${project.name} project details are open.`, `${project.name} 的项目详情已打开。`),
+        nextStep: tx("Use the Skills column to inspect project Skills, workflow, and heartbeat summary.", "可通过技能列查看项目技能、工作流和心跳摘要。"),
+        tone: "info"
+      });
+    });
+  }
+
+  function renameManagedProject(project: ManagedProject, name: string) {
+    const nextName = name.trim();
+    if (!nextName) {
+      showInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("Rename Project", "重命名项目"),
+        result: tx("Project name cannot be empty.", "项目名称不能为空。"),
+        nextStep: tx("Enter a short display name for this project.", "请输入一个简短的项目显示名。"),
+        tone: "warning"
+      });
+      return;
+    }
+
+    setManagedProjects((projects) =>
+      upsertManagedProject(projects, project.path, {
+        name: nextName,
+        lastFocusedAt: new Date().toISOString()
+      })
+    );
+    showInteractionNotice({
+      area: tx("Project Management", "项目管理"),
+      action: tx("Rename Project", "重命名项目"),
+      result: tx(`Project renamed to ${nextName}.`, `项目已重命名为 ${nextName}。`),
+      nextStep: tx("The bound project list and report pages now use this display name.", "已绑定项目列表和报告页会使用这个显示名。"),
+      tone: "success"
+    });
+  }
+
+  function analyzeManagedProject(project: ManagedProject) {
+    startTransition(() => {
+      setInspectedProjectPath("");
+      setInteractionNotice({
+        area: tx("Evaluation Reports", "评测报告"),
+        action: tx("Open Project Report", "打开项目报告"),
+        result: tx(`${project.name} report view is open.`, `${project.name} 的报告视图已打开。`),
+        nextStep: tx("Reports are organized by project, Skill, heartbeat, and workflow effect.", "报告按项目、技能、心跳和工作流效果组织。"),
+        tone: "info"
+      });
+    });
+    navigateToProductSection("#evaluate");
+  }
+
+  function unbindManagedProject(project: ManagedProject) {
+    startTransition(() => {
+      const nextProjects = managedProjects.filter((entry) => entry.path !== project.path);
+      setManagedProjects(nextProjects);
+      if (normalizeProjectPath(inspectedProjectPath) === project.path) {
+        setInspectedProjectPath(nextProjects[0]?.path ?? "");
+      }
+      if (normalizeProjectPath(targetProjectRoot) === project.path) {
+        const nextProject = nextProjects[0] ?? null;
+        setTargetProjectRoot(nextProject?.path ?? "");
+        setScanRoots(nextProject ? [nextProject.path] : []);
+        setScanExclusions([]);
+        setWorkflowStarterPreview(null);
+        setWorkflowStarterResult(null);
+        setWorkflowStarterHighlighted(false);
+        setScanResultDialog(null);
+        setScanResult(null);
+      }
+      setInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("Unbind Project", "解绑项目"),
+        result: tx(`${project.name} was removed from bound projects.`, `${project.name} 已从已绑定项目中移除。`),
+        nextStep: tx("The project folder on disk was not deleted.", "磁盘上的项目文件夹不会被删除。"),
+        tone: "info"
+      });
+    });
+  }
+
+  function scanManagedProject(project: ManagedProject) {
+    void scanTargetProject(project.path);
+  }
+
+  function appendProjectOnboardingLog(
+    projectPath: string,
+    stage: ProjectOnboardingLogEntry["stage"],
+    tone: ProjectOnboardingLogEntry["tone"],
+    message: string
+  ) {
+    const occurredAt = new Date().toISOString();
+    setProjectOnboardingLogs((entries) =>
+      [
+        ...entries,
+        {
+          id: `${projectPath}:${occurredAt}:${stage}`,
+          projectPath,
+          occurredAt,
+          stage,
+          tone,
+          message
+        }
+      ].slice(-maxProjectOnboardingLogEntries)
+    );
+  }
+
+  async function repairManagedProject(project: ManagedProject) {
+    try {
+      await performProjectRepair(project);
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("Project repair failed.", "项目修正失败。");
+      setProjectRepairFeedback({
+        projectPath: project.path,
+        status: "failed",
+        detail: tx(`Repair failed: ${message}`, `修正失败：${message}`)
+      });
+      appendProjectOnboardingLog(
+        project.path,
+        "complete",
+        "error",
+        tx(`Project repair failed: ${message}`, `项目修正失败：${message}`)
+      );
+      showInteractionNotice({
+        area: tx("Project Onboarding", "项目接入"),
+        action: tx("Detect and Repair", "检测并修正"),
+        result: tx(`${project.name} repair failed.`, `${project.name} 修正失败。`),
+        nextStep: message,
+        tone: "warning"
+      });
+    }
+  }
+
+  async function performProjectRepair(project: ManagedProject) {
+    setProjectRepairFeedback({
+      projectPath: project.path,
+      status: "running",
+      detail: tx("Step 1/4: scanning the project folder...", "第 1/4 步：正在扫描项目目录...")
+    });
+    appendProjectOnboardingLog(
+      project.path,
+      "scan",
+      "info",
+      tx(`Started project onboarding repair for ${project.path}.`, `开始检测并修正项目：${project.path}`)
+    );
+    showInteractionNotice({
+      area: tx("Project Onboarding", "项目接入"),
+      action: tx("Detect and Repair", "检测并修正"),
+      result: tx(`${project.name} repair is running.`, `${project.name} 正在修正中。`),
+      nextStep: tx("The project list will show the repair result when checks finish.", "检测结束后，项目列表会直接显示修正结果。"),
+      tone: "info"
+    });
+
+    const result = await scanTargetProject(project.path, {
+      showResultDialog: false,
+      suppressInteractionNotice: true
+    });
+    if (!result) {
+      setProjectRepairFeedback({
+        projectPath: project.path,
+        status: "failed",
+        detail: tx("Project scan failed. Check folder access and try again.", "项目扫描失败，请检查目录权限后重试。")
+      });
+      appendProjectOnboardingLog(
+        project.path,
+        "scan",
+        "error",
+        tx("Project folder scan failed. Check whether the folder exists and is readable.", "项目目录扫描失败，请检查目录是否存在且可读。")
+      );
+      return;
+    }
+
+    appendProjectOnboardingLog(
+      project.path,
+      "skills",
+      result.skillsFound > 0 ? "success" : "warning",
+      result.skillsFound > 0
+        ? tx(`${result.skillsFound} project Skill(s) were indexed.`, `已索引 ${result.skillsFound} 个项目技能。`)
+        : tx("No project Skill was found.", "未发现项目技能。")
+    );
+    appendProjectOnboardingLog(
+      project.path,
+      "workflow",
+      result.workflowDetected ? "success" : "warning",
+      result.workflowDetected
+        ? tx("Project workflow markers were detected.", "已检测到项目工作流标记。")
+        : tx("Project workflow is incomplete and needs confirmation before files are written.", "项目工作流不完整，写入文件前需要用户确认。")
+    );
+
+    if (result.skillsFound === 0 || !result.workflowDetected) {
+      setProjectRepairFeedback({
+        projectPath: project.path,
+        status: "needs-action",
+        detail: tx("A workflow repair plan is ready for confirmation.", "工作流修正方案已生成，等待确认。")
+      });
+      await previewRecommendedWorkflowStarter("card", result.rootPaths[0] ?? project.path);
+      return;
+    }
+
+    const repairedProject = {
+      ...project,
+      lastScanAt: result.completedAt,
+      skillsFound: result.skillsFound,
+      filesSeen: result.filesSeen,
+      skillsChanged: result.skillsChanged,
+      workflowApplied: result.workflowDetected
+    };
+    if (boot?.policy?.telemetryMode === "disabled") {
+      setProjectRepairFeedback({
+        projectPath: project.path,
+        status: "completed",
+        detail: tx("Configuration repaired. Runtime monitoring still needs authorization.", "配置修正完成，运行监控仍需授权。")
+      });
+      appendProjectOnboardingLog(
+        project.path,
+        "telemetry",
+        "warning",
+        tx("Project configuration is ready, but runtime telemetry is not authorized.", "项目配置已就绪，但运行遥测尚未授权。")
+      );
+      showInteractionNotice({
+        area: tx("Project Onboarding", "项目接入"),
+        action: tx("Detect and Repair", "检测并修正"),
+        result: tx("Project indexing and workflow are ready, but runtime monitoring is not authorized.", "项目索引和工作流已就绪，但运行监控尚未授权。"),
+        nextStep: tx("Use the monitor switch when you are ready to grant runtime permission.", "需要时可点击监控开关授权运行监控。"),
+        tone: "warning"
+      });
+      return;
+    }
+
+    setProjectRepairFeedback({
+      projectPath: project.path,
+      status: "running",
+      detail: tx("Step 3/4: checking local Codex sessions...", "第 3/4 步：正在检查本地 Codex 会话...")
+    });
+    appendProjectOnboardingLog(
+      project.path,
+      "connection",
+      "info",
+      tx("Started matching local session cwd and explicit Skill evidence.", "开始匹配本地会话目录和明确的 Skill 调用证据。")
+    );
+    const runtimeResult = await refreshProjectRuntimeEvidence(repairedProject);
+    const observedWorkspace = getLatestObservedWorkspace(runtimeResult);
+    const connectionComplete = runtimeResult?.status === "imported";
+    const directoryConnected = connectionComplete || runtimeResult?.status === "connected_no_skill_runs";
+    const repairDetail = connectionComplete
+      ? tx("Configuration and Codex project connection were verified.", "配置和 Codex 项目连接均已验证。")
+      : directoryConnected
+        ? tx(
+            "The Codex project directory is connected; waiting for a project Skill invocation.",
+            "Codex 项目目录已连接，正在等待项目技能触发。"
+          )
+      : observedWorkspace
+        ? tx(
+            `Codex is currently using ${observedWorkspace}; expected ${project.path}.`,
+            `检测到 Codex 当前目录为 ${observedWorkspace}；期望目录为 ${project.path}。`
+          )
+        : tx(
+            "Configuration repaired. Start a Codex task from this project directory.",
+            "配置修正完成，请从该项目目录启动 Codex 任务。"
+          );
+    setProjectRepairFeedback({
+      projectPath: project.path,
+      status: connectionComplete
+        ? "completed"
+        : directoryConnected
+          ? "connected-awaiting-skill"
+          : "connection-required",
+      detail: repairDetail
+    });
+    appendProjectOnboardingLog(
+      project.path,
+      "connection",
+      directoryConnected ? "success" : "warning",
+      repairDetail
+    );
+    appendProjectOnboardingLog(
+      project.path,
+      "complete",
+      directoryConnected ? "success" : "warning",
+      connectionComplete
+        ? tx("Project onboarding and connection verification completed.", "项目接入和连接验证完成。")
+        : directoryConnected
+          ? tx("Project connection is ready and awaiting a Skill invocation.", "项目连接已就绪，等待技能触发。")
+        : tx("Configuration repair completed, but the Codex task directory still needs correction.", "配置修正完成，但仍需修正 Codex 任务目录。")
+    );
+    showInteractionNotice({
+      area: tx("Project Onboarding", "项目接入"),
+      action: tx("Detect and Repair", "检测并修正"),
+      result: connectionComplete
+        ? tx(`${project.name} repair and connection checks are complete.`, `${project.name} 修正和连接检查均已完成。`)
+        : directoryConnected
+          ? tx(`${project.name} is connected and awaiting a Skill invocation.`, `${project.name} 已连接，等待技能触发。`)
+        : tx(`${project.name} configuration is repaired, but Codex is not connected to this project.`, `${project.name} 配置已修正，但 Codex 尚未连接到该项目。`),
+      nextStep: repairDetail,
+      tone: directoryConnected ? "success" : "warning"
+    });
+  }
+
+  function toggleProjectMonitoring(project: ManagedProject, enabled: boolean) {
+    if (
+      enabled &&
+      (boot?.policy?.telemetryMode === "disabled" || !boot?.policy?.allowBackgroundWatch)
+    ) {
+      setInspectedProjectPath(project.path);
+      showInteractionNotice({
+        area: tx("Project Runtime Evidence", "项目运行证据"),
+        action: tx("Heartbeat Monitor", "心跳监控"),
+        result: tx("Monitoring needs telemetry and background watch permission first.", "监控需要先开启遥测和后台监听权限。"),
+        nextStep: tx("Open the project detail dialog and enable telemetry, then turn monitoring on.", "请在项目详情弹窗开启遥测，再打开监控。"),
+        tone: "warning"
+      });
+      return;
+    }
+
+    const nextMonitorAt = enabled ? new Date().toISOString() : project.lastMonitorAt;
+    setManagedProjects((projects) =>
+      upsertManagedProject(projects, project.path, {
+        monitoringEnabled: enabled,
+        monitoringIntervalMs: project.monitoringIntervalMs,
+        lastMonitorAt: nextMonitorAt
+      })
+    );
+    showInteractionNotice({
+      area: tx("Project Runtime Evidence", "项目运行证据"),
+      action: tx("Heartbeat Monitor", "心跳监控"),
+      result: enabled
+        ? tx(`${project.name} monitoring is now on.`, `${project.name} 的监控已开启。`)
+        : tx(`${project.name} monitoring is now off.`, `${project.name} 的监控已关闭。`),
+      nextStep: enabled
+        ? tx("The app will keep refreshing runtime evidence while it is open.", "应用打开期间会持续刷新运行证据。")
+        : tx("Manual refresh is still available from project detail.", "仍可在项目详情里手动刷新。"),
+      tone: enabled ? "success" : "info"
+    });
+  }
+
+  function updateProjectMonitoringInterval(project: ManagedProject, intervalMs: number) {
+    const safeInterval =
+      intervalMs === 30000 || intervalMs === 60000 || intervalMs === 120000
+        ? intervalMs
+        : 60000;
+    setManagedProjects((projects) =>
+      upsertManagedProject(projects, project.path, {
+        monitoringIntervalMs: safeInterval
+      })
+    );
+    showInteractionNotice({
+      area: tx("Project Runtime Evidence", "项目运行证据"),
+      action: tx("Refresh Interval", "刷新间隔"),
+      result: tx("Heartbeat refresh interval was updated.", "心跳刷新间隔已更新。"),
+      nextStep: project.monitoringEnabled
+        ? tx("The next automatic refresh will use the new interval.", "下一次自动刷新会使用新的间隔。")
+        : tx("Turn monitoring on when you want continuous refresh.", "需要持续刷新时再开启监控。"),
+      tone: "info"
+    });
+  }
+
+  async function enableProjectTelemetry(project: ManagedProject) {
+    setBusyAction("authorize");
     setError(null);
 
     try {
-      const result = await window.workbench.scanSkills();
-      const proposalResult = await window.workbench.refreshOptimizationProposals();
-      const nextGraph = await window.workbench.refreshGraph();
-      startTransition(() => {
-        setScanResult(result);
-        setProposalRefreshResult(proposalResult);
-        setProposals(proposalResult.proposals);
-        setGraphSnapshot(nextGraph);
-        setInteractionNotice({
-          area: tx("Discovery", "发现"),
-          action: tx("Scan Now", "立即扫描"),
-          result: tx(
-            `${result.skillsFound} Skill(s) found from approved local roots.`,
-            `已从批准的本地根目录发现 ${result.skillsFound} 个 Skill。`
-          ),
-          nextStep: tx(
-            "Review scan results, then open Skill Library or Registry for details.",
-            "查看扫描结果，然后进入 Skill 库或注册表查看详情。"
-          ),
-          tone: "success"
-        });
+      const input: AuthorizationInput = {
+        name: `${project.name} runtime evidence`,
+        scanRoots: [project.path],
+        scanExclusions: [],
+        telemetryMode: "estimated",
+        allowRawContent: false,
+        allowBackgroundWatch: true
+      };
+      await window.workbench.grantAuthorization(input);
+      showInteractionNotice({
+        area: tx("Project Runtime Evidence", "项目运行证据"),
+        action: tx("Enable Telemetry", "开启遥测"),
+        result: tx(
+          "Estimated telemetry is enabled for this project. Raw prompt content remains disabled.",
+          "已为该项目开启估算遥测，原始提示内容仍保持关闭。"
+        ),
+        nextStep: tx(
+          "Refresh runtime evidence to import local Codex session signals.",
+          "刷新运行证据，导入本地 Codex 会话信号。"
+        ),
+        tone: "success"
       });
       await refreshWorkbench(false);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Scan failed");
+      const message = nextError instanceof Error ? nextError.message : "Failed to enable telemetry";
+      setError(message);
+      showInteractionNotice({
+        area: tx("Project Runtime Evidence", "项目运行证据"),
+        action: tx("Enable Telemetry", "开启遥测"),
+        result: message,
+        nextStep: tx("Check the selected project path and try again.", "检查所选项目路径后重试。"),
+        tone: "warning"
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function refreshProjectRuntimeEvidence(
+    project: ManagedProject,
+    options: { silent?: boolean } = {}
+  ) {
+    if (!options.silent) {
+      setBusyAction("runtime-refresh");
+    }
+    setError(null);
+
+    try {
+      const result = await window.workbench.refreshProjectRuntimeEvidence(project.path);
+      const proposalResult = await window.workbench.refreshOptimizationProposals();
+      const nextGraph = await window.workbench.refreshGraph();
+      const runs = await window.workbench.listRecentRuns(runtimeRunFetchLimit);
+      const latestMatchingWorkspaceRef = runs
+        .filter((run) => run.workspaceRef && isPathInsideProject(run.workspaceRef, project.path))
+        .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0]?.workspaceRef;
+      const latestObservedWorkspaceRef =
+        latestMatchingWorkspaceRef ?? getLatestObservedWorkspace(result) ?? project.lastObservedWorkspaceRef;
+      const sourceCount = result.sourcesChecked;
+      const resultText =
+        result.status === "imported"
+          ? tx(
+              `${result.importedRuns} run(s) imported and ${result.updatedRuns} updated from local sessions.`,
+              `已从本地会话导入 ${result.importedRuns} 条运行，更新 ${result.updatedRuns} 条。`
+            )
+          : result.status === "connected_no_skill_runs"
+            ? tx(
+                `Codex directory connected: ${result.matchedWorkspaceRef ?? project.path}.`,
+                `Codex 目录已连接：${result.matchedWorkspaceRef ?? project.path}。`
+              )
+          : result.status === "telemetry_disabled"
+            ? tx("Runtime evidence is blocked because telemetry is disabled.", "运行证据刷新被阻止，因为遥测未开启。")
+            : result.status === "no_ready_sources"
+              ? tx("No readable Codex or Claude Code session source was found.", "没有发现可读取的 Codex 或 Claude Code 会话来源。")
+              : result.status === "unauthorized"
+                ? tx("This project is not authorized yet.", "该项目尚未授权。")
+                : tx(
+                    `Checked ${sourceCount} local source(s), but no project Skill run was importable.`,
+                    `已检查 ${sourceCount} 个本地来源，但没有可导入的项目技能运行。`
+                  );
+      const nextStep =
+        result.status === "imported"
+          ? tx("Open Evaluation Reports to inspect project and Skill usage.", "打开评测报告查看项目与技能使用情况。")
+          : result.status === "connected_no_skill_runs"
+            ? tx(
+                "Continue using the project; the status will become healthy after a project Skill is invoked.",
+                "继续使用该项目；项目技能触发后，状态会自动变为运行正常。"
+              )
+          : result.status === "telemetry_disabled"
+            ? tx("Click Enable Telemetry in the project detail dialog, then refresh runtime evidence again.", "在项目详情弹窗点击开启遥测，然后再次刷新运行证据。")
+            : result.status === "no_importable_runs"
+              ? tx(
+                  "Make sure Codex sessions are opened inside this project and that project-local Skill names are actually referenced.",
+                  "请确认 Codex 会话是在这个项目内打开，并且项目本地技能名称确实被引用。"
+                )
+              : tx("Review the diagnostic message in project detail before retrying.", "重试前请先查看项目详情中的诊断信息。");
+      const heartbeatEntry: ProjectHeartbeatEntry = {
+        id: `${project.path}:${result.refreshedAt}`,
+        projectPath: project.path,
+        observedAt: result.refreshedAt,
+        tone: heartbeatToneForRuntimeStatus(result.status),
+        status: result.status,
+        importedRuns: result.importedRuns,
+        updatedRuns: result.updatedRuns,
+        totalRuns: result.importedRuns + result.updatedRuns,
+        sourceCount: result.sourcesChecked,
+        message: resultText
+      };
+
+      startTransition(() => {
+        setManagedProjects((projects) =>
+          upsertManagedProject(projects, project.path, {
+            lastMonitorAt: result.refreshedAt,
+            lastObservedWorkspaceRef: latestObservedWorkspaceRef,
+            lastConnectionCheckAt: result.refreshedAt
+          })
+        );
+        setProjectRuntimeRefreshResult(result);
+        setProjectHeartbeatEntries((entries) => upsertProjectHeartbeatEntry(entries, heartbeatEntry));
+        setProposalRefreshResult(proposalResult);
+        setProposals(proposalResult.proposals);
+        setGraphSnapshot(nextGraph);
+        setRecentRuns(runs);
+        if (!options.silent) {
+          setInteractionNotice({
+            area: tx("Project Runtime Evidence", "项目运行证据"),
+            action: tx("Refresh Runtime Evidence", "刷新运行证据"),
+            result: resultText,
+            nextStep,
+            tone:
+              result.status === "imported"
+                ? "success"
+                : result.status === "connected_no_skill_runs"
+                  ? "info"
+                  : "warning"
+          });
+        }
+      });
+      await refreshWorkbench(false);
+      return result;
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "Runtime evidence refresh failed";
+      const observedAt = new Date().toISOString();
+      setError(message);
+      setProjectHeartbeatEntries((entries) =>
+        upsertProjectHeartbeatEntry(entries, {
+          id: `${project.path}:${observedAt}`,
+          projectPath: project.path,
+          observedAt,
+          tone: "error",
+          status: "error",
+          importedRuns: 0,
+          updatedRuns: 0,
+          totalRuns: 0,
+          sourceCount: 0,
+          message
+        })
+      );
+      setManagedProjects((projects) =>
+        upsertManagedProject(projects, project.path, {
+          lastMonitorAt: observedAt
+        })
+      );
+      if (!options.silent) {
+        showInteractionNotice({
+          area: tx("Project Runtime Evidence", "项目运行证据"),
+          action: tx("Refresh Runtime Evidence", "刷新运行证据"),
+          result: message,
+          nextStep: tx("Check telemetry authorization and local Codex session logs, then retry.", "检查遥测授权和本地 Codex 会话日志后重试。"),
+          tone: "warning"
+        });
+      }
+      return null;
+    } finally {
+      if (!options.silent) {
+        setBusyAction(null);
+      }
+    }
+  }
+
+  async function checkProjectConnectionHeartbeat(project: ManagedProject) {
+    try {
+      const result = await window.workbench.checkProjectConnection(project.path);
+      const observedWorkspaceRef =
+        result.matchedWorkspaceRef ?? result.latestObservedWorkspaceRef ?? project.lastObservedWorkspaceRef;
+      const message = result.matchedWorkspaceRef
+        ? tx(
+            `Codex directory connected: ${result.matchedWorkspaceRef}.`,
+            `Codex 目录已连接：${result.matchedWorkspaceRef}。`
+          )
+        : tx("No matching Codex project directory was detected.", "未检测到匹配的 Codex 项目目录。");
+      setManagedProjects((projects) =>
+        upsertManagedProject(projects, project.path, {
+          lastMonitorAt: result.refreshedAt,
+          lastObservedWorkspaceRef: observedWorkspaceRef,
+          lastConnectionCheckAt: result.refreshedAt
+        })
+      );
+      setProjectRuntimeRefreshResult(result);
+      setProjectHeartbeatEntries((entries) =>
+        upsertProjectHeartbeatEntry(entries, {
+          id: `${project.path}:${result.refreshedAt}`,
+          projectPath: project.path,
+          observedAt: result.refreshedAt,
+          tone: heartbeatToneForRuntimeStatus(result.status),
+          status: result.status,
+          importedRuns: 0,
+          updatedRuns: 0,
+          totalRuns: 0,
+          sourceCount: result.sourcesChecked,
+          message
+        })
+      );
+      return result;
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "Connection heartbeat failed";
+      const observedAt = new Date().toISOString();
+      setProjectHeartbeatEntries((entries) =>
+        upsertProjectHeartbeatEntry(entries, {
+          id: `${project.path}:${observedAt}`,
+          projectPath: project.path,
+          observedAt,
+          tone: "error",
+          status: "error",
+          importedRuns: 0,
+          updatedRuns: 0,
+          totalRuns: 0,
+          sourceCount: 0,
+          message
+        })
+      );
+      return null;
+    }
+  }
+
+  async function beginBindProjectFlow() {
+    try {
+      showInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("Bind Project", "绑定项目"),
+        result: tx("Opening the system folder chooser...", "正在打开系统文件夹选择窗口..."),
+        nextStep: tx("Select one project folder, then confirm scan and bind.", "选择一个项目文件夹后，再确认扫描并绑定。"),
+        tone: "info"
+      });
+      const picked = await window.workbench.pickDirectory();
+      if (!picked) {
+        showInteractionNotice({
+          area: tx("Project Management", "项目管理"),
+          action: tx("Bind Project", "绑定项目"),
+          result: tx("Project folder selection was cancelled.", "已取消选择项目文件夹。"),
+          nextStep: tx("Click Bind Project again when you are ready.", "准备好后可再次点击绑定项目。"),
+          tone: "info"
+        });
+        return;
+      }
+
+      const normalizedPicked = normalizeProjectPath(picked);
+      startTransition(() => {
+        setPendingBindProjectRoot(normalizedPicked);
+        setScanResultDialog(null);
+        setInteractionNotice({
+          area: tx("Project Management", "项目管理"),
+          action: tx("Select Project Folder", "选择项目文件夹"),
+          result: tx(`Selected ${normalizedPicked}.`, `已选择 ${normalizedPicked}。`),
+          nextStep: tx("Confirm Scan and Bind to add it to the project list.", "点击扫描并绑定后，它才会加入项目列表。"),
+          tone: "info"
+        });
+      });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Project folder picker failed");
+      showInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("Bind Project", "绑定项目"),
+        result: tx("The folder picker did not open successfully.", "文件夹选择器没有成功打开。"),
+        nextStep: tx("Try Bind Project again.", "请再次尝试绑定项目。"),
+        tone: "warning"
+      });
+    }
+  }
+
+  function closePendingBindProjectDialog() {
+    if (busyAction === "project-scan") {
+      return;
+    }
+    const projectRoot = normalizeProjectPath(pendingBindProjectRoot);
+    setPendingBindProjectRoot("");
+    if (projectRoot) {
+      showInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("Bind Project", "绑定项目"),
+        result: tx("Project binding was closed before scanning.", "已关闭绑定确认，项目没有加入列表。"),
+        nextStep: tx("Click Bind Project again to choose a folder.", "需要时可再次点击绑定项目选择目录。"),
+        tone: "info"
+      });
+    }
+  }
+
+  async function scanAndBindPendingProject() {
+    const projectRoot = normalizeProjectPath(pendingBindProjectRoot);
+    if (!projectRoot) {
+      return;
+    }
+    await scanTargetProject(projectRoot, { deferBindUntilComplete: true, closeBindDialogOnComplete: true });
+  }
+
+  async function chooseTargetProjectRoot() {
+    await beginBindProjectFlow();
+    return null;
+  }
+
+  function updateTargetProjectRoot(path: string) {
+    startTransition(() => {
+      setTargetProjectRoot(path);
+      setScanRoots(path.trim() ? [path.trim()] : []);
+      setScanExclusions([]);
+      setWorkflowStarterPreview(null);
+	      setWorkflowStarterResult(null);
+	      setWorkflowStarterHighlighted(false);
+	      setScanResultDialog(null);
+	      setScanResult(null);
+	    });
+	  }
+
+  function saveScanResultProjectName() {
+    const projectRoot = scanResultDialogProjectRoot;
+    const nextName = scanResultProjectName.trim();
+    if (!projectRoot) {
+      return;
+    }
+
+    if (!nextName) {
+      showInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("Rename Project", "重命名项目"),
+        result: tx("Project name cannot be empty.", "项目名称不能为空。"),
+        nextStep: tx("Enter a short display name for this project.", "请输入一个简短的项目显示名。"),
+        tone: "warning"
+      });
+      return;
+    }
+
+    setManagedProjects((projects) =>
+      upsertManagedProject(projects, projectRoot, {
+        name: nextName,
+        lastFocusedAt: new Date().toISOString()
+      })
+    );
+    setScanResultProjectName(nextName);
+    showInteractionNotice({
+      area: tx("Project Management", "项目管理"),
+      action: tx("Rename Project", "重命名项目"),
+      result: tx(`Project renamed to ${nextName}.`, `项目已重命名为 ${nextName}。`),
+      nextStep: tx("The bound project list and report pages now use this display name.", "已绑定项目列表和报告页会使用这个显示名。"),
+      tone: "success"
+    });
+  }
+
+  async function scanTargetProject(
+    projectRootOverride?: string,
+    options: {
+      deferBindUntilComplete?: boolean;
+      closeBindDialogOnComplete?: boolean;
+      showResultDialog?: boolean;
+      suppressInteractionNotice?: boolean;
+    } = {}
+  ) {
+    let projectRoot = normalizeProjectPath(projectRootOverride ?? targetProjectRoot);
+    if (!projectRoot) {
+      const picked = await chooseTargetProjectRoot();
+      if (!picked) {
+        return;
+      }
+      projectRoot = picked;
+    }
+
+    startTransition(() => {
+      setTargetProjectRoot(projectRoot);
+      setScanRoots([projectRoot]);
+      if (!options.deferBindUntilComplete) {
+        setManagedProjects((projects) => upsertManagedProject(projects, projectRoot));
+      }
+    });
+
+    setBusyAction("project-scan");
+    setError(null);
+    if (!options.suppressInteractionNotice) {
+      showInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("Scan Project", "扫描项目"),
+        result: tx(`Scanning ${projectRoot}...`, `正在扫描 ${projectRoot}...`),
+        nextStep: tx("Only this project folder is being inspected.", "当前只会检查这个项目文件夹。"),
+        tone: "info"
+      });
+    }
+
+    try {
+      const result = await window.workbench.scanProjectSkills(projectRoot);
+      const proposalResult = await window.workbench.refreshOptimizationProposals();
+      const nextGraph = await window.workbench.refreshGraph();
+      startTransition(() => {
+        const scannedProjectRoot = normalizeProjectPath(result.rootPaths[0] ?? projectRoot);
+        setTargetProjectRoot(scannedProjectRoot);
+        setScanRoots([scannedProjectRoot]);
+        setScanResult(result);
+        setScanResultDialog(options.showResultDialog === false ? null : result);
+        setManagedProjects((projects) =>
+          upsertManagedProject(projects, scannedProjectRoot, {
+            lastScanAt: new Date().toISOString(),
+            skillsFound: result.skillsFound,
+            filesSeen: result.filesSeen,
+            skillsChanged: result.skillsChanged,
+            workflowApplied: result.workflowDetected
+          })
+        );
+        if (options.closeBindDialogOnComplete) {
+          setPendingBindProjectRoot("");
+        }
+        if (result.skillsFound > 0) {
+          setWorkflowStarterPreview(null);
+          setWorkflowStarterResult(null);
+        }
+        setProposalRefreshResult(proposalResult);
+        setProposals(proposalResult.proposals);
+        setGraphSnapshot(nextGraph);
+        if (!options.suppressInteractionNotice) setInteractionNotice({
+          area: tx("Project Management", "项目管理"),
+          action: tx("Scan Project", "扫描项目"),
+          result: tx(
+            `${result.skillsFound} Skill(s) found inside the selected project folder.`,
+            `已在选中的项目文件夹内发现 ${result.skillsFound} 个 Skill。`
+          ),
+          nextStep:
+            result.skillsFound > 0 && boot?.policy?.telemetryMode === "disabled"
+              ? tx(
+                  "Telemetry is still disabled. Open project detail and enable telemetry before usage counts can refresh.",
+                  "遥测仍未开启。请打开项目详情并开启遥测，调用次数才会刷新。"
+                )
+              : tx(
+                  "Review this project-only skill index snapshot, then refresh runtime evidence for local usage signals.",
+                  "查看这个仅限项目的技能索引快照，然后刷新运行证据获取本地使用信号。"
+                ),
+          tone: result.skillsFound > 0 && boot?.policy?.telemetryMode === "disabled" ? "warning" : "success"
+        });
+      });
+      await refreshWorkbench(false);
+      return result;
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "Project scan failed";
+      setError(message);
+      if (!options.suppressInteractionNotice) {
+        showInteractionNotice({
+          area: tx("Project Management", "项目管理"),
+          action: tx("Scan Project", "扫描项目"),
+          result: message,
+          nextStep: tx("Check that the folder still exists and is readable, then scan again.", "请确认文件夹仍存在且可读取，然后重新扫描。"),
+          tone: "warning"
+        });
+      }
+      return null;
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function focusWorkflowStarterCard() {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const activeSection = document.querySelector(
+          `[data-product-section="${currentProductSection}"]`
+        );
+        const card =
+          activeSection?.querySelector<HTMLElement>(".workflow-starter-card") ??
+          document.querySelector<HTMLElement>("#discovery .workflow-starter-card");
+        card?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    });
+  }
+
+  async function previewRecommendedWorkflowStarter(
+    source: "card" | "scan-dialog" = "card",
+    projectRootOverride?: string
+  ) {
+    let projectRoot = normalizeProjectPath(projectRootOverride ?? targetProjectRoot);
+    if (!projectRoot) {
+      const picked = await chooseTargetProjectRoot();
+      if (!picked) {
+        return;
+      }
+      projectRoot = picked;
+    }
+
+    setBusyAction("workflow-preview");
+    setError(null);
+    setWorkflowStarterHighlighted(true);
+    showInteractionNotice({
+      area: tx("Workflow Starter", "工作流 Starter"),
+      action:
+        source === "scan-dialog"
+          ? tx("Use recommended skills-workflow", "使用推荐 skills-workflow")
+          : tx("Preview skills-workflow", "预览 skills-workflow"),
+      result: tx("Previewing the recommended workflow. No files are being written yet.", "正在预览推荐工作流；现在还不会写入任何文件。"),
+      nextStep: tx("After the preview, review the file list and then apply if it looks right.", "预览完成后，先检查文件列表，确认无误后再应用。"),
+      tone: "info"
+    });
+    focusWorkflowStarterCard();
+
+    try {
+	      const preview = await window.workbench.previewRecommendedWorkflowStarter(projectRoot);
+	      startTransition(() => {
+	        setTargetProjectRoot(preview.projectRoot);
+	        setScanRoots([preview.projectRoot]);
+	        setWorkflowStarterPreview(preview);
+	        setWorkflowStarterResult(null);
+	        setWorkflowStarterHighlighted(true);
+	        setManagedProjects((projects) => upsertManagedProject(projects, preview.projectRoot));
+        setInteractionNotice({
+          area: tx("Workflow Starter", "工作流 Starter"),
+          action:
+            source === "scan-dialog"
+              ? tx("Use recommended skills-workflow", "使用推荐 skills-workflow")
+              : tx("Preview Recommended Workflow", "预览推荐工作流"),
+          result: preview.canApply
+            ? tx(
+                `${preview.totalFileCount} file(s), ${preview.skillCount} Skill(s), and ${preview.totalDirectoryCount} folder(s) are ready to add.`,
+                `将新增 ${preview.totalFileCount} 个文件、${preview.skillCount} 个 Skill 和 ${preview.totalDirectoryCount} 个目录。`
+              )
+            : tx(
+                `${preview.fileConflicts.length} existing file conflict(s) block this starter.`,
+                `有 ${preview.fileConflicts.length} 个已有文件冲突，暂不能应用。`
+              ),
+          nextStep: preview.canApply
+            ? tx("Review the starter preview, then apply it to this project.", "检查 Starter 预览，然后应用到该项目。")
+            : tx("Resolve conflicts or choose another project folder before applying.", "请先解决冲突，或选择另一个项目文件夹。"),
+          tone: preview.canApply ? "success" : "warning"
+        });
+      });
+      focusWorkflowStarterCard();
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "Workflow starter preview failed";
+      setError(message);
+      showInteractionNotice({
+        area: tx("Workflow Starter", "工作流 Starter"),
+        action: tx("Preview skills-workflow", "预览 skills-workflow"),
+        result: message,
+        nextStep: tx("Check the selected project path, then try the recommended workflow again.", "请检查已选择的项目路径，然后重新尝试推荐工作流。"),
+        tone: "warning"
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function applyRecommendedWorkflowStarter() {
+    let projectRoot = targetProjectRoot.trim();
+    if (!projectRoot) {
+      const picked = await chooseTargetProjectRoot();
+      if (!picked) {
+        return;
+      }
+      projectRoot = picked;
+    }
+
+    if (workflowStarterResult && workflowStarterResult.preview.projectRoot === projectRoot) {
+      setProjectRepairFeedback({
+        projectPath: projectRoot,
+        status: "completed",
+        detail: tx("Recommended workflow is already applied and project Skills are ready.", "推荐工作流已应用，项目技能已就绪。")
+      });
+      showInteractionNotice({
+        area: tx("Workflow Starter", "工作流 Starter"),
+        action: tx("Apply Recommended Workflow", "应用推荐工作流"),
+        result: tx("This skills-workflow has already been applied to the selected project.", "推荐 skills-workflow 已经应用到所选项目。"),
+        nextStep: tx("Review project Skills in the library, or open reports for monitoring.", "可在技能库查看项目技能，或打开评测报告查看监控。"),
+        tone: "success"
+      });
+      navigateToProductSection("#local-skills");
+      return;
+    }
+
+    setBusyAction("workflow-apply");
+    setError(null);
+
+    try {
+      const result = await window.workbench.applyRecommendedWorkflowStarter(projectRoot);
+      const scan = await window.workbench.scanProjectSkills(result.preview.projectRoot);
+      const proposalResult = await window.workbench.refreshOptimizationProposals();
+      const nextGraph = await window.workbench.refreshGraph();
+	      startTransition(() => {
+	        setTargetProjectRoot(result.preview.projectRoot);
+	        setScanRoots([result.preview.projectRoot]);
+	        setWorkflowStarterPreview(result.preview);
+	        setWorkflowStarterResult(result);
+	        setScanResult(scan);
+	        setProjectRepairFeedback({
+	          projectPath: result.preview.projectRoot,
+	          status: "completed",
+	          detail: tx(
+	            `Workflow applied successfully; ${scan.skillsFound} project Skill(s) are ready.`,
+	            `工作流应用成功，${scan.skillsFound} 个项目技能已就绪。`
+	          )
+	        });
+	        setManagedProjects((projects) =>
+	          upsertManagedProject(projects, result.preview.projectRoot, {
+	            lastScanAt: new Date().toISOString(),
+	            skillsFound: scan.skillsFound,
+	            filesSeen: scan.filesSeen,
+	            skillsChanged: scan.skillsChanged,
+	            workflowApplied: true
+	          })
+	        );
+	        setProposalRefreshResult(proposalResult);
+        setProposals(proposalResult.proposals);
+        setGraphSnapshot(nextGraph);
+        setInteractionNotice({
+          area: tx("Workflow Starter", "工作流 Starter"),
+          action: tx("Apply Recommended Workflow", "应用推荐工作流"),
+          result: tx(
+            `${result.copiedFileCount} file(s) copied and ${scan.skillsFound} Skill(s) indexed from this project.`,
+            `已复制 ${result.copiedFileCount} 个文件，并从该项目索引到 ${scan.skillsFound} 个 Skill。`
+          ),
+          nextStep: tx("Open Skill Library, Analysis, or Graph to continue from the project workflow.", "打开 Skill 库、分析或图谱，继续使用这个项目工作流。"),
+          tone: "success"
+        });
+      });
+      appendProjectOnboardingLog(
+        result.preview.projectRoot,
+        "workflow",
+        "success",
+        tx(
+          `Recommended workflow applied; ${scan.skillsFound} project Skill(s) were indexed.`,
+          `推荐工作流已应用，已索引 ${scan.skillsFound} 个项目技能。`
+        )
+      );
+      appendProjectOnboardingLog(
+        result.preview.projectRoot,
+        "complete",
+        "success",
+        tx("Project configuration repair completed successfully.", "项目配置修正成功完成。")
+      );
+      await refreshWorkbench(false);
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "Workflow starter apply failed";
+      setError(message);
+      setProjectRepairFeedback({
+        projectPath: projectRoot,
+        status: "failed",
+        detail: tx(`Workflow apply failed: ${message}`, `工作流应用失败：${message}`)
+      });
+      appendProjectOnboardingLog(
+        projectRoot,
+        "workflow",
+        "error",
+        tx(`Recommended workflow apply failed: ${message}`, `推荐工作流应用失败：${message}`)
+      );
+      showInteractionNotice({
+        area: tx("Workflow Starter", "工作流 Starter"),
+        action: tx("Apply Recommended Workflow", "应用推荐工作流"),
+        result: tx("Workflow apply failed.", "工作流应用失败。"),
+        nextStep: message,
+        tone: "warning"
+      });
     } finally {
       setBusyAction(null);
     }
@@ -8337,11 +12023,11 @@ export default function App() {
 
   async function importTelemetry() {
     if (boot?.status !== "ready") {
-      setError("Authorize scan roots before importing telemetry.");
+      setError("Authorize one project directory before importing telemetry.");
       showInteractionNotice({
         area: tx("Analysis / Telemetry", "分析 / 遥测"),
         action: tx("Import Telemetry", "导入遥测"),
-        result: tx("Import is blocked until scan roots are authorized.", "扫描根目录授权前，导入会被阻止。"),
+        result: tx("Import is blocked until a project directory is authorized.", "项目目录授权前，导入会被阻止。"),
         nextStep: tx("Finish first-run authorization, then import the local telemetry file.", "先完成首次授权，再导入本地遥测文件。"),
         tone: "warning"
       });
@@ -8382,6 +12068,139 @@ export default function App() {
       await refreshWorkbench(false);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Telemetry import failed");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function discoverLocalToolTelemetrySources() {
+    if (boot?.status !== "ready") {
+      setError("Authorize one project directory before discovering local tool telemetry.");
+      showInteractionNotice({
+        area: tx("Analysis / Local Tools", "分析 / 本地工具"),
+        action: tx("Discover Sources", "发现来源"),
+        result: tx("Discovery is blocked until a project directory is authorized.", "项目目录授权前，来源发现会被阻止。"),
+        nextStep: tx("Finish first-run authorization with telemetry enabled, then discover sources again.", "先完成首次授权并启用遥测，再重新发现来源。"),
+        tone: "warning"
+      });
+      return;
+    }
+
+    setBusyAction("local-tool-discovery");
+    setError(null);
+
+    try {
+      const sources = await window.workbench.discoverLocalToolTelemetrySources();
+      const firstReadySource = sources.find((source) => source.status === "ready");
+      startTransition(() => {
+        setLocalToolSources(sources);
+        setSelectedLocalToolSourceId((current) =>
+          current && sources.some((source) => source.id === current)
+            ? current
+            : firstReadySource?.id ?? sources[0]?.id ?? ""
+        );
+        setLocalToolPreview(null);
+        setLocalToolImportResult(null);
+        setInteractionNotice({
+          area: tx("Analysis / Local Tools", "分析 / 本地工具"),
+          action: tx("Discover Sources", "发现来源"),
+          result: tx(
+            `${sources.filter((source) => source.status === "ready").length} ready local tool source(s) found.`,
+            `发现 ${sources.filter((source) => source.status === "ready").length} 个可读取的本地工具来源。`
+          ),
+          nextStep: tx("Select a source below and run Preview before importing anything.", "在下方选择来源，并先预览，再导入任何内容。"),
+          tone: "success"
+        });
+      });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Local tool source discovery failed");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function previewLocalToolTelemetrySource() {
+    if (!selectedLocalToolSource) {
+      showInteractionNotice({
+        area: tx("Analysis / Local Tools", "分析 / 本地工具"),
+        action: tx("Preview Source", "预览来源"),
+        result: tx("Choose a discovered source first.", "请先选择一个已发现的来源。"),
+        nextStep: tx("Click Discover Sources, then select Codex or Claude Code logs.", "点击发现来源，然后选择 Codex 或 Claude Code 日志。"),
+        tone: "warning"
+      });
+      return;
+    }
+
+    setBusyAction("local-tool-preview");
+    setError(null);
+
+    try {
+      const preview = await window.workbench.previewLocalToolTelemetrySource(selectedLocalToolSource);
+      startTransition(() => {
+        setLocalToolPreview(preview);
+        setLocalToolImportResult(null);
+        setInteractionNotice({
+          area: tx("Analysis / Local Tools", "分析 / 本地工具"),
+          action: tx("Preview Source", "预览来源"),
+          result: tx(
+            `${preview.importableRuns} importable run(s), ${preview.detectedToolNames.length} tool signal(s), confidence ${preview.confidence}.`,
+            `可导入 ${preview.importableRuns} 条运行，发现 ${preview.detectedToolNames.length} 类工具信号，置信度 ${preview.confidence}。`
+          ),
+          nextStep:
+            preview.importableRuns > 0
+              ? tx("Review the preview metrics, then import normalized telemetry.", "查看预览指标，然后导入规范化遥测。")
+              : tx("Scan the selected project first or choose another source with explicit Skill evidence.", "请先扫描已选择项目，或选择包含明确技能证据的其他来源。"),
+          tone: preview.importableRuns > 0 ? "success" : "warning"
+        });
+      });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Local tool telemetry preview failed");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function importLocalToolTelemetrySource() {
+    const source = localToolPreview?.source ?? selectedLocalToolSource;
+    if (!source) {
+      showInteractionNotice({
+        area: tx("Analysis / Local Tools", "分析 / 本地工具"),
+        action: tx("Import Source", "导入来源"),
+        result: tx("Choose and preview a source before importing.", "请先选择并预览一个来源，再导入。"),
+        nextStep: tx("Run Discover Sources and Preview Source first.", "请先执行发现来源和预览来源。"),
+        tone: "warning"
+      });
+      return;
+    }
+
+    setBusyAction("local-tool-import");
+    setError(null);
+
+    try {
+      const result = await window.workbench.importLocalToolTelemetrySource(source);
+      const proposalResult = await window.workbench.refreshOptimizationProposals();
+      const nextGraph = await window.workbench.refreshGraph();
+      startTransition(() => {
+        setLocalToolPreview(result.preview);
+        setLocalToolImportResult(result);
+        setTelemetryResult(result.telemetry);
+        setProposalRefreshResult(proposalResult);
+        setProposals(proposalResult.proposals);
+        setGraphSnapshot(nextGraph);
+        setInteractionNotice({
+          area: tx("Analysis / Local Tools", "分析 / 本地工具"),
+          action: tx("Import Source", "导入来源"),
+          result: tx(
+            `${result.telemetry.importedRuns} run(s) imported and ${result.telemetry.updatedRuns} updated from ${result.source.label}.`,
+            `已从 ${result.source.label} 导入 ${result.telemetry.importedRuns} 条运行，更新 ${result.telemetry.updatedRuns} 条。`
+          ),
+          nextStep: tx("Review Today Snapshot, Seven-Day Window, and Optimization Signals below.", "查看下方今日快照、七日窗口和优化信号。"),
+          tone: "success"
+        });
+      });
+      await refreshWorkbench(false);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Local tool telemetry import failed");
     } finally {
       setBusyAction(null);
     }
@@ -8556,12 +12375,12 @@ export default function App() {
 
   async function exportBundle() {
     if (boot?.status !== "ready") {
-      setError("Authorize scan roots before exporting bundles.");
+      setError("Authorize one project directory before exporting bundles.");
       showInteractionNotice({
         area: tx("Bundles / Export", "Bundle / 导出"),
         action: tx("Export Skill Bundle", "导出 Skill Bundle"),
         result: tx("Export is blocked until local authorization is ready.", "本地授权就绪前，导出会被阻止。"),
-        nextStep: tx("Complete first-run authorization and index at least one local Skill.", "完成首次授权，并至少索引一个本地 Skill。"),
+        nextStep: tx("Complete first-run authorization and index at least one local Skill.", "完成首次授权，并至少索引一个本地技能。"),
         tone: "warning"
       });
       return;
@@ -8573,7 +12392,7 @@ export default function App() {
         area: tx("Bundles / Export", "Bundle / 导出"),
         action: tx("Export Skill Bundle", "导出 Skill Bundle"),
         result: tx("Export needs an indexed Skill selection first.", "导出前需要先选择已索引 Skill。"),
-        nextStep: tx("Scan approved roots, select a Skill, then export again.", "扫描已批准根目录、选择 Skill，然后再次导出。"),
+        nextStep: tx("Scan the selected project, select a Skill, then export again.", "扫描已选择项目、选择 Skill，然后再次导出。"),
         tone: "warning"
       });
       return;
@@ -8678,7 +12497,7 @@ export default function App() {
 
   async function importBundle() {
     if (boot?.status !== "ready") {
-      setError("Authorize scan roots before importing bundles.");
+      setError("Authorize one project directory before importing bundles.");
       showInteractionNotice({
         area: tx("Bundles / Import", "Bundle / 导入"),
         action: tx("Import Bundle", "导入 Bundle"),
@@ -8829,6 +12648,33 @@ export default function App() {
     dismissed: proposals.filter((proposal) => proposal.status === "dismissed").length,
     resolved: proposals.filter((proposal) => proposal.status === "resolved").length
   };
+  const acceptedProposals = proposals.filter((proposal) => proposal.status === "accepted");
+  const proposalLifecycleSteps = [
+    {
+      key: "open",
+      label: tx("Review", "审查"),
+      detail: tx("Evidence is waiting for a decision", "证据等待决策"),
+      count: proposalCounts.open
+    },
+    {
+      key: "accepted",
+      label: tx("Plan", "排期"),
+      detail: tx("Accepted work needs implementation", "已接受事项需要实现"),
+      count: proposalCounts.accepted
+    },
+    {
+      key: "apply",
+      label: tx("Apply / Verify", "应用 / 验证"),
+      detail: tx("Preview target impact before writing", "写入前预览目标影响"),
+      count: proposalCounts.accepted
+    },
+    {
+      key: "resolved",
+      label: tx("Close", "关闭"),
+      detail: tx("Resolved work stays auditable", "已解决事项保留审计"),
+      count: proposalCounts.resolved
+    }
+  ];
   const visibleProposals =
     proposalFilter === "all"
       ? proposals
@@ -8845,8 +12691,195 @@ export default function App() {
   const topUsedSkill = weeklySummary?.mostUsedSkills[0] ?? dailySummary?.mostUsedSkills[0] ?? null;
   const slowestSkill = weeklySummary?.slowestSkills[0] ?? dailySummary?.slowestSkills[0] ?? null;
   const highestWasteSkill = weeklySummary?.highestWasteSkills[0] ?? null;
+  const overviewTodayKey = new Date().toISOString().slice(0, 10);
+  const overviewWeekStart = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const overviewTodayRuns = currentProjectRuns.filter((run) => run.startedAt.slice(0, 10) === overviewTodayKey);
+  const overviewWeeklyRuns = currentProjectRuns.filter(
+    (run) => new Date(run.startedAt).getTime() >= overviewWeekStart
+  );
   const dailySuccessRate =
-    dailySummary && dailySummary.totalRuns > 0 ? dailySummary.successCount / dailySummary.totalRuns : 0;
+    overviewTodayRuns.length > 0
+      ? overviewTodayRuns.filter((run) => run.status === "completed").length / overviewTodayRuns.length
+      : 0;
+  const weeklySuccessRate =
+    overviewWeeklyRuns.length > 0
+      ? overviewWeeklyRuns.filter((run) => run.status === "completed").length / overviewWeeklyRuns.length
+      : 0;
+  const overviewTrendBuckets = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - index));
+    return {
+      key: date.toISOString().slice(0, 10),
+      label: date.toLocaleDateString(undefined, { month: "numeric", day: "numeric" }),
+      runs: 0,
+      tokens: 0,
+      cost: 0,
+      success: 0,
+      total: 0
+    };
+  });
+  const overviewTrendBucketMap = new Map(overviewTrendBuckets.map((bucket) => [bucket.key, bucket]));
+  currentProjectRuns.forEach((run) => {
+    const startedAt = new Date(run.startedAt);
+    if (Number.isNaN(startedAt.getTime())) {
+      return;
+    }
+    const key = startedAt.toISOString().slice(0, 10);
+    const bucket = overviewTrendBucketMap.get(key);
+    if (!bucket) {
+      return;
+    }
+    bucket.runs += 1;
+    bucket.tokens += run.totalTokens;
+    bucket.cost += run.estimatedCostUsd;
+    bucket.total += 1;
+    if (run.status === "completed") {
+      bucket.success += 1;
+    }
+  });
+  const overviewRunTrendValues = overviewTrendBuckets.map((bucket) => bucket.runs);
+  const overviewTokenTrendValues = overviewTrendBuckets.map((bucket) => bucket.tokens);
+  const overviewCostTrendValues = overviewTrendBuckets.map((bucket) => bucket.cost);
+  const overviewSuccessTrendValues = overviewTrendBuckets.map((bucket) =>
+    bucket.total > 0 ? Math.round((bucket.success / bucket.total) * 100) : 0
+  );
+  const weeklyAverageRuns = Math.round(overviewWeeklyRuns.length / 7);
+  const weeklyAverageTokens = Math.round(
+    overviewWeeklyRuns.reduce((sum, run) => sum + run.totalTokens, 0) / 7
+  );
+  const overviewTodayTokens = overviewTodayRuns.reduce((sum, run) => sum + run.totalTokens, 0);
+  const overviewTodayCost = overviewTodayRuns.reduce((sum, run) => sum + run.estimatedCostUsd, 0);
+  const overviewWeeklyCost = overviewWeeklyRuns.reduce((sum, run) => sum + run.estimatedCostUsd, 0);
+  const overviewMetricCards = [
+    {
+      icon: "◉",
+      label: tx("Runs Today", "今日运行"),
+      value: formatCount(overviewTodayRuns.length),
+      trend: tx(`${formatCount(weeklyAverageRuns)} daily avg`, `${formatCount(weeklyAverageRuns)} 日均`),
+      points: buildSparklinePoints(overviewRunTrendValues),
+      tone: "skill"
+    },
+    {
+      icon: "▣",
+      label: tx("Tokens", "Token"),
+      value: formatCount(overviewTodayTokens),
+      trend: tx(`${formatCount(weeklyAverageTokens)} daily avg`, `${formatCount(weeklyAverageTokens)} 日均`),
+      points: buildSparklinePoints(overviewTokenTrendValues),
+      tone: "project"
+    },
+    {
+      icon: "◇",
+      label: tx("Cost", "成本"),
+      value: formatUsd(overviewTodayCost),
+      trend: tx(`${formatUsd(overviewWeeklyCost)} this week`, `本周 ${formatUsd(overviewWeeklyCost)}`),
+      points: buildSparklinePoints(overviewCostTrendValues),
+      tone: "market"
+    },
+    {
+      icon: "✓",
+      label: tx("Success", "成功率"),
+      value: formatPercent(dailySuccessRate),
+      trend: tx(`${formatPercent(weeklySuccessRate)} weekly`, `本周 ${formatPercent(weeklySuccessRate)}`),
+      points: buildSparklinePoints(overviewSuccessTrendValues),
+      tone: "agent"
+    }
+  ];
+  const overviewHealthSignals = [
+    {
+      label: tx("Evaluation Coverage", "评测覆盖"),
+      value: currentProjectSkillCount > 0 ? Math.min(100, Math.round(((skillAnalysis ? 1 : 0) / currentProjectSkillCount) * 100)) : 0,
+      detail: tx(`${formatCount(Math.max(currentProjectSkillCount - (skillAnalysis ? 1 : 0), 0))} pending`, `${formatCount(Math.max(currentProjectSkillCount - (skillAnalysis ? 1 : 0), 0))} 待评测`)
+    },
+    {
+      label: tx("Runtime Evidence", "运行证据"),
+      value: currentProjectRuns.length > 0 ? Math.min(100, Math.round((currentProjectRuns.length / Math.max(currentProjectSkillCount, 1)) * 25)) : 0,
+      detail: tx(`${formatCount(currentProjectRuns.length)} recent runs`, `${formatCount(currentProjectRuns.length)} 最近运行`)
+    },
+    {
+      label: tx("Open Proposals", "待处理建议"),
+      value: currentProjectSkillCount > 0
+        ? Math.max(
+            8,
+            100 - proposals.filter((proposal) => proposal.status === "open" && currentProjectSkillIds.has(proposal.skillId)).length * 18
+          )
+        : 0,
+      detail: currentProjectSkillCount > 0
+        ? tx(
+            `${proposals.filter((proposal) => proposal.status === "open" && currentProjectSkillIds.has(proposal.skillId)).length} need review`,
+            `${proposals.filter((proposal) => proposal.status === "open" && currentProjectSkillIds.has(proposal.skillId)).length} 个待处理`
+          )
+        : tx("Select a project first", "请先选择项目")
+    }
+  ];
+  const overviewDashboardProgress = Math.round(
+    overviewHealthSignals.reduce((sum, signal) => sum + signal.value, 0) / Math.max(overviewHealthSignals.length, 1)
+  );
+  const overviewProjectCoverageItems = managedProjects.map((project) => {
+    const projectSkills = boot.skills.filter((skill) => isPathInsideProject(skill.sourcePath, project.path));
+    const projectSkillIds = new Set(projectSkills.map((skill) => skill.id));
+    const openProposalCount = proposals.filter(
+      (proposal) => proposal.status === "open" && projectSkillIds.has(proposal.skillId)
+    ).length;
+    const runCount = recentRuns.filter((run) => projectSkillIds.has(run.skillId)).length;
+    return {
+      project,
+      skillCount: project.skillsFound ?? projectSkills.length,
+      openProposalCount,
+      runCount
+    };
+  });
+  const resolveProjectFromMetadata = (metadata: Record<string, unknown>) => {
+    const candidatePaths = [
+      metadata.projectRoot,
+      metadata.projectPath,
+      metadata.rootPath,
+      metadata.path,
+      metadata.sourcePath
+    ].filter((value): value is string => typeof value === "string");
+    return managedProjects.find((project) =>
+      candidatePaths.some(
+        (candidatePath) =>
+          isPathInsideProject(candidatePath, project.path) || isPathInsideProject(project.path, candidatePath)
+      )
+    ) ?? null;
+  };
+  const overviewActivityItems = [
+    ...recentRuns.map((run) => {
+      const skill = boot.skills.find((entry) => entry.id === run.skillId) ?? null;
+      const project = skill
+        ? managedProjects.find((entry) => isPathInsideProject(skill.sourcePath, entry.path)) ?? null
+        : null;
+      return {
+        id: `run-${run.runId}`,
+        title: run.skillName,
+        label: tx("Runtime captured", "运行已捕获"),
+        projectName: project?.name ?? tx("Unbound", "未绑定"),
+        occurredAt: run.startedAt,
+        time: formatDateTime(run.startedAt)
+      };
+    }),
+    ...auditEvents.map((event) => {
+      const project = resolveProjectFromMetadata(event.metadata);
+      return {
+        id: `audit-${event.id}`,
+        title:
+          event.eventType === "authorization.granted"
+            ? tx("Authorization granted", "授权已生效")
+            : event.eventType === "backup.created"
+              ? tx("Backup created", "备份已创建")
+              : event.eventType === "bundle.created"
+                ? tx("Bundle created", "Bundle 已创建")
+                : tx("Local event recorded", "本地事件已记录"),
+        label: tx("Audit trail", "审计轨迹"),
+        projectName: project?.name ?? tx("System", "系统"),
+        occurredAt: event.createdAt,
+        time: formatDateTime(event.createdAt)
+      };
+    })
+  ]
+    .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
+    .slice(0, 8);
   const remoteSkillCount = marketplaceCatalog?.skills.length ?? 0;
   const topbarStatusItems = [
     {
@@ -9102,6 +13135,36 @@ export default function App() {
     if (skill) {
       const meta = libraryStageMeta("summary");
       showSkillActionNotice(skill, meta.action, meta.summary, meta.detail);
+    }
+  }
+
+  async function openSkillRunDetails(skill: SkillSummary, fallbackRuns: SkillRunSummary[]) {
+    setSkillRunDetail({
+      skill,
+      runs: fallbackRuns,
+      loading: true
+    });
+
+    try {
+      const runs = await window.workbench.listSkillRuns(skill.id, skillRunDetailLimit);
+      setSkillRunDetail({
+        skill,
+        runs,
+        loading: false
+      });
+    } catch (nextError) {
+      setSkillRunDetail({
+        skill,
+        runs: fallbackRuns,
+        loading: false
+      });
+      showInteractionNotice({
+        area: tx("Skill Library", "技能库"),
+        action: tx("Open Run Details", "打开调用详情"),
+        result: nextError instanceof Error ? nextError.message : tx("Run details failed to load.", "调用详情加载失败。"),
+        nextStep: tx("The table still shows the locally cached recent run count.", "表格仍会显示本地缓存的最近调用次数。"),
+        tone: "warning"
+      });
     }
   }
 
@@ -9401,14 +13464,16 @@ export default function App() {
     setApplyFlowNotice({
       title: tx("Apply flow is in read-only preview", "应用流程处于只读预览"),
       summary: remoteApplyCandidate
-        ? tx(
-            `${remoteApplyCandidate.displayName} is staged as a remote candidate for ${applyScope} scope.`,
-            `${remoteApplyCandidate.displayName} 已作为远程候选暂存到 ${applyScope} 范围。`
+        ? formatLocalizedText(
+            languageMode,
+            `${remoteApplyCandidate.displayName} is staged as a remote candidate for ${formatApplyScope(applyScope, "en")}.`,
+            `${remoteApplyCandidate.displayName} 已作为远程候选暂存到${formatApplyScope(applyScope, "zh")}。`
           )
         : skill
-        ? tx(
-            `${skill.displayName} is staged for ${applyScope} scope.`,
-            `${skill.displayName} 已准备进入 ${applyScope} 范围。`
+        ? formatLocalizedText(
+            languageMode,
+            `${skill.displayName} is staged for ${formatApplyScope(applyScope, "en")}.`,
+            `${skill.displayName} 已准备进入${formatApplyScope(applyScope, "zh")}。`
           )
         : tx("Choose or index a Skill before applying.", "应用前请先选择或索引一个 Skill。"),
       detail: remoteApplyCandidate
@@ -9422,8 +13487,8 @@ export default function App() {
             "下方已展示目标影响、冲突策略、警告与预览步骤。后续显式确认前不会发生写入。"
           )
         : tx(
-            "Skill OS is still resolving the local target preview from policy and registry data.",
-            "Skill OS 正在根据策略和注册表数据解析本地目标预览。"
+            "Skill OS is still resolving the local target preview from policy and skill index data.",
+            "Skill OS 正在根据策略和技能索引数据解析本地目标预览。"
           )
     });
   }
@@ -9432,14 +13497,7 @@ export default function App() {
     setApplyScope(scope);
     setApplyWorkbenchStage("preview");
 
-    const scopeLabel =
-      scope === "system"
-        ? tx("System Scope", "系统范围")
-        : scope === "workspace"
-          ? tx("Workspace Scope", "工作区范围")
-          : scope === "project"
-            ? tx("Project Scope", "项目范围")
-            : tx("Folder Scope", "文件夹范围");
+    const scopeLabel = formatApplyScope(scope, languageMode);
     const summary =
       scope === "system"
         ? tx(
@@ -9448,8 +13506,8 @@ export default function App() {
           )
         : scope === "workspace"
           ? tx(
-              "Workspace scope limits the preview to an approved workspace root.",
-              "工作区范围会把预览限制在已授权的工作区根目录内。"
+              "Workspace scope limits the preview to the chosen workspace.",
+              "工作区范围会把预览限制在已选择工作区内。"
             )
           : scope === "project"
             ? tx(
@@ -9479,28 +13537,34 @@ export default function App() {
 
   const productNavGroups = [
     {
-      label: tx("Core Overview", "核心总览"),
+      label: tx("Workspace", "工作台"),
       items: [
-        { href: "#overview", icon: "⌂", label: tx("Overview", "总览"), detail: tx("Health, scope, and activity", "健康、范围与活动") }
+        { href: "#overview", icon: "⌂", label: tx("Overview", "总览"), detail: tx("Project health at a glance", "项目健康总览") },
+        { href: "#discovery", icon: "▣", label: tx("Projects", "项目管理"), detail: tx("Bind, view, scan", "绑定、查看、扫描") }
       ]
     },
     {
-      label: tx("Framework", "Framework"),
+      label: tx("Assets", "资产"),
       items: [
-        { href: "#discovery", icon: "◌", label: tx("Discovery", "发现"), detail: tx("Authorized intake", "授权导入") },
-        { href: "#local-skills", icon: "▥", label: tx("Skill Library", "Skill 库"), detail: tx("Run, analyze, apply", "运行、分析、应用") },
-        { href: "#apply-center", icon: "⇥", label: tx("Apply Center", "应用中心"), detail: tx("Scope and target preview", "范围与目标预览") },
-        { href: "#bundles", icon: "⬡", label: tx("Bundles", "打包管理"), detail: tx("Export and import bundles", "导出与导入 Bundle") }
-      ]
-    },
-    {
-      label: tx("Workbench", "Workbench"),
-      items: [
+        { href: "#local-skills", icon: "▥", label: tx("Skill Library", "技能库"), detail: tx("Local and remote assets", "本地与远程资产") },
         { href: "#remote-market", icon: "◈", label: tx("Remote Market", "远程市场"), detail: tx("GitHub and marketplace", "GitHub 与市场") },
-        { href: "#analysis", icon: "▤", label: tx("Analysis", "分析"), detail: tx("Telemetry and cost", "遥测与成本") },
-        { href: "#graph", icon: "⌘", label: tx("Graph", "图谱"), detail: tx("Search, topology, focus", "搜索、拓扑、焦点") },
-        { href: "#proposals", icon: "◇", label: tx("Optimization", "优化"), detail: tx("Review suggested changes", "审查建议变更") },
-        { href: "#registry", icon: "▦", label: tx("Registry", "注册表"), detail: tx("Runs and indexed skills", "运行与已索引 Skill") },
+        { href: "#bundles", icon: "⬡", label: tx("Bundles", "打包"), detail: tx("Export and import", "导出与导入") }
+      ]
+    },
+    {
+      label: tx("Reports", "报告"),
+      items: [
+        { href: "#evaluate", icon: "◎", label: tx("Reports", "评测报告"), detail: tx("Project and Skill reports", "项目与技能报告") },
+        { href: "#analysis", icon: "▤", label: tx("Monitoring", "运行监控"), detail: tx("Heartbeat and telemetry", "心跳与遥测") },
+        { href: "#graph", icon: "⌘", label: tx("Graph", "图谱"), detail: tx("Relationships and focus", "关系与焦点") }
+      ]
+    },
+    {
+      label: tx("Governance", "治理"),
+      items: [
+        { href: "#proposals", icon: "◇", label: tx("Optimize", "优化中心"), detail: tx("Review and route work", "审查并流转任务") },
+        { href: "#apply-center", icon: "⇥", label: tx("Apply", "应用"), detail: tx("Scope preview and verify", "范围预览与验证") },
+        { href: "#registry", icon: "▦", label: tx("Skill Index", "技能索引"), detail: tx("Runs and indexed skills", "运行与已索引 Skill") },
         { href: "#audit", icon: "◷", label: tx("Audit", "审计"), detail: tx("Local governance events", "本地治理事件") },
         { href: "#settings", icon: "⚙", label: tx("Settings", "设置"), detail: tx("Storage and permissions", "存储与权限") }
       ]
@@ -9515,15 +13579,9 @@ export default function App() {
     },
     {
       id: "scope",
-      label: tx("Scope", "范围"),
-      title: tx("Choose authorization scope", "选择授权范围"),
-      summary: tx("Start narrow. Selected directories are recommended for v1.", "建议从小范围开始。v1 推荐选择目录。")
-    },
-    {
-      id: "exclude",
-      label: tx("Exclusions", "排除"),
-      title: tx("Skip heavy or irrelevant paths", "跳过较重或无关路径"),
-      summary: tx("Common exclusions: node_modules, dist, .cache.", "常见排除项：node_modules、dist、.cache。")
+      label: tx("Project", "项目"),
+      title: tx("Choose one project directory", "选择一个项目目录"),
+      summary: tx("Version 1 only scans the selected project folder.", "v1 只扫描已选择的项目文件夹。")
     },
     {
       id: "permissions",
@@ -9534,8 +13592,8 @@ export default function App() {
     {
       id: "initialize",
       label: tx("Initialize", "初始化"),
-      title: tx("Initialize local Skill index", "初始化本地 Skill 索引"),
-      summary: tx("Create local policy, initialize SQLite, and index approved roots.", "创建本地策略、初始化 SQLite，并索引已批准根目录。")
+      title: tx("Initialize local Skill index", "初始化本地技能索引"),
+      summary: tx("Create local policy, initialize SQLite, and bind the selected project.", "创建本地策略、初始化 SQLite，并绑定已选择项目。")
     }
   ];
   const maxOnboardingStep = onboardingSteps.length - 1;
@@ -9550,7 +13608,7 @@ export default function App() {
             <span className="product-brand-mark">OS</span>
             <div>
               <strong>Skill OS</strong>
-              <span>{tx("Framework + Workbench", "Framework + Workbench")}</span>
+              <span>{tx("Projects · Skills · Reports", "项目 · 技能 · 报告")}</span>
             </div>
           </div>
           <nav className="product-nav">
@@ -9628,6 +13686,10 @@ export default function App() {
           ref={productWorkspaceRef}
         >
       <div className="product-topbar" aria-label={tx("Local trust status", "本地信任状态")}>
+        <div className="reference-trust-bar" aria-label={tx("Trust bar", "信任栏")}>
+          <span>{tx("Trust bar", "信任栏")}</span>
+          <strong>{tx("Local first | Local data processing", "本地优先 | 本地数据处理中")}</strong>
+        </div>
         <div className="product-status-strip">
           {topbarStatusItems.map((item) => (
             <div className="product-status-tile" key={item.label}>
@@ -9644,21 +13706,244 @@ export default function App() {
           <LanguageSwitcher value={languageMode} onChange={setLanguageMode} />
           <button
             type="button"
-            className="ghost-button"
+            className="ghost-button topbar-settings-button"
+            aria-label={tx("Settings", "设置")}
+            title={tx("Settings", "设置")}
             onClick={() => navigateToProductSection("#settings")}
           >
-            {tx("Settings", "设置")}
+            ⚙
           </button>
         </div>
       </div>
+      <section className="guided-flow-panel" aria-label={tx("Guided Skill workflow", "Skill 引导流程")}>
+        <div className="guided-flow-copy">
+          <span className="os-module-kicker">
+            {isGuidedFlowComplete ? tx("Ready", "已就绪") : tx("Next Step", "下一步")}
+          </span>
+          <strong>{recommendedFlowTitle}</strong>
+          <small>{recommendedFlowInstruction}</small>
+        </div>
+        <div className="guided-stepper" role="list">
+          {guidedFlowSteps.map((step, index) => {
+            const state = getGuidedFlowStepState(step, index);
+            return (
+              <button
+                type="button"
+                className={`guided-step guided-step-${state}`}
+                key={step.href}
+                onClick={() => navigateToProductSection(step.href)}
+                title={`${step.title} - ${step.doneWhen}`}
+                role="listitem"
+                aria-current={state === "active" ? "step" : undefined}
+              >
+                <span className="guided-step-index">{String(index + 1).padStart(2, "0")}</span>
+                <span className="guided-step-label">{step.compactLabel}</span>
+                <span className="guided-step-state">
+                  {state === "done"
+                    ? tx("Done", "已完成")
+                    : state === "active"
+                      ? tx("Current", "当前")
+                      : state === "next"
+                        ? tx("Next", "下一步")
+                        : tx("Pending", "待处理")}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="guided-flow-actions">
+          <button
+            type="button"
+            className="primary"
+            onClick={() => navigateToProductSection(recommendedFlowStep.href)}
+          >
+            {recommendedFlowCta}
+          </button>
+          <small>{recommendedFlowStep.doneWhen}</small>
+        </div>
+      </section>
       {interactionNotice && currentProductSection !== "overview" ? (
         <InteractionFeedback notice={interactionNotice} />
       ) : null}
       <header className="hero" data-product-section="overview" id="overview">
+        <div className="overview-dashboard-reference">
+          <section className="overview-dashboard-hero">
+            <div>
+              <span className="os-module-kicker">{tx("Project Path", "项目路径")}</span>
+              <h1>{tx("Overview", "总览")}</h1>
+              <p>
+                {targetProjectRoot
+                  ? `${tx("Current workspace", "当前工作区")}：${targetProjectRoot}`
+                  : tx("No project selected. Bind one project folder to start project analysis.", "尚未选择项目。绑定一个项目文件夹后开始项目分析。")}
+              </p>
+            </div>
+            <div className="overview-dashboard-progress">
+              <span>{tx("Project analysis progress", "项目分析进度")}</span>
+              <strong>{overviewDashboardProgress}%</strong>
+              <i style={{ "--value": `${overviewDashboardProgress}%` } as CSSProperties} />
+            </div>
+          </section>
+
+          <section className="overview-dashboard-metrics" aria-label={tx("Dashboard metrics", "仪表盘指标")}>
+            {overviewMetricCards.map((metric) => (
+              <button
+                type="button"
+                className={`overview-dashboard-metric overview-kpi-${metric.tone}`}
+                key={metric.label}
+                onClick={() => navigateToProductSection(metric.label === tx("Success", "成功率") ? "#evaluate" : "#analysis")}
+              >
+                <span>{metric.label}</span>
+                <strong>{metric.value}</strong>
+                <small>{metric.trend}</small>
+                <svg className="overview-sparkline" viewBox="0 0 132 34" role="img" aria-label={metric.label}>
+                  <polyline points={metric.points} />
+                </svg>
+              </button>
+            ))}
+          </section>
+
+          <section className="overview-dashboard-body">
+            <article className="overview-dashboard-card-main">
+              <div className="overview-dashboard-card-head">
+                <div>
+                  <span className="os-module-kicker">
+                    {tx("Actionable recommendations", "待处理建议")} · {formatCount(overviewActionItems.length)}
+                  </span>
+                  <h2>{recommendedFlowTitle}</h2>
+                  <p>{recommendedFlowInstruction}</p>
+                </div>
+                <button type="button" className="primary" onClick={() => navigateToProductSection(recommendedFlowStep.href)}>
+                  {recommendedFlowCta}
+                </button>
+              </div>
+              <div className="overview-action-list" aria-label={tx("Actionable recommendations", "待处理建议")}>
+                {(overviewActionItems.length > 0
+                  ? overviewActionItems
+                  : [
+                      {
+                        id: "overview-next-default",
+                        tone: "project",
+                        projectName: focusedProjectDisplayName || tx("No Project", "未选项目"),
+                        title: recommendedFlowTitle,
+                        detail: recommendedFlowInstruction,
+                        href: recommendedFlowStep.href,
+                        onClick: () => navigateToProductSection(recommendedFlowStep.href)
+                      }
+                    ]).map((item) => (
+                  <button
+                    type="button"
+                    className={`overview-action-item tone-${item.tone}`}
+                    key={item.id}
+                    onClick={item.onClick}
+                  >
+                    <span>{item.projectName}</span>
+                    <strong>{item.title}</strong>
+                    <small>{item.detail}</small>
+                  </button>
+                ))}
+              </div>
+              <div className="overview-dashboard-boundary">
+                <div>
+                  <span>{tx("Local Project", "本地项目")}</span>
+                  <strong>{focusedProjectDisplayName || tx("Not bound", "未绑定")}</strong>
+                </div>
+                <div>
+                  <span>{tx("Indexed Skills", "已索引技能")}</span>
+                  <strong>{formatCount(currentProjectSkillCount)}</strong>
+                </div>
+                <div>
+                  <span>{tx("Remote Candidates", "远程候选")}</span>
+                  <strong>{formatCount(remoteSkillCount)}</strong>
+                </div>
+                <div>
+                  <span>{tx("Open Proposals", "待处理建议")}</span>
+                  <strong>{formatCount(proposalCounts.open)}</strong>
+                </div>
+              </div>
+            </article>
+
+            <aside className="overview-dashboard-side">
+              <article className="overview-dashboard-health-card">
+                <span className="os-module-kicker">{tx("Health", "健康度")}</span>
+                <div className="overview-dashboard-donut" style={{ "--value": `${overviewDashboardProgress}%` } as CSSProperties}>
+                  <strong>{overviewDashboardProgress}%</strong>
+                </div>
+                <div className="overview-dashboard-health-list">
+                  {overviewHealthSignals.map((signal) => (
+                    <div key={signal.label}>
+                      <span>{signal.label}</span>
+                      <strong>{formatPercent(signal.value / 100)}</strong>
+                      <i style={{ "--value": `${signal.value}%` } as CSSProperties} />
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="overview-project-coverage">
+                <div className="overview-section-head">
+                  <span className="os-module-kicker">{tx("Project Coverage", "项目覆盖")}</span>
+                  <strong>{formatCount(managedProjects.length)}</strong>
+                </div>
+                <div className="overview-project-coverage-list">
+                  {overviewProjectCoverageItems.length > 0 ? (
+                    overviewProjectCoverageItems.map(({ project, skillCount, openProposalCount, runCount }) => (
+                      <button
+                        type="button"
+                        className="overview-project-row"
+                        key={project.id}
+                        onClick={() => {
+                          setInspectedProjectPath(project.path);
+                          navigateToProductSection("#discovery");
+                        }}
+                      >
+                        <span>
+                          <strong>{project.name}</strong>
+                          <small>{project.lastScanAt ? tx("Scanned", "已扫描") : tx("Not scanned", "待扫描")}</small>
+                        </span>
+                        <span className="overview-project-stats">
+                          <small>{formatCount(skillCount)} {tx("Skills", "技能")}</small>
+                          <small>{formatCount(runCount)} {tx("Runs", "运行")}</small>
+                          <small className={openProposalCount > 0 ? "has-action" : ""}>
+                            {openProposalCount > 0
+                              ? `${formatCount(openProposalCount)} ${tx("actions", "待处理")}`
+                              : tx("No actions", "暂无待处理")}
+                          </small>
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <p>{tx("No project is bound yet.", "尚未绑定项目。")}</p>
+                  )}
+                </div>
+              </article>
+            </aside>
+
+            <article className="overview-dashboard-activity">
+              <span className="os-module-kicker">{tx("Recent Activity", "最近活动")}</span>
+              {overviewActivityItems.length > 0 ? (
+                overviewActivityItems.map((item) => (
+                  <div className="overview-dashboard-activity-row" key={item.id}>
+                    <i />
+                    <div>
+                      <strong>{item.title}</strong>
+                      <span className="overview-activity-meta">
+                        <b>{item.projectName}</b>
+                        {item.label}
+                      </span>
+                    </div>
+                    <small>{item.time}</small>
+                  </div>
+                ))
+              ) : (
+                <p>{tx("No recent activity yet. Scan a project or import runtime evidence to populate this timeline.", "暂无最近活动。扫描项目或导入运行证据后，这里会显示时间线。")}</p>
+              )}
+            </article>
+          </section>
+        </div>
         <div className="overview-main">
           <div className="hero-toolbar">
             <p className="eyebrow">
-              {languageMode === "zh" ? "MIDNIGHT GRAPH / 本地优先" : "MIDNIGHT GRAPH / LOCAL FIRST"}
+              {languageMode === "zh" ? "本地优先" : "LOCAL FIRST"}
             </p>
             <span className="hero-mode-pill">{productModeLabel}</span>
           </div>
@@ -9668,78 +13953,106 @@ export default function App() {
               mode={languageMode}
               en={
                 isBuilderMode
-                  ? "Workflow + Skill Framework, paired with a local visual workbench."
-                  : "A guided local workbench for discovering, reviewing, and improving Skills."
+                  ? "A local-first workbench for discovering Skills, evaluating quality, and observing real Codex / Claude runtime chains."
+                  : "Find your Skills, score them with use cases, then verify whether they help in real Codex and Claude sessions."
               }
               zh={
                 isBuilderMode
-                  ? "Workflow + Skill Framework，配套本地可视化工作台。"
-                  : "面向引导使用的本地工作台，用于发现、查看和改进 Skill。"
+                  ? "本地优先的工作台，用于发现 Skill、评测质量，并观测真实 Codex / Claude 运行链路。"
+                  : "发现你的 Skills，用用例评分，再验证它们是否真的帮助 Codex 和 Claude 会话。"
               }
             />
           </p>
-          <div className="overview-primary-grid">
-            <article className="overview-next-step entity-skill">
-              <span className="os-module-kicker">{tx("Recommended Next Step", "推荐下一步")}</span>
-              <h2>
-                {formatProductModeText(
-                  productMode,
-                  tx("Start with a Skill, then open detail only when needed.", "先从 Skill 开始，只在需要时打开细节。"),
-                  tx("Produce first. Govern what changes.", "先生产，再治理变化")
-                )}
-              </h2>
-              <p>
-                {formatProductModeText(
-                  productMode,
-                  tx(
-                    "Top Skills and simple summaries come first. Deeper analysis, tuning, and packaging stay one click away.",
-                    "优先显示顶级 Skill 和简单摘要。更深的分析、调校和打包只保留一步之遥。"
-                  ),
-                  tx(
-                    "Create Skills in the framework, then inspect health, cost, graph, and proposals here.",
-                    "在 Framework 里创建 Skill，再在这里查看健康、成本、图谱和建议。"
-                  )
-                )}
-              </p>
-              <div className="overview-next-actions">
-                <button type="button" className="primary" onClick={() => navigateToProductSection("#discovery")}>
-                  {formatProductModeText(productMode, tx("Start Guided Flow", "开始引导流程"), tx("Open Framework", "进入 Framework"))}
+          <div className="overview-primary-grid overview-dashboard-grid">
+            <article className="overview-dashboard-card entity-skill">
+              <div className="overview-dashboard-head">
+                <div>
+                  <span className="os-module-kicker">{tx("Overview Metrics", "总览指标")}</span>
+                  <h2>{tx("Skill workflow health", "Skill 工作流健康度")}</h2>
+                </div>
+                <button type="button" className="ghost-button compact" onClick={() => navigateToProductSection("#analysis")}>
+                  {tx("Runtime Detail", "运行详情")} ▤
                 </button>
-                <button type="button" onClick={() => navigateToProductSection("#analysis")}>
-                  {tx("Open Workbench", "进入 Workbench")}
+              </div>
+              <div className="overview-kpi-grid" aria-label={tx("Overview KPI trends", "总览指标趋势")}>
+                {overviewMetricCards.map((metric) => (
+                  <button
+                    type="button"
+                    className={`overview-kpi-card overview-kpi-${metric.tone}`}
+                    key={metric.label}
+                    onClick={() => navigateToProductSection(metric.label === tx("Success", "成功率") ? "#evaluate" : "#analysis")}
+                  >
+                    <span className="overview-kpi-icon">{metric.icon}</span>
+                    <span className="overview-kpi-label">{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                    <small>{metric.trend}</small>
+                    <svg className="overview-sparkline" viewBox="0 0 132 34" role="img" aria-label={metric.label}>
+                      <polyline points={metric.points} />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+              <div className="overview-next-actions overview-dashboard-actions">
+                <button type="button" className="primary" onClick={() => navigateToProductSection(recommendedFlowStep.href)}>
+                  {recommendedFlowCta}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigateToProductSection(isGuidedFlowComplete ? "#local-skills" : "#evaluate")}
+                >
+                  {isGuidedFlowComplete ? tx("Improve a Skill", "打磨 Skill") : tx("Evaluate Quality", "评测质量")}
                 </button>
               </div>
             </article>
             <article className="overview-report-card">
               <div className="overview-report-head">
-                <span className="os-module-kicker">{tx("Current State", "当前状态")}</span>
-                <button type="button" className="ghost-button compact" onClick={() => navigateToProductSection("#analysis")}>
-                  {tx("Analysis", "分析")} ▤
+                <div>
+                  <span className="os-module-kicker">{tx("Current State", "当前状态")}</span>
+                  <strong>{tx("Coverage and risk", "覆盖与风险")}</strong>
+                </div>
+                <button type="button" className="ghost-button compact" onClick={() => navigateToProductSection("#evaluate")}>
+                  {tx("Evaluate", "评测")} ◎
                 </button>
               </div>
-              <div className="overview-report-metrics">
+              <div className="overview-health-list" aria-label={tx("Overview health indicators", "总览健康指标")}>
+                {overviewHealthSignals.map((signal) => (
+                  <div className="overview-health-row" key={signal.label}>
+                    <div>
+                      <span>{signal.label}</span>
+                      <strong>{formatPercent(signal.value / 100)}</strong>
+                    </div>
+                    <small>{signal.detail}</small>
+                    <i style={{ "--value": `${signal.value}%` } as CSSProperties} />
+                  </div>
+                ))}
+              </div>
+              <div className="overview-report-metrics overview-compact-metrics">
                 <div>
-                  <span>{tx("Indexed", "已索引")}</span>
+                  <span>{tx("Skills", "Skills")}</span>
                   <strong>{formatCount(boot.skills.length)}</strong>
                 </div>
                 <div>
-                  <span>{tx("Runs", "运行")}</span>
-                  <strong>{formatCount(dailySummary?.totalRuns ?? 0)}</strong>
+                  <span>{tx("Models", "模型")}</span>
+                  <strong>{formatCount(observedModelNames.length)}</strong>
                 </div>
                 <div>
-                  <span>{tx("Open Proposals", "待处理建议")}</span>
-                  <strong>{formatCount(proposalCounts.open)}</strong>
+                  <span>{tx("Tool Calls", "工具调用")}</span>
+                  <strong>{formatCount(dailySummary?.totalToolCalls ?? 0)}</strong>
                 </div>
                 <div>
-                  <span>{tx("Graph", "图谱")}</span>
-                  <strong>{formatCount(graphSnapshot?.totalNodes ?? 0)}</strong>
+                  <span>{tx("Slowest", "最慢")}</span>
+                  <strong>{slowestSkill ? formatDuration(slowestSkill.avgDurationMs) : "n/a"}</strong>
                 </div>
               </div>
               <div className="overview-summary-row">
                 <small>
                   {tx(
-                    "Local report: health, cost, graph, and proposal state.",
-                    "本地报表：健康、成本、图谱和建议状态。"
+                    highestWasteSkill
+                      ? `Waste hotspot: ${highestWasteSkill.skillName} at ${formatWasteScore(highestWasteSkill.wasteScore)}.`
+                      : "Local report: inventory, evaluation readiness, runtime evidence, and improvement queue.",
+                    highestWasteSkill
+                      ? `浪费热点：${highestWasteSkill.skillName}，${formatWasteScore(highestWasteSkill.wasteScore)}。`
+                      : "本地报表：资产、评测就绪度、运行证据和改进队列。"
                   )}
                 </small>
               </div>
@@ -9748,34 +14061,32 @@ export default function App() {
           <div className="overview-workflow-strip" aria-label={tx("Skill OS workflow", "Skill OS 工作流")}>
             <div className="overview-workflow-intro">
               <span className="os-module-kicker">{tx("Operating Path", "操作路径")}</span>
-              <strong>
-                {formatProductModeText(
-                  productMode,
-                  tx("One clear lane first", "先看清一条主线"),
-                  tx("One lane at a time", "一次只走一层")
-                )}
-              </strong>
-              <small>
-                {formatProductModeText(
-                  productMode,
-                  tx("Top Skills first, then details on demand.", "先看顶级 Skill，再按需进入细节。"),
-                  tx("Open detail only when a signal needs work.", "只有信号需要处理时再进入细节。")
-                )}
-              </small>
+              <strong>{recommendedFlowTitle}</strong>
+              <small>{recommendedFlowCta}</small>
             </div>
-            {[
-              { label: tx("Discover", "发现"), caption: tx("Find Skills", "找到 Skill"), href: "#discovery" },
-              { label: tx("Analyze", "分析"), caption: tx("Read health", "查看健康"), href: "#analysis" },
-              { label: tx("Graph", "图谱"), caption: tx("Map relations", "映射关系"), href: "#graph" },
-              { label: tx("Optimize", "优化"), caption: tx("Decide changes", "决策变更"), href: "#proposals" },
-              { label: tx("Apply", "应用"), caption: tx("Preview scope", "预览范围"), href: "#apply-center" }
-            ].map((step, index) => (
-              <button type="button" key={step.href} onClick={() => navigateToProductSection(step.href as (typeof productNavHrefs)[number])}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <strong>{step.label}</strong>
-                <small>{step.caption}</small>
-              </button>
-            ))}
+            {guidedFlowSteps.map((step, index) => {
+              const state = getGuidedFlowStepState(step, index);
+              return (
+                <button
+                  type="button"
+                  className={`overview-workflow-step overview-workflow-step-${state}`}
+                  key={step.href}
+                  onClick={() => navigateToProductSection(step.href)}
+                >
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <strong>{step.compactLabel}</strong>
+                  <small>
+                    {state === "done"
+                      ? tx("Done", "已完成")
+                      : state === "active"
+                        ? tx("Current", "当前")
+                        : state === "next"
+                          ? tx("Next", "下一步")
+                          : tx("Pending", "待处理")}
+                  </small>
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="hero-side">
@@ -9802,18 +14113,18 @@ export default function App() {
                 className="overview-boundary-card entity-skill"
                 onClick={() => navigateToProductSection("#discovery")}
               >
-                <span>{tx("Framework", "Framework")}</span>
-                <strong>{tx("Produce", "生产")}</strong>
-                <small>{tx("Create and organize Skills", "创建并组织 Skill")}</small>
+                <span>{tx("Projects", "项目管理")}</span>
+                <strong>{tx("Managed Projects", "项目管理")}</strong>
+                <small>{tx("Bind, view, and scan one folder", "绑定、查看、扫描单目录")}</small>
               </button>
               <button
                 type="button"
                 className="overview-boundary-card entity-project"
                 onClick={() => navigateToProductSection("#analysis")}
               >
-                <span>{tx("Workbench", "Workbench")}</span>
-                <strong>{tx("Govern", "治理")}</strong>
-                <small>{tx("Analyze health, cost, graph", "分析健康、成本、图谱")}</small>
+                <span>{tx("Runtime", "运行链路")}</span>
+                <strong>{tx("Real Usage", "真实使用")}</strong>
+                <small>{tx("Skill hits, tools, tokens", "Skill 命中、工具、Token")}</small>
               </button>
             </div>
             <div className="overview-focus-summary overview-signal-summary">
@@ -9859,222 +14170,56 @@ export default function App() {
       <section className="panel os-module-panel" data-product-section="discovery" id="discovery">
         <div className="section-headline">
           <div>
-            <h2>{tx("Discovery", "发现")}</h2>
+            <h2>{tx("Project Management", "项目管理")}</h2>
             <p className="section-copy">
               <LocalizedCopy
                 mode={languageMode}
                 en={
                   isBuilderMode
-                    ? "Two clear intake lanes: authorized local folders and manually activated remote imports."
-                    : "A guided intake path that starts local and opens remote Skills only when you choose."
+                    ? "Bind projects here, focus one active project, and scan only that selected directory."
+                    : "Start with one project folder. This version does not scan the whole computer."
                 }
                 zh={
                   isBuilderMode
-                    ? "两条清晰导入通道：授权本地目录，以及需手动激活的远程导入。"
-                    : "一个引导式导入路径：先本地，再在你选择时打开远程 Skill。"
+                    ? "在这里绑定项目、查看项目详情，并且只扫描选中的项目目录。"
+                    : "先从一个项目文件夹开始。本版本不扫描整台电脑。"
                 }
               />
             </p>
           </div>
         </div>
-        <div className="discovery-entry-strip">
-          <article className="discovery-entry-card entity-skill">
-            <span className="os-module-kicker">{tx("Local First", "本地优先")}</span>
-            <strong>{tx("Start with approved folders", "先从已批准目录开始")}</strong>
-            <small>{tx("Use authorization and exclusions to populate the registry safely.", "通过授权和排除项安全填充注册表。")}</small>
-            <button type="button" onClick={() => navigateToProductSection("#registry")}>
-              {tx("Open Registry", "打开注册表")}
-            </button>
-          </article>
-          <article className="discovery-entry-card entity-marketplace">
-            <span className="os-module-kicker">{tx("Remote Intake", "远程导入")}</span>
-            <strong>{tx("Preview before import", "先预览，再导入")}</strong>
-            <small>{tx("Analyze GitHub or Marketplace sources before activation.", "在激活前分析 GitHub 或市场来源。")}</small>
-            <button type="button" onClick={() => navigateToProductSection("#remote-market")}>
-              {tx("Open Remote Market", "打开远程市场")}
-            </button>
-          </article>
-        </div>
-        <div className="unified-discovery-panel">
-          <div className="unified-discovery-head">
-            <div>
-              <span className="os-module-kicker">{tx("Unified Discovery", "统一发现")}</span>
-              <h3>{tx("Search Skills across local and remote sources", "跨本地与远程来源搜索 Skill")}</h3>
-              <p>{tx("One query groups results by source so users do not need to know where a Skill lives before searching.", "一个查询按来源分组结果，用户搜索前不需要先知道 Skill 在哪里。")}</p>
-            </div>
-            <label className="unified-discovery-search">
-              <span>{tx("Search Skills", "搜索 Skill")}</span>
-              <input
-                value={unifiedDiscoveryQuery}
-                onChange={(event) => setUnifiedDiscoveryQuery(event.target.value)}
-                placeholder={tx("Search local, GitHub, marketplace, MCP...", "搜索本地、GitHub、市场、MCP...")}
-              />
-            </label>
-          </div>
-          <div className="unified-discovery-results">
-            <article>
-              <span className="stat-label">{tx("Local", "本地")}</span>
-              {(boot.skills.length > 0 ? boot.skills : []).filter((skill) => {
-                const query = unifiedDiscoveryQuery.trim().toLowerCase();
-                return query.length === 0 || skill.displayName.toLowerCase().includes(query) || skill.sourcePath.toLowerCase().includes(query);
-              }).slice(0, 3).map((skill) => (
-                <div className="unified-discovery-item" key={skill.id}>
-                  <strong>{skill.displayName}</strong>
-                  <span>{skill.sourceType}</span>
-                </div>
-              ))}
-              {boot.skills.length === 0 ? (
-                <p className="muted">{tx("Scan approved roots to populate local results.", "扫描已批准根目录后会出现本地结果。")}</p>
-              ) : null}
-            </article>
-            <article>
-              <span className="stat-label">{tx("Remote", "远程")}</span>
-              {[
-                { name: "OpenAI Research Agent", source: "Marketplace", score: "94" },
-                { name: "Claude Product Writer", source: "GitHub", score: "88" },
-                { name: "GitHub MCP Toolkit", source: "MCP", score: "82" }
-              ].filter((skill) => {
-                const query = unifiedDiscoveryQuery.trim().toLowerCase();
-                return query.length === 0 || skill.name.toLowerCase().includes(query) || skill.source.toLowerCase().includes(query);
-              }).slice(0, 3).map((skill) => (
-                <div className="unified-discovery-item remote" key={skill.name}>
-                  <strong>{skill.name}</strong>
-                  <span>{skill.source} · {tx("Health", "健康度")} {skill.score}</span>
-                </div>
-              ))}
-            </article>
-          </div>
-        </div>
-        <div className="discovery-lanes">
-          <article className="discovery-lane entity-skill">
-            <div className="discovery-lane-head">
-              <div>
-                <span className="os-module-kicker">{tx("Local Discovery", "本地发现")}</span>
-                <h3>{tx("Authorized folders", "授权目录")}</h3>
-              </div>
-              <button type="button" className="primary" disabled={busy} onClick={() => void scanSkills()}>
-                {busyAction === "scan" ? tx("Scanning...", "扫描中...") : tx("Scan Now", "立即扫描")}
-              </button>
-            </div>
-            <div className="discovery-stat-grid">
-              <div>
-                <span className="stat-label">{tx("Roots", "根目录")}</span>
-                <strong>{activeDiscoveryRoots.length}</strong>
-              </div>
-              <div>
-                <span className="stat-label">{tx("Exclusions", "排除")}</span>
-                <strong>{activeDiscoveryExclusions.length}</strong>
-              </div>
-              <div>
-                <span className="stat-label">{tx("Indexed", "已索引")}</span>
-                <strong>{boot.skills.length}</strong>
-              </div>
-            </div>
-            <div className="discovery-path-list">
-              {activeDiscoveryRoots.length === 0 ? (
-                <p className="muted">{tx("No authorized folders yet.", "还没有授权目录。")}</p>
-              ) : (
-                activeDiscoveryRoots.slice(0, 4).map((rootPath) => (
-                  <div className="discovery-path-row" key={rootPath}>
-                    <span>{rootPath}</span>
-                    <small>
-                      {scanRoots.includes(rootPath)
-                        ? tx("staged", "待授权")
-                        : boot.roots.find((root) => root.path === rootPath)?.rootType ?? tx("saved", "已保存")}
-                    </small>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="discovery-path-list">
-              {activeDiscoveryExclusions.length === 0 ? (
-                <p className="muted">{tx("No exclusions are staged for this scan policy.", "当前扫描策略还没有待排除路径。")}</p>
-              ) : (
-                activeDiscoveryExclusions.slice(0, 3).map((path) => (
-                  <div className="discovery-path-row" key={path}>
-                    <span>{path}</span>
-                    <small>{tx("exclude", "排除")}</small>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="os-card-actions">
-              <button type="button" onClick={() => void addRoot()}>{tx("Add Folder", "添加目录")}</button>
-              <button type="button" onClick={() => void addExclusion()}>{tx("Add Exclusion", "添加排除项")}</button>
-            </div>
-            {scanResult ? (
-              <div className="discovery-result-strip">
-                <span>{tx("Found", "发现")} {scanResult.skillsFound}</span>
-                <span>{tx("Files", "文件")} {scanResult.filesSeen}</span>
-                <span>{tx("Skipped", "跳过")} {scanResult.skippedEntryCount}</span>
-              </div>
-            ) : null}
-          </article>
+        <ProjectLibraryPanel
+          projects={managedProjects}
+          recentRuns={recentRuns}
+          telemetryReady={Boolean(boot?.policy && boot.policy.telemetryMode !== "disabled")}
+          repairFeedback={projectRepairFeedback}
+          onboardingLogs={projectOnboardingLogs}
+          currentProjectRoot={targetProjectRoot}
+          busyAction={busyAction}
+          busy={busy}
+          onBindProject={() => void beginBindProjectFlow()}
+          onInspectProject={inspectManagedProject}
+          onAnalyzeProject={analyzeManagedProject}
+          onScanProject={scanManagedProject}
+          onRepairProject={(project) => void repairManagedProject(project)}
+          onViewOnboardingLog={(project) => setSelectedProjectLogPath(project.path)}
+          onToggleMonitoring={toggleProjectMonitoring}
+          onUnbindProject={unbindManagedProject}
+        />
 
-          <article className="discovery-lane entity-marketplace">
-            <div className="discovery-lane-head">
-              <div>
-                <span className="os-module-kicker">{tx("Remote Discovery", "远程发现")}</span>
-                <h3>{tx("Import, then activate", "先导入，再激活")}</h3>
-              </div>
-              <span className="remote-safety-pill">{tx("Never auto-run", "绝不自动运行")}</span>
-            </div>
-            <div className="remote-import-box">
-              <label>
-                <span>{tx("GitHub Repository URL", "GitHub 仓库 URL")}</span>
-                <input
-                  value={remoteRepositoryUrl}
-                  onChange={(event) => {
-                    setRemoteRepositoryUrl(event.target.value);
-                    setRemoteSourceError(null);
-                  }}
-                  placeholder="https://github.com/org/skill-repo"
-                />
-              </label>
-              <div className="os-card-actions">
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={busyAction === "remote-analysis"}
-                  onClick={() => void analyzeRemoteSource()}
-                >
-                  {busyAction === "remote-analysis"
-                    ? tx("Analyzing...", "分析中...")
-                    : tx("Analyze Repository", "分析仓库")}
-                </button>
-              </div>
-              {remoteSourceError ? <p className="error-text">{remoteSourceError}</p> : null}
-              <div className="risk-check-list">
-                <span>{tx("Repository analysis", "仓库分析")}</span>
-                <span>{tx("Manifest detection", "清单检测")}</span>
-                <span>{tx("Risk check", "风险检查")}</span>
-                <span>{tx("Activation preview", "激活预览")}</span>
-              </div>
-            </div>
-            <div className="marketplace-search-row">
-              <label>
-                <span>{tx("Marketplace Search", "市场搜索")}</span>
-                <input
-                  value={marketplaceQuery}
-                  onChange={(event) => setMarketplaceQuery(event.target.value)}
-                  placeholder={tx("Search verified skills", "搜索已验证 Skill")}
-                />
-              </label>
-            </div>
-            <div className="remote-card-grid">
-              {[
-                { name: "Context Cleaner", tag: tx("Recently Added", "最近新增") },
-                { name: "Repo Mapper", tag: tx("Trending", "趋势") },
-                { name: "Agent Router", tag: tx("Verified", "已验证") }
-              ].map((entry) => (
-                <div className="remote-source-card" key={entry.name}>
-                  <strong>{entry.name}</strong>
-                  <span>{entry.tag}</span>
-                </div>
-              ))}
-            </div>
-          </article>
-        </div>
+        {isEmptyTargetProject || workflowStarterPreview || workflowStarterResult ? (
+          <WorkflowStarterCard
+            projectRoot={workflowStarterProjectRoot}
+            preview={workflowStarterPreview}
+            result={workflowStarterResult}
+            busyAction={busyAction}
+            highlighted={workflowStarterHighlighted}
+            onPreview={() => void previewRecommendedWorkflowStarter()}
+            onApply={() => void applyRecommendedWorkflowStarter()}
+            onOpenLibrary={() => navigateToProductSection("#local-skills")}
+            onOpenEvaluate={() => navigateToProductSection("#evaluate")}
+          />
+        ) : null}
 
         {remoteSourceAnalysis ? (
           <article className={`remote-analysis-panel remote-preflight-workbench risk-${remoteSourceAnalysis.riskLevel}`}>
@@ -10085,13 +14230,7 @@ export default function App() {
                 <p>{remoteSourceAnalysis.normalizedUrl}</p>
               </div>
               <span className="remote-risk-pill">
-                {remoteSourceAnalysis.riskLevel === "blocked"
-                  ? tx("Blocked", "已阻断")
-                  : remoteSourceAnalysis.riskLevel === "high"
-                    ? tx("High Risk", "高风险")
-                    : remoteSourceAnalysis.riskLevel === "medium"
-                      ? tx("Review", "需审查")
-                      : tx("Low Risk", "低风险")}
+                {formatRemoteRiskLevel(remoteSourceAnalysis.riskLevel, languageMode)}
               </span>
             </div>
             <div className="remote-analysis-meta">
@@ -10124,26 +14263,343 @@ export default function App() {
       <section className="panel os-module-panel" data-product-section="local-skills" id="local-skills">
         <div className="section-headline">
           <div>
-            <h2>{tx("Skill Library", "Skill 库")}</h2>
+            <h2>{tx("Skill Library", "技能库")}</h2>
             <p className="section-copy">
               <LocalizedCopy
                 mode={languageMode}
-                en="A local-first library for indexed Skills, health signals, runtime evidence, and apply actions."
-                zh="本地优先的 Skill 库，集中展示已索引 Skill、健康信号、运行证据与应用动作。"
+                en="An asset library for scanned local Skills and imported remote candidates. It stores assets; it does not auto-run them."
+                zh="用于收纳本地扫描技能和远程导入候选的资产库。这里负责存储资产，不会自动运行。"
               />
             </p>
           </div>
+          <div className="toolbar wrap">
+            <ChineseDescriptionSwitch
+              checked={skillChineseAssistEnabled}
+              disabled={languageMode !== "zh"}
+              onChange={() => setSkillChineseAssistEnabled((current) => !current)}
+            />
+          </div>
         </div>
+        <div className="skill-asset-overview-grid">
+          <button
+            type="button"
+            className="skill-asset-card entity-skill"
+            onClick={() => {
+              setActiveSkillAssetTab("local");
+              setSkillLibraryProjectFilter("all");
+            }}
+          >
+            <span className="os-module-kicker">{tx("Local Scanned Skills", "本地扫描技能")}</span>
+            <strong>{formatCount(librarySkillRows.length)} {tx("local Skills", "本地技能")}</strong>
+            <small>{tx("Collected from scanned project folders.", "来自已扫描项目目录的技能资产。")}</small>
+          </button>
+          <button
+            type="button"
+            className="skill-asset-card entity-marketplace"
+            onClick={() => setActiveSkillAssetTab("remote")}
+          >
+            <span className="os-module-kicker">{tx("Remote Candidates", "远程候选")}</span>
+            <strong>{formatCount(remoteCandidates.length)} {tx("inactive", "未激活")}</strong>
+            <small>{tx("Imported remote Skills stay inactive until Apply Center confirmation.", "远程技能导入后保持未激活，直到在应用中心确认。")}</small>
+          </button>
+          <button
+            type="button"
+            className="skill-asset-card entity-project"
+            onClick={() => navigateToProductSection("#discovery")}
+          >
+            <span className="os-module-kicker">{tx("Bound Projects", "已绑定项目")}</span>
+            <strong>{formatCount(managedProjects.length)} {tx("projects", "项目")}</strong>
+            <small>{tx("Project Management records which folders are bound and scanned.", "项目管理记录哪些目录已绑定、已扫描。")}</small>
+          </button>
+          <button
+            type="button"
+            className="skill-asset-card entity-agent"
+            onClick={() => navigateToProductSection("#analysis")}
+          >
+            <span className="os-module-kicker">{tx("Runtime Evidence", "运行证据")}</span>
+            <strong>{formatCount(recentRuns.length)} {tx("runs", "运行")}</strong>
+            <small>{tx("Evidence is linked back to Skills and projects in reports.", "证据会在报告中关联回技能和项目。")}</small>
+          </button>
+        </div>
+        <div className="skill-asset-tabs" role="tablist" aria-label={tx("Skill asset views", "技能资产视图")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSkillAssetTab === "local"}
+            className={activeSkillAssetTab === "local" ? "active" : undefined}
+            onClick={() => setActiveSkillAssetTab("local")}
+          >
+            <span>{tx("Local Scanned Skills", "本地扫描技能")}</span>
+            <strong>{formatCount(librarySkillRows.length)}</strong>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSkillAssetTab === "remote"}
+            className={activeSkillAssetTab === "remote" ? "active" : undefined}
+            onClick={() => setActiveSkillAssetTab("remote")}
+          >
+            <span>{tx("Remote Loaded Skills", "远程加载技能")}</span>
+            <strong>{formatCount(remoteCandidates.length)}</strong>
+          </button>
+        </div>
+        <div className="skill-asset-catalog-grid is-tabbed">
+          {activeSkillAssetTab === "local" ? (
+          <article className="skill-asset-catalog-panel entity-skill">
+            <div className="skill-asset-catalog-head">
+              <div>
+                <span className="os-module-kicker">{tx("Local Scanned Skills", "本地扫描技能")}</span>
+                <h3>{tx("Collected Skills Table", "已收集技能表")}</h3>
+              </div>
+              <span className="mini-pill">{formatCount(filteredLibrarySkillRows.length)} / {formatCount(librarySkillRows.length)} {tx("items", "项")}</span>
+            </div>
+            <div className="skill-library-controls">
+              <label className="skill-library-search">
+                <span>{tx("Search", "搜索")}</span>
+                <input
+                  value={skillLibraryQuery}
+                  onChange={(event) => setSkillLibraryQuery(event.currentTarget.value)}
+                  placeholder={tx("Skill, path, project", "技能、路径、项目")}
+                />
+              </label>
+              <label>
+                <span>{tx("Project", "项目")}</span>
+                <select
+                  value={skillLibraryProjectFilter}
+                  onChange={(event) => setSkillLibraryProjectFilter(event.currentTarget.value)}
+                >
+                  <option value="all">{tx("All Projects", "全部项目")}</option>
+                  {managedProjects.map((project) => (
+                    <option key={project.path} value={project.path}>{project.name}</option>
+                  ))}
+                  <option value="unbound">{tx("Unbound", "未绑定")}</option>
+                </select>
+              </label>
+              <label>
+                <span>{tx("Type", "类型")}</span>
+                <select
+                  value={skillLibraryTypeFilter}
+                  onChange={(event) => setSkillLibraryTypeFilter(event.currentTarget.value as SkillLibraryTypeFilter)}
+                >
+                  <option value="all">{tx("All Types", "全部类型")}</option>
+                  <option value="development">{tx("Development", "开发")}</option>
+                  <option value="analysis">{tx("Analysis", "分析")}</option>
+                  <option value="memory">{tx("Memory", "记忆")}</option>
+                  <option value="infrastructure">{tx("Infrastructure", "基础设施")}</option>
+                  <option value="packaging">{tx("Packaging", "打包")}</option>
+                  <option value="governance">{tx("Governance", "治理")}</option>
+                </select>
+              </label>
+              <label>
+                <span>{tx("Sort", "排序")}</span>
+                <select
+                  value={skillLibrarySortKey}
+                  onChange={(event) => setSkillLibrarySortKey(event.currentTarget.value as SkillLibrarySortKey)}
+                >
+                  <option value="priority">{tx("Recommended", "推荐")}</option>
+                  <option value="calls">{tx("Calls", "调用")}</option>
+                  <option value="tokens">{tx("Tokens", "Token")}</option>
+                  <option value="score">{tx("Score", "评分")}</option>
+                  <option value="latest">{tx("Latest Run", "最近运行")}</option>
+                  <option value="name">{tx("Name", "名称")}</option>
+                </select>
+              </label>
+            </div>
+            <div className="skill-asset-table-shell">
+              <table className="skill-asset-data-table local">
+                <thead>
+                  <tr>
+                    <th>{tx("Skill", "技能")}</th>
+                    <th>{tx("Project", "项目")}</th>
+                    <th>{tx("Type", "类型")}</th>
+                    <th>{tx("Calls", "调用")}</th>
+                    <th>{tx("Tokens", "Token")}</th>
+                    <th>{tx("Score", "评分")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredLibrarySkillRows.map((row) => {
+                    const sourceProject = managedProjects.find((project) => isPathInsideProject(row.skill.sourcePath, project.path));
+                    return (
+                      <tr
+                        className={selectedLibrarySkillRow?.skill.id === row.skill.id ? "selected" : undefined}
+                        key={row.skill.id}
+                        onClick={() => selectLibrarySkill(row.skill.id)}
+                      >
+                        <td>
+                          <button type="button" className="skill-asset-name-button" onClick={() => selectLibrarySkill(row.skill.id)}>
+                            <strong>{row.skill.displayName}</strong>
+                            <span>{row.purposeSummary}</span>
+                          </button>
+                        </td>
+                        <td>
+                          <strong>{sourceProject?.name || focusedProjectDisplayName || tx("Unbound project", "未绑定项目")}</strong>
+                          <span>{row.skill.sourcePath}</span>
+                        </td>
+                        <td>{row.roleLabel}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="skill-run-count-button"
+                            title={tx("View call details", "查看调用详情")}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void openSkillRunDetails(row.skill, row.skillRuns);
+                            }}
+                          >
+                            {formatCount(row.skill.runtime.totalRuns)}
+                          </button>
+                        </td>
+                        <td>{formatCount(row.skill.runtime.totalTokens)}</td>
+                        <td>
+                          <span className="project-status-pill">{row.skill.health.score}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {filteredLibrarySkillRows.length === 0 ? (
+                <p className="skill-asset-empty">{tx("Scan a bound project to collect local Skills.", "扫描已绑定项目后会收集本地技能。")}</p>
+              ) : null}
+            </div>
+          </article>
+          ) : (
+          <article className="skill-asset-catalog-panel entity-marketplace">
+            <div className="skill-asset-catalog-head">
+              <div>
+                <span className="os-module-kicker">{tx("Remote Loaded Skills", "远程加载技能")}</span>
+                <h3>{tx("Imported candidates stay inactive", "远程候选保持未激活")}</h3>
+              </div>
+              <span className="mini-pill">{formatCount(filteredRemoteCandidates.length)} / {formatCount(remoteCandidates.length)} {tx("items", "项")}</span>
+            </div>
+            <div className="skill-library-controls remote">
+              <label className="skill-library-search">
+                <span>{tx("Search", "搜索")}</span>
+                <input
+                  value={remoteLibraryQuery}
+                  onChange={(event) => setRemoteLibraryQuery(event.currentTarget.value)}
+                  placeholder={tx("Remote Skill, URL, status", "远程技能、URL、状态")}
+                />
+              </label>
+              <label>
+                <span>{tx("Sort", "排序")}</span>
+                <select
+                  value={remoteLibrarySortKey}
+                  onChange={(event) => setRemoteLibrarySortKey(event.currentTarget.value as RemoteLibrarySortKey)}
+                >
+                  <option value="name">{tx("Name", "名称")}</option>
+                  <option value="risk">{tx("Risk", "风险")}</option>
+                  <option value="status">{tx("Status", "状态")}</option>
+                  <option value="source">{tx("Source", "来源")}</option>
+                </select>
+              </label>
+            </div>
+            <div className="skill-asset-table-shell">
+              <table className="skill-asset-data-table remote">
+                <thead>
+                  <tr>
+                    <th>{tx("Skill", "技能")}</th>
+                    <th>{tx("Source", "来源")}</th>
+                    <th>{tx("Risk", "风险")}</th>
+                    <th>{tx("Verification", "验证")}</th>
+                    <th>{tx("Status", "状态")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRemoteCandidates.map((candidate) => (
+                    <tr key={candidate.candidateId} onClick={() => void openRemoteCandidate(candidate)}>
+                      <td>
+                        <button type="button" className="skill-asset-name-button" onClick={() => void openRemoteCandidate(candidate)}>
+                          <strong>{candidate.displayName}</strong>
+                          <span>{candidate.catalogSkillId ?? candidate.sourceType}</span>
+                        </button>
+                      </td>
+                      <td>{candidate.normalizedUrl}</td>
+                      <td>{formatRemoteRiskLevel(candidate.riskLevel, languageMode)}</td>
+                      <td>{formatRemoteVerificationStatus(candidate.verificationStatus, languageMode)}</td>
+                      <td>{candidate.status === "activation_previewed" ? tx("Previewed", "已预览") : tx("Inactive", "未激活")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filteredRemoteCandidates.length === 0 ? (
+                <p className="skill-asset-empty">{tx("Import remote Skills from Remote Market to list them here.", "从远程市场导入技能后会显示在这里。")}</p>
+              ) : null}
+            </div>
+          </article>
+          )}
+        </div>
+        {activeSkillAssetTab === "local" && selectedLibrarySkillRow ? (
+          <article className="skill-asset-selected-summary entity-skill">
+            <div>
+              <span className="os-module-kicker">{tx("Selected Asset", "当前选中资产")}</span>
+              <h3>{selectedLibrarySkillRow.skill.displayName}</h3>
+              <p>{selectedLibrarySkillRow.purposeSummary}</p>
+            </div>
+            <div className="skill-asset-selected-metrics">
+              <div>
+                <span>{tx("Calls", "调用")}</span>
+                <button
+                  type="button"
+                  className="skill-run-count-button metric"
+                  onClick={() => void openSkillRunDetails(selectedLibrarySkillRow.skill, selectedLibrarySkillRow.skillRuns)}
+                >
+                  {formatCount(selectedLibrarySkillRow.skill.runtime.totalRuns)}
+                </button>
+              </div>
+              <div>
+                <span>{tx("Score", "评分")}</span>
+                <strong>{selectedLibrarySkillRow.skill.health.score}</strong>
+              </div>
+              <div>
+                <span>{tx("Status", "状态")}</span>
+                <strong>{selectedLibrarySkillRow.healthLabel}</strong>
+              </div>
+              <div>
+                <span>{tx("Workflow", "工作流")}</span>
+                <strong>{selectedLibrarySkillRow.orchestrationSummary}</strong>
+              </div>
+            </div>
+          </article>
+        ) : null}
+        {activeSkillAssetTab === "remote" && selectedRemoteCandidate ? (
+          <article className="skill-asset-selected-summary entity-marketplace">
+            <div>
+              <span className="os-module-kicker">{tx("Selected Remote Candidate", "当前远程候选")}</span>
+              <h3>{selectedRemoteCandidate.displayName}</h3>
+              <p>{selectedRemoteCandidate.normalizedUrl}</p>
+            </div>
+            <div className="skill-asset-selected-metrics">
+              <div>
+                <span>{tx("Risk", "风险")}</span>
+                <strong>{formatRemoteRiskLevel(selectedRemoteCandidate.riskLevel, languageMode)}</strong>
+              </div>
+              <div>
+                <span>{tx("Verification", "验证")}</span>
+                <strong>{formatRemoteVerificationStatus(selectedRemoteCandidate.verificationStatus, languageMode)}</strong>
+              </div>
+              <div>
+                <span>{tx("Status", "状态")}</span>
+                <strong>{selectedRemoteCandidate.status === "activation_previewed" ? tx("Previewed", "已预览") : tx("Inactive", "未激活")}</strong>
+              </div>
+              <div>
+                <span>{tx("Activation", "激活")}</span>
+                <strong>{tx("Manual only", "仅手动")}</strong>
+              </div>
+            </div>
+          </article>
+        ) : null}
         <div className="skill-library-flow">
           <section className="skill-library-top">
             <div className="section-headline compact">
               <div>
-                <span className="os-module-kicker">{tx("Priority Skills", "优先 Skill")}</span>
+                <span className="os-module-kicker">{tx("Skill Detail", "技能详情")}</span>
                 <h3>
                   {formatProductModeText(
                     productMode,
-                    tx("Top Skills first, details later", "先看 Top Skill，再看细节"),
-                    tx("Start with the highest-signal Skills", "先处理最高信号的 Skill")
+                    tx("Select an asset to inspect details", "选择一个资产查看细节"),
+                    tx("Inspect the selected local Skill", "查看选中的本地技能")
                   )}
                 </h3>
               </div>
@@ -10205,7 +14661,7 @@ export default function App() {
                   )}
                   <div className="skill-top-meta">
                     <span>{tx("Health", "健康")} {row.skill.health.score}</span>
-                    <span>{formatCount(row.skillRuns.length)} {tx("runs", "运行")}</span>
+                    <span>{formatCount(row.skill.runtime.totalRuns)} {tx("runs", "运行")}</span>
                     <span>{row.openProposalCount} {tx("open", "待处理")}</span>
                   </div>
                 </button>
@@ -10213,7 +14669,7 @@ export default function App() {
               {topLibrarySkillRows.length === 0 ? (
                 <article className="skill-top-card skill-empty-card">
                   <span className="skill-rank">00</span>
-                  <strong>{tx("No local Skills", "暂无本地 Skill")}</strong>
+                  <strong>{tx("No local Skills", "暂无本地技能")}</strong>
                   <small>{tx("Authorize and scan folders first.", "请先授权并扫描目录。")}</small>
                 </article>
               ) : null}
@@ -10224,7 +14680,7 @@ export default function App() {
             <article className="skill-list-panel">
               <div className="section-headline compact">
                 <div>
-                  <span className="os-module-kicker">{tx("Skills List", "Skill 列表")}</span>
+                  <span className="os-module-kicker">{tx("Skills List", "技能列表")}</span>
                   <h3>{tx("Basic purpose and status only", "只看作用与基础状态")}</h3>
                 </div>
                 <span className="mini-pill">{formatCount(librarySkillRows.length)} {tx("indexed", "已索引")}</span>
@@ -10263,13 +14719,13 @@ export default function App() {
                     <span className="skill-simple-meta">
                       <span>{row.healthLabel}</span>
                       <span>{tx("Health", "健康")} {row.skill.health.score}</span>
-                      <span>{formatCount(row.skillRuns.length)} {tx("runs", "运行")}</span>
+                      <span>{formatCount(row.skill.runtime.totalRuns)} {tx("runs", "运行")}</span>
                     </span>
                   </button>
                 ))}
                 {librarySkillRows.length === 0 ? (
                   <div className="empty-inline">
-                    {tx("Local Skills appear here after discovery indexes approved roots.", "发现流程索引已批准根目录后，本地 Skill 会显示在这里。")}
+                    {tx("Local Skills appear here after the selected project directory is scanned.", "扫描已选择项目目录后，本地技能会显示在这里。")}
                   </div>
                 ) : null}
               </div>
@@ -10413,7 +14869,13 @@ export default function App() {
                     </div>
                     <div>
                       <span>{tx("Usage", "使用")}</span>
-                      <strong>{formatCount(selectedLibrarySkillRow.skillRuns.length)}</strong>
+                      <button
+                        type="button"
+                        className="skill-run-count-button metric"
+                        onClick={() => void openSkillRunDetails(selectedLibrarySkillRow.skill, selectedLibrarySkillRow.skillRuns)}
+                      >
+                        {formatCount(selectedLibrarySkillRow.skill.runtime.totalRuns)}
+                      </button>
                     </div>
                     <div>
                       <span>{tx("Success", "成功率")}</span>
@@ -10521,8 +14983,8 @@ export default function App() {
                           {selectedLibraryOpenProposals.length > 0 ? (
                             selectedLibraryOpenProposals.slice(0, 2).map((proposal) => (
                               <div className="skill-detail-proposal" key={proposal.id}>
-                                <strong>{proposal.title}</strong>
-                                <small>{proposal.estimatedBenefit}</small>
+                                <strong>{formatProposalTitle(proposal, languageMode)}</strong>
+                                <small>{formatProposalBenefit(proposal, languageMode)}</small>
                               </div>
                             ))
                           ) : (
@@ -10579,17 +15041,17 @@ export default function App() {
                               {selectedLibrarySkillRow.skill.governance.structureType === "composite_framework"
                                 ? tx(
                                     "This item coordinates multiple workflow modules instead of acting like a single isolated Skill.",
-                                    "这个条目会协调多个工作流模块，而不是一个孤立的单点 Skill。"
+                                    "这个条目会协调多个工作流模块，而不是一个孤立的单点技能。"
                                   )
                                 : tx(
                                     "This item behaves like one direct local Skill with a narrower execution surface.",
-                                    "这个条目更像一个直接执行的本地 Skill，执行面更窄。"
+                                    "这个条目更像一个直接执行的本地技能，执行面更窄。"
                                   )}
                             </small>
                           </div>
                           <div className="skill-governance-card">
                             <span>{tx("Framework", "框架")}</span>
-                            <strong>{selectedLibrarySkillRow.frameworkLabel ?? tx("Direct local Skill", "直接本地 Skill")}</strong>
+                            <strong>{selectedLibrarySkillRow.frameworkLabel ?? tx("Direct local Skill", "直接本地技能")}</strong>
                             <small>
                               {selectedLibrarySkillRow.moduleCountLabel
                                 ? tx(
@@ -10749,8 +15211,8 @@ export default function App() {
               <p>
                 {skillAnalysis
                   ? tx(
-                      `Generated locally at ${formatDateTime(skillAnalysis.generatedAt)} from registry, telemetry, proposals, bundles, and graph evidence.`,
-                      `已在本地于 ${formatDateTime(skillAnalysis.generatedAt)} 基于注册表、遥测、建议、Bundle 与图谱证据生成。`
+                      `Generated locally at ${formatDateTime(skillAnalysis.generatedAt)} from skill index, telemetry, proposals, bundles, and graph evidence.`,
+                      `已在本地于 ${formatDateTime(skillAnalysis.generatedAt)} 基于技能索引、遥测、建议、Bundle 与图谱证据生成。`
                     )
                   : tx(
                       "Generate a local evidence snapshot for summary, dependencies, execution flow, risks, optimization ideas, alternatives, and related Skills.",
@@ -10870,6 +15332,251 @@ export default function App() {
           </div>
         </div>
         ) : null}
+      </section>
+
+      <section className="panel os-module-panel evaluate-module-panel" data-product-section="evaluate" id="evaluate">
+        <div className="section-headline">
+          <div>
+            <h2>{tx("Evaluation Reports", "评测报告")}</h2>
+            <p className="section-copy">
+              <LocalizedCopy
+                mode={languageMode}
+                en="Reports are organized by project, Skill, heartbeat monitoring, and workflow effect."
+                zh="报告按项目、技能、心跳监控和工作流效果组织。"
+              />
+            </p>
+          </div>
+          <div className="toolbar wrap">
+            <button type="button" onClick={() => navigateToProductSection("#local-skills")}>
+              {tx("Choose Skill", "选择技能")}
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={!evaluationTargetRow || busyAction === "skill-analysis"}
+              onClick={() => void generateSkillAnalysis(evaluationTargetRow?.skill.id)}
+            >
+              {busyAction === "skill-analysis" ? tx("Generating...", "生成中...") : tx("Generate Report", "生成报告")}
+            </button>
+          </div>
+        </div>
+        <div className="evaluation-report-grid">
+          <article className="evaluation-report-card entity-project">
+            <span className="os-module-kicker">{tx("Project Report", "项目报告")}</span>
+            <strong>{focusedProjectDisplayName || tx("No project", "未绑定项目")}</strong>
+            <small>{formatCount(currentProjectSkillCount)} {tx("Skills indexed in the selected project.", "个技能已索引到已选择项目。")}</small>
+          </article>
+          <article className="evaluation-report-card entity-skill">
+            <span className="os-module-kicker">{tx("Skill Report", "技能报告")}</span>
+            <strong>{evaluationTargetRow?.skill.displayName ?? tx("No Skill selected", "未选择技能")}</strong>
+            <small>{tx("Quality score, trigger fit, cost, and safety live here.", "质量评分、触发适配、成本和安全边界在这里查看。")}</small>
+          </article>
+          <article className="evaluation-report-card entity-agent">
+            <span className="os-module-kicker">{tx("Heartbeat", "心跳监控")}</span>
+            <strong>{formatPercent(dailySuccessRate)}</strong>
+            <small>{formatCount(dailySummary?.totalRuns ?? 0)} {tx("runs today or latest import.", "次运行，来自今日或最近导入。")}</small>
+          </article>
+          <article className="evaluation-report-card entity-development">
+            <span className="os-module-kicker">{tx("Workflow Effect", "工作流效果")}</span>
+            <strong>{workflowStarterResult ? tx("Workflow ready", "工作流就绪") : tx("Baseline", "基线")}</strong>
+            <small>{tx("Track process counts, usage, and evaluation effect by project.", "按项目追踪流程次数、使用情况和评测效果。")}</small>
+          </article>
+        </div>
+        <div className="evaluation-monitor-grid">
+          <article className="evaluation-monitor-panel entity-project">
+            <div className="skill-asset-catalog-head">
+              <div>
+                <span className="os-module-kicker">{tx("Project Monitoring", "项目监控")}</span>
+                <h3>{tx("Project / Workflow / Heartbeat", "项目 / 工作流 / 心跳")}</h3>
+              </div>
+              <span className="mini-pill">{formatCount(managedProjects.length)} {tx("projects", "项目")}</span>
+            </div>
+            <div className="skill-asset-table-shell">
+              <table className="skill-asset-data-table">
+                <thead>
+                  <tr>
+                    <th>{tx("Project", "项目")}</th>
+                    <th>{tx("Skills", "技能")}</th>
+                    <th>{tx("Calls", "调用")}</th>
+                    <th>{tx("Score", "评分")}</th>
+                    <th>{tx("Workflow", "工作流")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {managedProjects.map((project) => {
+                    const projectSkills = (boot?.skills ?? []).filter((skill) => isPathInsideProject(skill.sourcePath, project.path));
+                    const projectSkillIdSet = new Set(projectSkills.map((skill) => skill.id));
+                    const projectRuns = recentRuns.filter((run) => projectSkillIdSet.has(run.skillId));
+                    const completedRuns = projectRuns.filter((run) => run.status === "completed").length;
+                    const score = projectRuns.length > 0 ? `${Math.round((completedRuns / projectRuns.length) * 100)}%` : "n/a";
+                    return (
+                      <tr key={project.id} onClick={() => inspectManagedProject(project)}>
+                        <td>
+                          <strong>{project.name}</strong>
+                          <span>{project.path}</span>
+                        </td>
+                        <td>{formatCount(project.skillsFound ?? projectSkills.length)}</td>
+                        <td>{formatCount(projectRuns.length)}</td>
+                        <td>{score}</td>
+                        <td>{project.workflowApplied ? tx("Ready", "就绪") : tx("Baseline", "基线")}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {managedProjects.length === 0 ? (
+                <p className="skill-asset-empty">{tx("Bind and scan a project to create monitoring rows.", "绑定并扫描项目后会生成监控行。")}</p>
+              ) : null}
+            </div>
+          </article>
+          <article className="evaluation-monitor-panel entity-skill">
+            <div className="skill-asset-catalog-head">
+              <div>
+                <span className="os-module-kicker">{tx("Skill Monitoring", "技能监控")}</span>
+                <h3>{tx("Calls and score from Skill Library", "来自技能库的调用与评分")}</h3>
+              </div>
+              <span className="mini-pill">{formatCount(librarySkillRows.length)} {tx("skills", "技能")}</span>
+            </div>
+            <div className="skill-asset-table-shell">
+              <table className="skill-asset-data-table">
+                <thead>
+                  <tr>
+                    <th>{tx("Skill", "技能")}</th>
+                    <th>{tx("Type", "类型")}</th>
+                    <th>{tx("Calls", "调用")}</th>
+                    <th>{tx("Score", "评分")}</th>
+                    <th>{tx("Status", "状态")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {librarySkillRows.slice(0, 8).map((row) => (
+                    <tr key={row.skill.id} onClick={() => selectLibrarySkill(row.skill.id)}>
+                      <td>
+                        <strong>{row.skill.displayName}</strong>
+                        <span>{row.skill.sourcePath}</span>
+                      </td>
+                      <td>{row.roleLabel}</td>
+                      <td>{formatCount(row.skill.runtime.totalRuns)}</td>
+                      <td>{row.skill.health.score}</td>
+                      <td>{row.healthLabel}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+        {evaluationTargetRow ? (
+          <>
+            <div className="evaluate-hero-band">
+              <article className="evaluate-target-card entity-skill">
+                <span className="os-module-kicker">{tx("Evaluation Target", "评测对象")}</span>
+                <h3>{evaluationTargetRow.skill.displayName}</h3>
+                <p>{evaluationTargetRow.purposeSummary}</p>
+                <div className="settings-pill-row">
+                  <span className={`skill-governance-pill tone-${getSkillGovernanceTone(evaluationTargetRow.skill.governance.role)}`}>
+                    {evaluationTargetRow.roleLabel}
+                  </span>
+                  <span className="skill-governance-pill">{evaluationTargetRow.preferredHarnessLabel}</span>
+                  <span className="skill-governance-pill">{evaluationTargetRow.governanceScopeLabel}</span>
+                </div>
+              </article>
+              <article className="evaluate-score-card entity-project">
+                <span className="os-module-kicker">{tx("Baseline Score", "基线评分")}</span>
+                <strong>{evaluationOverallScore}</strong>
+                <small>
+                  {tx(
+                    "Static + runtime evidence baseline. Full use-case execution comes next.",
+                    "静态 + 运行证据基线。完整用例执行将在下一步接入。"
+                  )}
+                </small>
+              </article>
+            </div>
+
+            <div className="evaluate-score-grid">
+              {[
+                {
+                  label: tx("Routing Accuracy", "命中准确性"),
+                  value: evaluationRoutingScore,
+                  detail: tx("Trigger clarity and observed run evidence.", "触发清晰度与已观测运行证据。")
+                },
+                {
+                  label: tx("Cost Efficiency", "成本效率"),
+                  value: evaluationCostScore,
+                  detail: tx("Token pressure estimated from imported runtime data.", "根据已导入运行数据估算 Token 压力。")
+                },
+                {
+                  label: tx("Developer Fit", "开发适配度"),
+                  value: evaluationDeveloperFitScore,
+                  detail: tx("Development role, harness fit, and generated analysis readiness.", "开发角色、框架适配与分析就绪度。")
+                },
+                {
+                  label: tx("Safety", "安全边界"),
+                  value: evaluationSafetyScore,
+                  detail: tx("Sensitive data, scope risk, and open proposal pressure.", "敏感数据、范围风险与待处理建议压力。")
+                }
+              ].map((item) => (
+                <article className="evaluate-score-dimension" key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <p>{item.detail}</p>
+                </article>
+              ))}
+            </div>
+
+            <div className="evaluate-usecase-grid">
+              <article className="evaluate-usecase-card">
+                <span className="os-module-kicker">{tx("Use Case 01", "用例 01")}</span>
+                <h3>{tx("Should trigger", "应该命中")}</h3>
+                <p>
+                  {tx(
+                    `Ask the assistant to perform a task matching ${evaluationTargetRow.roleLabel} and verify this Skill is selected with the narrowest useful context.`,
+                    `让助手执行匹配 ${evaluationTargetRow.roleLabel} 的任务，并验证此 Skill 是否以最小有效上下文被选中。`
+                  )}
+                </p>
+              </article>
+              <article className="evaluate-usecase-card">
+                <span className="os-module-kicker">{tx("Use Case 02", "用例 02")}</span>
+                <h3>{tx("Should not trigger", "不应误触发")}</h3>
+                <p>{tx("Run a nearby but different task and check whether the Skill stays out of the context path.", "运行一个相近但不同的任务，检查此 Skill 是否不会进入上下文链路。")}</p>
+              </article>
+              <article className="evaluate-usecase-card">
+                <span className="os-module-kicker">{tx("Use Case 03", "用例 03")}</span>
+                <h3>{tx("Runtime value", "运行价值")}</h3>
+                <p>{tx("Compare token use, tool calls, failure rate, and repair loops before and after this Skill is active.", "比较此 Skill 生效前后的 Token、工具调用、失败率和反复修复次数。")}</p>
+              </article>
+            </div>
+
+            <div className="evaluate-harness-row">
+              <article>
+                <span className="os-module-kicker">Codex</span>
+                <strong>
+                  {evaluationTargetRow.skill.governance.preferredHarness === "superpowers"
+                    ? tx("Development-depth fit", "适合深度开发")
+                    : tx("General workflow fit", "适合通用工作流")}
+                </strong>
+                <p>{tx("Evaluate with Codex sessions, tool calls, file edits, tests, and commit outcomes.", "通过 Codex 会话、工具调用、文件编辑、测试和提交结果评测。")}</p>
+              </article>
+              <article>
+                <span className="os-module-kicker">Claude Code</span>
+                <strong>{tx("Project-log fit", "项目日志适配")}</strong>
+                <p>{tx("Evaluate with Claude project JSONL sessions, tool use, cwd, and generated changes.", "通过 Claude 项目 JSONL 会话、工具使用、cwd 和生成变更评测。")}</p>
+              </article>
+            </div>
+
+            {skillAnalysis && skillAnalysis.skillId === evaluationTargetRow.skill.id ? (
+              <div className="evaluate-analysis-summary">
+                <strong>{tx("Latest Analysis", "最近分析")}</strong>
+                <p>{skillAnalysis.summary}</p>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="empty-inline">
+            {tx("Discover and index at least one Skill before evaluation.", "请先发现并索引至少一个 Skill，再开始评测。")}
+          </div>
+        )}
       </section>
 
       <section className="panel os-module-panel" data-product-section="remote-market" id="remote-market">
@@ -11015,12 +15722,17 @@ export default function App() {
                     </div>
                     <div>
                       <span>{tx("Risk", "风险")}</span>
-                      <strong>{selectedRemoteCandidate.riskLevel}</strong>
+                      <strong>{formatRemoteRiskLevel(selectedRemoteCandidate.riskLevel, languageMode)}</strong>
                       <small>{tx("Review before activation", "激活前复核")}</small>
                     </div>
                     <div>
                       <span>{tx("Verification", "验证")}</span>
-                      <strong>{selectedRemoteCandidate.verificationStatus}</strong>
+                      <strong>
+                        {formatRemoteVerificationStatus(
+                          selectedRemoteCandidate.verificationStatus,
+                          languageMode
+                        )}
+                      </strong>
                       <small>{tx("Bundled/local signal only", "仅为内置/本地信号")}</small>
                     </div>
                     <div>
@@ -11046,7 +15758,7 @@ export default function App() {
                         <div className="remote-candidate-check-list">
                           {selectedRemoteCandidateDetail.checks.slice(0, 4).map((check) => (
                             <div className={`remote-candidate-check status-${check.status}`} key={check.label}>
-                              <span>{check.status}</span>
+                              <span>{formatRemoteCheckStatus(check.status, languageMode)}</span>
                               <strong>{check.label}</strong>
                               <small>{check.summary}</small>
                             </div>
@@ -11055,7 +15767,12 @@ export default function App() {
                         <div className="remote-candidate-gate-grid">
                           <div>
                             <span>{tx("Manifest", "清单")}</span>
-                            <strong>{selectedRemoteCandidateDetail.manifestPreview.status}</strong>
+                            <strong>
+                              {formatRemoteCheckStatus(
+                                selectedRemoteCandidateDetail.manifestPreview.status,
+                                languageMode
+                              )}
+                            </strong>
                             <small>{selectedRemoteCandidateDetail.manifestPreview.summary}</small>
                           </div>
                           <div>
@@ -11078,7 +15795,10 @@ export default function App() {
                             <span>{tx("Trust", "信任")}</span>
                             <strong>
                               {selectedRemoteCandidateDetail.catalogSignals.trustScore ??
-                                selectedRemoteCandidate.verificationStatus}
+                                formatRemoteVerificationStatus(
+                                  selectedRemoteCandidate.verificationStatus,
+                                  languageMode
+                                )}
                             </strong>
                             <small>
                               {selectedRemoteCandidateDetail.catalogSignals.author ??
@@ -11239,7 +15959,12 @@ export default function App() {
                       <div>
                         <span>{tx("Verification", "验证")}</span>
                         <strong>{tx(selectedMarketplaceSkill.statusLabel, selectedMarketplaceSkill.statusLabelZh)}</strong>
-                        <small>{selectedMarketplaceSkill.verificationStatus}</small>
+                        <small>
+                          {formatRemoteVerificationStatus(
+                            selectedMarketplaceSkill.verificationStatus,
+                            languageMode
+                          )}
+                        </small>
                       </div>
                       <div>
                         <span>{tx("Trust / Risk", "信任 / 风险")}</span>
@@ -11381,33 +16106,33 @@ export default function App() {
       <section className="panel os-module-panel" data-product-section="analysis" id="analysis">
         <div className="section-headline">
           <div>
-            <h2>{tx("Analysis", "分析")}</h2>
+            <h2>{tx("Runtime Analysis", "运行链路分析")}</h2>
             <p className="section-copy">
               <LocalizedCopy
                 mode={languageMode}
-                en="Runtime cost, latency, success rate, models, and tools in one place."
-                zh="集中查看运行成本、延迟、成功率、模型和工具。"
+                en="Bind or import Codex and Claude Code activity, then analyze Skill hits, tool calls, tokens, latency, and failures across the runtime chain."
+                zh="绑定或导入 Codex 与 Claude Code 活动，然后分析运行链路里的 Skill 命中、工具调用、Token、延迟和失败。"
               />
             </p>
           </div>
         </div>
         <div className="analysis-entry-band" aria-label={tx("Analysis starting flow", "分析起步流程")}>
           <article className="analysis-entry-card entity-skill">
-            <span className="os-module-kicker">{tx("Read First", "先看这里")}</span>
-            <strong>{tx("Today, then week", "先看今天，再看本周")}</strong>
-            <small>{tx("Use the top metrics to decide whether you need telemetry detail or trend detail next.", "先用顶部指标判断，接下来该看遥测细节还是周趋势。")}</small>
+            <span className="os-module-kicker">{tx("Runtime Chain", "运行链路")}</span>
+            <strong>{tx("Bind tools, then inspect sessions", "先绑定工具，再看会话")}</strong>
+            <small>{tx("Start with Codex or Claude logs, preview what can be measured, then import normalized runtime evidence.", "从 Codex 或 Claude 日志开始，先预览可测内容，再导入规范化运行证据。")}</small>
             <div className="analysis-entry-actions">
               <button type="button" className="primary" onClick={() => navigateToProductSection("#analysis")}>
-                {tx("Open Intake", "进入导入")}
+                {tx("Open Tool Sources", "打开工具来源")}
               </button>
               <button type="button" onClick={() => navigateToProductSection("#analysis")}>
-                {tx("Open Week", "查看本周")}
+                {tx("View Sessions", "查看会话")}
               </button>
             </div>
           </article>
           <article className="analysis-entry-card">
-            <span className="os-module-kicker">{tx("Current Pressure", "当前压力")}</span>
-            <strong>{tx("Cost, latency, and waste", "成本、延迟与浪费")}</strong>
+            <span className="os-module-kicker">{tx("Runtime Pressure", "运行压力")}</span>
+            <strong>{tx("Token, latency, repair loops", "Token、延迟、修复循环")}</strong>
             <div className="analysis-entry-pills">
               <span className="mini-pill">{formatUsd(weeklySummary?.totalCostUsd ?? dailySummary?.totalCostUsd ?? 0)}</span>
               <span className="mini-pill">{formatDuration(weeklySummary?.avgDurationMs ?? dailySummary?.avgDurationMs ?? null)}</span>
@@ -11417,9 +16142,9 @@ export default function App() {
             </div>
           </article>
           <article className="analysis-entry-card">
-            <span className="os-module-kicker">{tx("Go Deeper", "继续深入")}</span>
-            <strong>{tx("Telemetry -> snapshot -> signals", "遥测 -> 快照 -> 信号")}</strong>
-            <small>{tx("Detailed import, daily snapshot, and leaderboards stay below so the first screen stays readable.", "导入、日快照和排行榜都保留在下方，保证首屏可读。")}</small>
+            <span className="os-module-kicker">{tx("Runtime Sources", "运行来源")}</span>
+            <strong>{tx("Codex app, terminal, Claude Code", "Codex 应用、终端、Claude Code")}</strong>
+            <small>{tx("The app stays read-only until you explicitly preview and import a source.", "应用保持只读，直到你显式预览并导入来源。")}</small>
           </article>
         </div>
         <div className="analysis-metric-grid">
@@ -11721,82 +16446,36 @@ export default function App() {
               {onboardingStep === 1 ? (
                 <div className="onboarding-stack">
                   <div className="onboarding-choice-grid">
-                    <button
-                      type="button"
-                      className={`onboarding-choice ${scanScopeMode === "full" ? "selected" : ""}`}
-                      onClick={() => setScanScopeMode("full")}
-                    >
-                      <span className="os-module-kicker">{tx("Full Device", "整机扫描")}</span>
-                      <h3>{tx("Scan Entire Device", "扫描整台设备")}</h3>
-                      <p>{tx("Powerful but noisy. Use only when you really need broad discovery.", "能力强但噪声高。仅在确实需要广泛发现时使用。")}</p>
-                    </button>
-                    <button
-                      type="button"
-                      className={`onboarding-choice ${scanScopeMode === "selected" ? "selected" : ""}`}
-                      onClick={() => setScanScopeMode("selected")}
-                    >
+                    <div className="onboarding-choice selected">
                       <span className="os-module-kicker">{tx("Recommended", "推荐")}</span>
-                      <h3>{tx("Scan Selected Directories", "扫描选择目录")}</h3>
-                      <p>{tx("Safer default. You control exactly where Skill OS looks.", "更安全的默认项。你明确控制 Skill OS 搜索范围。")}</p>
-                    </button>
+                      <h3>{tx("Single Project Directory", "单项目目录")}</h3>
+                      <p>{tx("Skill OS will inspect only the selected folder. Full-device discovery is not available in this version.", "Skill OS 只检查已选择文件夹。本版本不开放整机发现。")}</p>
+                    </div>
                   </div>
 
                   <div className="section-headline compact">
-                    <h3>{tx("Approved Scan Roots", "已批准扫描根目录")}</h3>
-                    <button type="button" onClick={() => void addRoot()}>
-                      {tx("Choose Folder", "选择文件夹")}
+                    <h3>{tx("Project Directory", "项目目录")}</h3>
+                    <button type="button" onClick={() => void beginBindProjectFlow()}>
+                      {tx("Bind Project", "绑定项目")}
                     </button>
                   </div>
 
                   <div className="root-list">
-                    {scanRoots.length === 0 ? (
-                      <p className="muted">{tx("No scan roots approved yet.", "还没有批准扫描根目录。")}</p>
+                    {targetProjectRoot ? (
+                      <div className="root-chip">
+                        <span>{targetProjectRoot}</span>
+                        <button type="button" onClick={() => updateTargetProjectRoot("")}>
+                          {tx("Remove", "移除")}
+                        </button>
+                      </div>
                     ) : (
-                      scanRoots.map((root) => (
-                        <div className="root-chip" key={root}>
-                          <span>{root}</span>
-                          <button type="button" onClick={() => removeRoot(root)}>
-                            {tx("Remove", "移除")}
-                          </button>
-                        </div>
-                      ))
+                      <p className="muted">{tx("No project directory selected yet.", "尚未选择项目目录。")}</p>
                     )}
                   </div>
                 </div>
               ) : null}
 
               {onboardingStep === 2 ? (
-                <div className="onboarding-stack">
-                  <div className="os-tag-row">
-                    <span>node_modules</span>
-                    <span>dist</span>
-                    <span>.cache</span>
-                  </div>
-                  <div className="section-headline compact">
-                    <h3>{tx("Excluded Scan Paths", "排除扫描路径")}</h3>
-                    <button type="button" onClick={() => void addExclusion()}>
-                      {tx("Choose Folder", "选择文件夹")}
-                    </button>
-                  </div>
-
-                  <div className="root-list">
-                    {scanExclusions.length === 0 ? (
-                      <p className="muted">{tx("No exclusions yet.", "还没有排除项。")}</p>
-                    ) : (
-                      scanExclusions.map((path) => (
-                        <div className="root-chip" key={path}>
-                          <span>{path}</span>
-                          <button type="button" onClick={() => removeExclusion(path)}>
-                            {tx("Remove", "移除")}
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              ) : null}
-
-              {onboardingStep === 3 ? (
                 <div className="onboarding-stack">
                   <div className="form-grid">
                     <label>
@@ -11859,20 +16538,20 @@ export default function App() {
                 </div>
               ) : null}
 
-              {onboardingStep === 4 ? (
+              {onboardingStep === 3 ? (
                 <div className="onboarding-stack">
                   <div className="summary-grid">
                     <div>
                       <span className="stat-label">{tx("Scan Scope", "扫描范围")}</span>
-                      <strong>{scanScopeMode === "selected" ? tx("Selected", "选择目录") : tx("Full Device", "整机")}</strong>
+                      <strong>{tx("Single project", "单项目")}</strong>
                     </div>
                     <div>
-                      <span className="stat-label">{tx("Folders Scanned", "待扫描目录")}</span>
-                      <strong>{scanRoots.length}</strong>
+                      <span className="stat-label">{tx("Project Directory", "项目目录")}</span>
+                      <strong>{targetProjectRoot ? "1" : "0"}</strong>
                     </div>
                     <div>
-                      <span className="stat-label">{tx("Excluded Paths", "排除路径")}</span>
-                      <strong>{scanExclusions.length}</strong>
+                      <span className="stat-label">{tx("Boundary", "边界")}</span>
+                      <strong>{tx("No full scan", "不整机扫描")}</strong>
                     </div>
                     <div>
                       <span className="stat-label">{tx("Telemetry Mode", "遥测模式")}</span>
@@ -11881,8 +16560,8 @@ export default function App() {
                   </div>
                   <div className="onboarding-final-card entity-agent">
                     <span className="os-module-kicker">{tx("Ready to initialize", "准备初始化")}</span>
-                    <h3>{tx("Create local policy and Skill index", "创建本地策略与 Skill 索引")}</h3>
-                    <p>{tx("This creates local state only. Remote Skills remain inactive until you import and activate them later.", "这只会创建本地状态。远程 Skill 仍保持非活跃，直到之后导入并激活。")}</p>
+                    <h3>{tx("Create local policy and project index", "创建本地策略与项目索引")}</h3>
+                    <p>{tx("This creates local state for the selected project only. Remote Skills remain inactive until you import and activate them later.", "这只会为已选择项目创建本地状态。远程 Skill 仍保持非活跃，直到之后导入并激活。")}</p>
                   </div>
                 </div>
               ) : null}
@@ -11928,8 +16607,8 @@ export default function App() {
                   <p className="section-copy">
                     <LocalizedCopy
                       mode={languageMode}
-                      en="Import local JSONL runtime logs after indexing skills. Data stays inside your local SQLite store and respects the current policy boundary."
-                      zh="索引 skill 后导入本地 JSONL 运行日志。数据保留在你的本地 SQLite 存储内，并遵守当前策略边界。"
+                      en="Import local runtime logs or discover Codex / Claude Code sources after indexing Skills. Data stays inside local SQLite and respects the current policy boundary."
+                      zh="索引 Skills 后导入本地运行日志，或发现 Codex / Claude Code 来源。数据保留在本地 SQLite，并遵守当前策略边界。"
                     />
                   </p>
                 </div>
@@ -11968,6 +16647,152 @@ export default function App() {
                   />
                 </p>
               ) : null}
+
+              <div className="local-tool-intake">
+                <div className="section-headline compact">
+                  <div>
+                    <h3>{tx("Local Tool Sources", "本地工具来源")}</h3>
+                    <p className="section-copy">
+                      <LocalizedCopy
+                        mode={languageMode}
+                        en="Discover Codex and Claude Code logs, preview what can be measured, then import normalized Skill run metrics. Terminal history is not scanned automatically."
+                        zh="发现 Codex 和 Claude Code 日志，先预览能测到什么，再导入规范化 Skill 运行指标。终端历史不会被自动扫描。"
+                      />
+                    </p>
+                  </div>
+                  <div className="toolbar wrap">
+                    <button
+                      type="button"
+                      disabled={busy || boot.policy?.telemetryMode === "disabled"}
+                      onClick={() => void discoverLocalToolTelemetrySources()}
+                    >
+                      {busyAction === "local-tool-discovery"
+                        ? tx("Discovering...", "发现中...")
+                        : tx("Discover Sources", "发现来源")}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy || !selectedLocalToolSource || selectedLocalToolSource.status !== "ready"}
+                      onClick={() => void previewLocalToolTelemetrySource()}
+                    >
+                      {busyAction === "local-tool-preview" ? tx("Previewing...", "预览中...") : tx("Preview Source", "预览来源")}
+                    </button>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={busy || !localToolPreview || localToolPreview.importableRuns === 0}
+                      onClick={() => void importLocalToolTelemetrySource()}
+                    >
+                      {busyAction === "local-tool-import" ? tx("Importing...", "导入中...") : tx("Import Source", "导入来源")}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="local-tool-trust-row">
+                  <span className="mini-pill">{tx("Read-only preview", "只读预览")}</span>
+                  <span className="mini-pill">{tx("No raw prompts stored", "不保存原始 Prompt")}</span>
+                  <span className="mini-pill">{tx("No background watcher", "不启用后台监听")}</span>
+                </div>
+
+                {localToolSources.length > 0 ? (
+                  <div className="local-tool-source-list">
+                    {localToolSources.map((source) => (
+                      <button
+                        type="button"
+                        key={source.id}
+                        className={`local-tool-source ${selectedLocalToolSourceId === source.id ? "selected" : ""}`}
+                        onClick={() => {
+                          setSelectedLocalToolSourceId(source.id);
+                          setLocalToolPreview(null);
+                          setLocalToolImportResult(null);
+                        }}
+                      >
+                        <span>
+                          <strong>{source.label}</strong>
+                          <small>{source.description}</small>
+                          {source.path ? <small className="inline-code">{source.path}</small> : null}
+                        </span>
+                        <span className={`source-status source-status-${source.status}`}>
+                          {source.status}
+                        </span>
+                        <span className="local-tool-source-meta">
+                          {formatCount(source.fileCount)} {tx("files", "文件")} · {formatCount(source.byteCount)} B
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-inline compact">
+                    <span className="muted">
+                      {tx("Click Discover Sources to list local Codex and Claude Code telemetry candidates.", "点击发现来源，列出本机 Codex 和 Claude Code 遥测候选。")}
+                    </span>
+                  </div>
+                )}
+
+                {localToolPreview ? (
+                  <div className="import-summary local-tool-preview">
+                    <div className="summary-grid">
+                      <div>
+                        <span className="stat-label">{tx("Importable Runs", "可导入运行")}</span>
+                        <strong>{localToolPreview.importableRuns}</strong>
+                      </div>
+                      <div>
+                        <span className="stat-label">{tx("Detected Events", "发现事件")}</span>
+                        <strong>{formatCount(localToolPreview.detectedEvents)}</strong>
+                      </div>
+                      <div>
+                        <span className="stat-label">{tx("Scanned Lines", "扫描行数")}</span>
+                        <strong>{formatCount(localToolPreview.scannedLines)}</strong>
+                      </div>
+                      <div>
+                        <span className="stat-label">{tx("Confidence", "置信度")}</span>
+                        <strong>{localToolPreview.confidence}</strong>
+                      </div>
+                      <div>
+                        <span className="stat-label">{tx("Token Fields", "Token 字段")}</span>
+                        <strong>{localToolPreview.tokenFieldsDetected ? tx("yes", "有") : tx("no", "无")}</strong>
+                      </div>
+                      <div>
+                        <span className="stat-label">{tx("Sensitive Hits", "敏感命中")}</span>
+                        <strong>{localToolPreview.sensitiveFieldCount}</strong>
+                      </div>
+                    </div>
+                    <div className="local-tool-signal-row">
+                      <span className="stat-label">{tx("Skills", "技能")}</span>
+                      {(localToolPreview.detectedSkillNames.length > 0
+                        ? localToolPreview.detectedSkillNames
+                        : [tx("No explicit Skill evidence", "没有明确技能证据")]
+                      ).map((item) => (
+                        <span className="mini-pill" key={`skill-${item}`}>{item}</span>
+                      ))}
+                    </div>
+                    <div className="local-tool-signal-row">
+                      <span className="stat-label">{tx("Tools", "工具")}</span>
+                      {(localToolPreview.detectedToolNames.length > 0
+                        ? localToolPreview.detectedToolNames
+                        : [tx("No tool calls detected", "未发现工具调用")]
+                      ).map((item) => (
+                        <span className="mini-pill" key={`tool-${item}`}>{item}</span>
+                      ))}
+                    </div>
+                    {localToolPreview.warnings.length > 0 ? (
+                      <div className="issue-list">
+                        {localToolPreview.warnings.map((warning) => (
+                          <div className="issue-item" key={warning}>{warning}</div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {localToolImportResult ? (
+                  <p className="muted">
+                    {tx("Last local tool import", "最近本地工具导入")}: {localToolImportResult.source.label} ·
+                    {` ${localToolImportResult.telemetry.importedRuns} `}
+                    {tx("runs imported", "条运行已导入")}
+                  </p>
+                ) : null}
+              </div>
 
               {telemetryResult ? (
                 <div className="import-summary">
@@ -12202,8 +17027,8 @@ export default function App() {
                 <p className="section-copy">
               <LocalizedCopy
                 mode={languageMode}
-                en="A local relationship map built from approved roots, indexed skills, models, bundles, and proposals."
-                zh="一张由已批准根目录、已索引 skill、模型、bundle 与建议生成的本地关系图。"
+                en="A local relationship map built from the selected project, indexed skills, models, bundles, and proposals."
+                zh="一张由已选择项目、已索引 skill、模型、bundle 与建议生成的本地关系图。"
               />
             </p>
           </div>
@@ -12444,12 +17269,12 @@ export default function App() {
           <section className="panel" data-product-section="proposals" id="proposals">
             <div className="section-headline proposal-headline">
               <div>
-                <h2>{tx("Optimization Proposals", "优化建议")}</h2>
+                <h2>{tx("Optimization Center", "优化中心")}</h2>
                 <p className="section-copy">
                   <LocalizedCopy
                     mode={languageMode}
-                    en="The proposal engine never rewrites skills silently. It turns telemetry and registry evidence into suggestions you can accept, ignore, or reopen."
-                    zh="建议引擎不会静默改写 skill。它只会把遥测和注册表证据转成你可以接受、忽略或重新打开的建议。"
+                    en="Review evidence, accept useful work, route implementation, then close it after verification. Skill OS records decisions locally and never rewrites skills silently."
+                    zh="先审查证据，接受有价值的工作，再流转实现，验证后关闭。Skill OS 只在本地记录决策，不会静默改写 skill。"
                   />
                 </p>
               </div>
@@ -12462,17 +17287,21 @@ export default function App() {
                     showInteractionNotice({
                       area: tx("Optimization", "优化"),
                       action: tx("Filter Proposals", "筛选建议"),
-                      result: tx(`Showing ${nextFilter} proposal queue.`, `正在展示 ${nextFilter} 建议队列。`),
+                      result: formatLocalizedText(
+                        languageMode,
+                        `Showing ${formatProposalFilterStatus(nextFilter, "en")} proposal queue.`,
+                        `正在展示 ${formatProposalFilterStatus(nextFilter, "zh")} 建议队列。`
+                      ),
                       nextStep: tx("Open a proposal card to review evidence and choose a decision.", "打开建议卡片查看证据并选择决策。"),
                       tone: "info"
                     });
                   }}
                 >
-                  <option value="all">{tx("all proposals", "全部建议")}</option>
-                  <option value="open">{tx("open", "待处理")}</option>
-                  <option value="accepted">{tx("accepted", "已接受")}</option>
-                  <option value="dismissed">{tx("dismissed", "已忽略")}</option>
-                  <option value="resolved">{tx("resolved", "已解决")}</option>
+                  <option value="all">{formatProposalFilterStatus("all", languageMode)}</option>
+                  <option value="open">{formatProposalStatus("open", languageMode)}</option>
+                  <option value="accepted">{formatProposalStatus("accepted", languageMode)}</option>
+                  <option value="dismissed">{formatProposalStatus("dismissed", languageMode)}</option>
+                  <option value="resolved">{formatProposalStatus("resolved", languageMode)}</option>
                 </select>
                 <button
                   type="button"
@@ -12483,6 +17312,19 @@ export default function App() {
                   {busyAction === "proposals" ? tx("Refreshing...", "刷新中...") : tx("Refresh Proposals", "刷新建议")}
                 </button>
               </div>
+            </div>
+
+            <div className="proposal-lifecycle-strip" aria-label={tx("Optimization lifecycle", "优化生命周期")}>
+              {proposalLifecycleSteps.map((step, index) => (
+                <div className="proposal-lifecycle-step" key={step.key}>
+                  <span className="proposal-lifecycle-index">{index + 1}</span>
+                  <div>
+                    <strong>{step.label}</strong>
+                    <span>{step.detail}</span>
+                  </div>
+                  <em>{step.count}</em>
+                </div>
+              ))}
             </div>
 
             <div className="summary-grid proposal-summary">
@@ -12539,6 +17381,38 @@ export default function App() {
                 </span>
               </div>
             )}
+
+            {acceptedProposals.length > 0 ? (
+              <article className="proposal-work-queue">
+                <div>
+                  <span className="stat-label">{tx("Accepted Work Queue", "已接受工作队列")}</span>
+                  <strong>{tx("Ready for implementation", "等待实现")}</strong>
+                  <p className="muted">
+                    {tx(
+                      "Accepted proposals are decisions, not automatic edits. Route them through Apply Center or your code workflow.",
+                      "已接受建议只是决策，不是自动编辑。请通过应用中心或代码工作流执行。"
+                    )}
+                  </p>
+                </div>
+                <div className="proposal-work-list">
+                  {acceptedProposals.slice(0, 3).map((proposal) => (
+                    <div className="proposal-work-item" key={proposal.id}>
+                      <strong>{formatProposalTitle(proposal, languageMode)}</strong>
+                      <span>
+                        {proposal.skillName} · {formatProposalType(proposal.proposalType, languageMode)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => navigateToProductSection("#apply-center")}
+                >
+                  {tx("Open Apply Center", "打开应用中心")}
+                </button>
+              </article>
+            ) : null}
 
             {proposalDecisionNotice ? (
               <article className="proposal-decision-feedback" aria-live="polite">
@@ -13026,7 +17900,7 @@ export default function App() {
                 <div className="os-apply-grid apply-scope-selector">
                   {[
                     { value: "system" as const, label: tx("System Scope", "系统范围"), copy: tx("Install globally for the current user after confirmation.", "确认后为当前用户全局安装。") },
-                    { value: "workspace" as const, label: tx("Workspace Scope", "工作区范围"), copy: tx("Apply to an approved workspace root.", "应用到已批准工作区根目录。") },
+                  { value: "workspace" as const, label: tx("Workspace Scope", "工作区范围"), copy: tx("Apply to the chosen workspace after preview.", "预览后应用到已选择工作区。") },
                     { value: "project" as const, label: tx("Project Scope", "项目范围"), copy: tx("Attach Skill behavior to one project.", "将 Skill 行为绑定到单个项目。") },
                     { value: "folder" as const, label: tx("Folder Scope", "文件夹范围"), copy: tx("Target the current folder without touching siblings.", "只作用于当前文件夹，不影响同级目录。") }
                   ].map((scope) => (
@@ -13036,7 +17910,7 @@ export default function App() {
                       key={scope.value}
                       onClick={() => chooseApplyScope(scope.value)}
                     >
-                      <span className="os-module-kicker">{scope.value}</span>
+                      <span className="os-module-kicker">{formatApplyScope(scope.value, languageMode)}</span>
                       <h3>{scope.label}</h3>
                       <p>{scope.copy}</p>
                       <div className="os-tag-row apply-scope-progress">
@@ -13076,14 +17950,18 @@ export default function App() {
                       <small>{remoteApplyCandidate.normalizedUrl}</small>
                     </div>
                     <div className="remote-apply-handoff-grid">
-                      <span>{tx("Risk", "风险")}: {remoteApplyCandidate.riskLevel}</span>
-                      <span>{tx("Verification", "验证")}: {remoteApplyCandidate.verificationStatus}</span>
+                      <span>{tx("Risk", "风险")}: {formatRemoteRiskLevel(remoteApplyCandidate.riskLevel, languageMode)}</span>
+                      <span>
+                        {tx("Verification", "验证")}:{" "}
+                        {formatRemoteVerificationStatus(remoteApplyCandidate.verificationStatus, languageMode)}
+                      </span>
                       <span>{tx("Run Now", "立即运行")}: {remoteApplyCandidate.willRunNow ? tx("Yes", "是") : tx("No", "否")}</span>
                       <span>
                         {tx("Target Preview", "目标预览")}:{" "}
-                        {remoteApplyCandidateDetail?.diffPreview.status === "preview_required"
-                          ? tx("Required", "必需")
-                          : tx("Pending", "待处理")}
+                        {formatDiffPreviewStatus(
+                          remoteApplyCandidateDetail?.diffPreview.status,
+                          languageMode
+                        )}
                       </span>
                     </div>
                     <p>
@@ -13124,7 +18002,7 @@ export default function App() {
                           <div>
                             <span>{tx("Scope", "范围")}</span>
                             <strong>{applyScopeNotice.scope}</strong>
-                            <small>{primaryLibrarySkill?.displayName ?? tx("No Skill selected", "未选择 Skill")}</small>
+                            <small>{primaryLibrarySkill?.displayName ?? tx("No Skill selected", "未选择技能")}</small>
                           </div>
                           <div>
                             <span>{tx("Boundary", "边界")}</span>
@@ -13153,16 +18031,16 @@ export default function App() {
                           <dd>
                             {activeApplyPreview?.sourceKind === "remote_candidate"
                               ? tx("Remote Candidate", "远程候选")
-                              : tx("Local Skill", "本地 Skill")}
+                              : tx("Local Skill", "本地技能")}
                           </dd>
                         </div>
                         <div>
-                          <dt>{tx("Skill", "Skill")}</dt>
+                          <dt>{tx("Skill", "技能")}</dt>
                           <dd>{remoteApplyCandidate?.displayName ?? activeApplyPreview?.skillName ?? primaryLibrarySkill?.displayName ?? "n/a"}</dd>
                         </div>
                         <div>
                           <dt>{tx("Selected Scope", "已选范围")}</dt>
-                          <dd>{applyScope}</dd>
+                          <dd>{formatApplyScope(applyScope, languageMode)}</dd>
                         </div>
                         <div>
                           <dt>{tx("Target", "目标")}</dt>
@@ -13343,108 +18221,148 @@ export default function App() {
           <section className="panel" data-product-section="registry" id="registry">
             <div className="section-headline">
               <div>
-                <h2>{tx("Skill Registry", "Skill 注册表")}</h2>
+                <h2>{tx("Skill Index", "技能索引")}</h2>
                 <p className="section-copy">
                   <LocalizedCopy
                     mode={languageMode}
-                    en="Registry scanning only runs inside approved roots under your active local policy and skips excluded subtrees before reading `SKILL.md`."
-                    zh="注册表扫描只会在当前本地策略批准的根目录内运行，并在读取 `SKILL.md` 前跳过已排除子树。"
+                    en="The skill index is scoped to the currently selected project folder. Full-computer discovery is reserved for a later version."
+                    zh="技能索引只作用于当前选择的项目文件夹。全电脑发现会在后续版本单独开发。"
                   />
                 </p>
               </div>
-              <button type="button" className="primary" disabled={busy} onClick={() => void scanSkills()}>
-                {busyAction === "scan" ? tx("Scanning...", "扫描中...") : tx("Scan Approved Roots", "扫描已批准根目录")}
-              </button>
+              <div className="toolbar wrap project-toolbar-actions">
+                <BindProjectButton busy={busy} onClick={() => void beginBindProjectFlow()} />
+                <ScanProjectButton
+                  busy={busy}
+                  scanning={busyAction === "project-scan"}
+                  primary
+                  onClick={() => void scanTargetProject()}
+                />
+                <ChineseDescriptionSwitch
+                  checked={skillChineseAssistEnabled}
+                  disabled={languageMode !== "zh"}
+                  onChange={() => setSkillChineseAssistEnabled((current) => !current)}
+                />
+              </div>
             </div>
 
-            <div className="registry-control-grid" aria-label={tx("Registry controls", "注册表控制")}>
+            <div className="registry-control-grid" aria-label={tx("Skill index controls", "技能索引控制")}>
               <article className="registry-control-card entity-project">
                 <span>{tx("Scope", "范围")}</span>
-                <strong>{formatCount(boot.roots.length)} {tx("approved roots", "已批准根目录")}</strong>
-                <p>{tx("Only these folders can be scanned by the local indexer.", "本地索引器只会扫描这些目录。")}</p>
+                <strong>{targetProjectRoot ? tx("Current project", "当前项目") : tx("No project selected", "未选择项目")}</strong>
+                <p>{tx("The local indexer is limited to one selected project directory.", "本地索引器仅限一个已选择项目目录。")}</p>
               </article>
               <article className="registry-control-card entity-agent">
-                <span>{tx("Exclusions", "排除")}</span>
-                <strong>{formatCount(boot.exclusions.length)} {tx("blocked subtrees", "已阻止子树")}</strong>
-                <p>{tx("Excluded paths are skipped before SKILL.md content is read.", "读取 SKILL.md 内容前会先跳过排除路径。")}</p>
+                <span>{tx("Boundary", "边界")}</span>
+                <strong>{tx("Single directory", "单目录")}</strong>
+                <p>{tx("Sibling folders and other projects are ignored unless you scan another bound project.", "同级目录和其他项目会被忽略，除非你扫描另一个已绑定项目。")}</p>
               </article>
               <article className="registry-control-card entity-skill">
                 <span>{tx("Inventory", "库存")}</span>
-                <strong>{formatCount(boot.skills.length)} {tx("indexed skills", "已索引 Skill")}</strong>
-                <p>{tx("The table below is the current app-local registry snapshot.", "下方表格是当前应用本地注册表快照。")}</p>
+                <strong>{formatCount(currentProjectSkillCount)} {tx("indexed skills", "已索引 Skill")}</strong>
+                <p>{tx("The table below is the current app-local skill index snapshot.", "下方表格是当前应用本地技能索引快照。")}</p>
               </article>
               <article className="registry-control-card entity-bundle">
                 <span>{tx("Latest Scan", "最近扫描")}</span>
                 <strong>
                   {scanResult
-                    ? tx("Completed", "已完成")
-                    : boot.skills.length > 0
+                    ? activeScanTargetLabel
+                    : currentProjectSkillCount > 0
                       ? tx("Snapshot loaded", "已加载快照")
                       : tx("Not scanned", "未扫描")}
                 </strong>
                 <p>
                   {scanResult
-                    ? tx("Scan result is shown before the registry table.", "扫描结果会展示在注册表表格之前。")
-                    : tx("Run an approved-root scan when you want to refresh the local index.", "需要刷新本地索引时，请运行已批准根目录扫描。")}
+                    ? tx("Scan result is shown before the skill index table.", "扫描结果会展示在技能索引表格之前。")
+                    : tx("Choose one project folder, then run a project scan.", "选择一个项目文件夹，然后运行项目扫描。")}
                 </p>
               </article>
             </div>
 
-            <div className="panel-grid bundle-panel-grid">
-              <article className="leaderboard-card">
-                <div className="section-headline compact">
-                  <h3>{tx("Approved Roots", "已批准根目录")}</h3>
+            <div className="registry-project-scope">
+              <div className="project-scope-main">
+                <div className="project-scope-title-row">
+                  <span className="stat-label">{tx("Selected Project", "已选项目")}</span>
+                  <strong>
+                    {targetProjectRoot
+                      ? tx("Selected project", "已选择项目")
+                      : tx("No project selected", "未选择项目")}
+                  </strong>
                 </div>
-                <div className="root-list">
-                  {boot.roots.length === 0 ? (
-                    <div className="empty-inline compact">
-                      <span className="muted">
-                        {tx("No approved roots yet. Add folders from Discovery or first-run authorization.", "还没有已批准根目录。请从发现页或首次授权添加目录。")}
-                      </span>
-                    </div>
-                  ) : (
-                    boot.roots.map((root) => (
-                      <div className="root-chip" key={root.id}>
-                        <div className="root-chip-main">
-                          <span>{root.path}</span>
-                          <small>{root.rootType}</small>
-                        </div>
-                        <GraphPanelInspectAction
-                          targetNode={resolveGraphNode("root", root.id)}
-                          selectedNodeId={selectedGraphNodeId}
-                          onInspectNode={inspectGraphNodeFromPanels}
-                          label={tx("Inspect Root", "检查根目录")}
-                        />
-                      </div>
-                    ))
+                <p className={targetProjectRoot ? "inline-code" : "project-scope-help"}>
+                  {targetProjectRoot ||
+                    tx("No project folder selected yet.", "尚未选择项目文件夹。")}
+                </p>
+                <p className="project-scope-help">
+                  {tx(
+                    "Click Bind Project to open the system folder picker. After selecting a project root, click Scan Project; only that directory is indexed.",
+                    "点击“绑定项目”会打开系统目录选择框。选中项目根目录后点击“扫描项目”，系统只索引这个目录。"
                   )}
-                </div>
-              </article>
-
-              <article className="leaderboard-card">
-                <div className="section-headline compact">
-                  <h3>{tx("Excluded Paths", "排除路径")}</h3>
-                </div>
-                <div className="root-list">
-                  {boot.exclusions.length === 0 ? (
-                    <p className="muted">
-                      {tx("No exclusions are active for this policy yet.", "当前策略还没有启用排除路径。")}
-                    </p>
-                  ) : (
-                    boot.exclusions.map((entry) => (
-                      <div className="root-chip" key={entry.id}>
-                        <span>{entry.path}</span>
-                        <small>{tx("skip subtree", "跳过子树")}</small>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </article>
+                </p>
+                <label className="project-scope-path-input">
+                  <span>{tx("Project Folder Path", "项目文件夹路径")}</span>
+                  <input
+                    value={targetProjectRoot}
+                    onChange={(event) => updateTargetProjectRoot(event.target.value)}
+                    placeholder="/Users/name/path/to/project"
+                  />
+                </label>
+              </div>
+              <div className="os-card-actions project-toolbar-actions">
+                <BindProjectButton busy={busy} onClick={() => void beginBindProjectFlow()} />
+                <ScanProjectButton
+                  busy={busy}
+                  scanning={busyAction === "project-scan"}
+                  primary
+                  onClick={() => void scanTargetProject()}
+                />
+              </div>
+              {busyAction === "project-scan" || busyAction === "scan" ? (
+                <p className="project-scope-status" aria-live="polite">
+                  {tx("Scanning the selected project folder...", "正在扫描已选择的项目文件夹...")}
+                </p>
+              ) : null}
             </div>
+
+            <ProjectLibraryPanel
+              projects={managedProjects}
+              recentRuns={recentRuns}
+              telemetryReady={Boolean(boot?.policy && boot.policy.telemetryMode !== "disabled")}
+              repairFeedback={projectRepairFeedback}
+              onboardingLogs={projectOnboardingLogs}
+              currentProjectRoot={targetProjectRoot}
+              busyAction={busyAction}
+              busy={busy}
+              onBindProject={() => void beginBindProjectFlow()}
+              onInspectProject={inspectManagedProject}
+              onAnalyzeProject={analyzeManagedProject}
+              onScanProject={scanManagedProject}
+              onRepairProject={(project) => void repairManagedProject(project)}
+              onViewOnboardingLog={(project) => setSelectedProjectLogPath(project.path)}
+              onToggleMonitoring={toggleProjectMonitoring}
+              onUnbindProject={unbindManagedProject}
+            />
+
+            {isEmptyTargetProject || workflowStarterPreview || workflowStarterResult ? (
+              <WorkflowStarterCard
+                projectRoot={workflowStarterProjectRoot}
+                preview={workflowStarterPreview}
+                result={workflowStarterResult}
+                busyAction={busyAction}
+                highlighted={workflowStarterHighlighted}
+                onPreview={() => void previewRecommendedWorkflowStarter()}
+                onApply={() => void applyRecommendedWorkflowStarter()}
+                onOpenLibrary={() => navigateToProductSection("#local-skills")}
+                onOpenEvaluate={() => navigateToProductSection("#evaluate")}
+              />
+            ) : null}
 
             {scanResult ? (
               <div className="scan-summary">
-                <strong>{tx("Latest scan", "最新扫描")}</strong>
+                <strong>
+                  {tx("Latest project scan", "最新项目扫描")}
+                </strong>
+                <p className="inline-code">{scanResult.rootPaths.join(" · ")}</p>
                 <div className="summary-grid secondary">
                   <div>
                     <span className="stat-label">{tx("Skill Files", "Skill 文件")}</span>
@@ -13475,7 +18393,8 @@ export default function App() {
             ) : null}
 
             <SkillTable
-              skills={boot.skills}
+              skills={hasSelectedProject ? boot.skills : []}
+              chineseAssistEnabled={skillChineseAssistEnabled}
               selectedGraphNodeId={selectedGraphNodeId}
               resolveGraphNode={resolveGraphNode}
               onInspectGraphNode={inspectGraphNodeFromPanels}
@@ -13544,8 +18463,8 @@ export default function App() {
                     applied: tx("Applied to self-test workflow", "已应用到自测流程")
                   },
                   {
-                    title: tx("Bilingual density guard", "双语密度保护"),
-                    signal: tx("Chinese/English copy must not collapse into vertical fragments or clipped buttons.", "中英双语文案不能塌成竖排碎片或裁切按钮。"),
+                    title: tx("Single-language layout guard", "单语言布局保护"),
+                    signal: tx("The interface should render either Chinese or English, so dense controls do not clip or wrap into fragments.", "界面应只渲染中文或英文，避免密集控件被撑破、裁切或碎片化换行。"),
                     applied: tx("Applied to headline and action layouts", "已应用到标题和操作布局")
                   }
                 ].map((insight) => (
@@ -13613,7 +18532,7 @@ export default function App() {
                 <p className="inline-code">{boot.databasePath}</p>
                 <div className="settings-pill-row">
                   <span className="mini-pill">{tx("Local index", "本地索引")}</span>
-                  <span className="mini-pill">{formatCount(boot.skills.length)} {tx("skills", "Skill")}</span>
+                  <span className="mini-pill">{formatCount(boot.skills.length)} {tx("skills", "技能")}</span>
                 </div>
               </article>
               <article className="os-module-card">
@@ -13658,8 +18577,8 @@ export default function App() {
               </article>
               <article className="os-module-card">
                 <span className="os-module-kicker">{tx("Language", "语言")}</span>
-                <h3>{languageMode === "both" ? tx("Bilingual", "中英双语") : languageMode === "zh" ? "中文" : "English"}</h3>
-                <p>{tx("Language is a global product mode, not a first-screen-only translation.", "语言是全局产品能力，不是只翻译首屏。")}</p>
+                <h3>{languageMode === "zh" ? "中文" : "English"}</h3>
+                <p>{tx("The interface shows one language at a time to keep dense layouts stable.", "界面一次只显示一种语言，避免密集布局被混排撑乱。")}</p>
                 <div className="settings-pill-row">
                   <span className="mini-pill">{tx("Global UI", "全局 UI")}</span>
                 </div>
@@ -13667,10 +18586,10 @@ export default function App() {
               <article className="os-module-card">
                 <span className="os-module-kicker">{tx("Advanced", "高级")}</span>
                 <h3>{tx("Policy boundaries", "策略边界")}</h3>
-                <p>{tx("Remote skills never auto-run, and scans stay inside approved roots.", "远程 Skill 永不自动运行，扫描始终限制在已批准根目录内。")}</p>
+                <p>{tx("Remote skills never auto-run, and scans stay inside the selected project directory.", "远程 Skill 永不自动运行，扫描始终限制在已选择项目目录内。")}</p>
                 <div className="settings-pill-row">
-                  <span className="mini-pill">{formatCount(boot.roots.length)} {tx("roots", "根目录")}</span>
-                  <span className="mini-pill">{formatCount(boot.exclusions.length)} {tx("exclusions", "排除")}</span>
+                  <span className="mini-pill">{formatCount(managedProjects.length)} {tx("bound projects", "已绑定项目")}</span>
+                  <span className="mini-pill">{tx("Single project scan", "单项目扫描")}</span>
                 </div>
               </article>
             </div>
@@ -13679,6 +18598,429 @@ export default function App() {
       )}
         </div>
       </div>
+      {inspectedProject ? (
+        <div
+          className="project-detail-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setInspectedProjectPath("");
+            }
+          }}
+        >
+          <section
+            className="project-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-detail-modal-title"
+          >
+            <ProjectAssetDetailPanel
+              project={inspectedProject}
+              profile={projectProfile}
+              currentProjectRoot={targetProjectRoot}
+              localSkills={boot.skills}
+              recentRuns={recentRuns}
+              heartbeatEntries={projectHeartbeatEntries}
+              telemetryMode={boot.policy?.telemetryMode ?? "missing"}
+              backgroundWatchAllowed={Boolean(boot.policy?.allowBackgroundWatch)}
+              runtimeRefreshResult={projectRuntimeRefreshResult}
+              busyAction={busyAction}
+              busy={busy}
+              onScanProject={scanManagedProject}
+              onRefreshRuntimeEvidence={(project) => void refreshProjectRuntimeEvidence(project)}
+              onEnableTelemetry={(project) => void enableProjectTelemetry(project)}
+              onToggleMonitoring={toggleProjectMonitoring}
+              onUpdateMonitoringInterval={updateProjectMonitoringInterval}
+              onRenameProject={renameManagedProject}
+              onClose={() => setInspectedProjectPath("")}
+            />
+          </section>
+        </div>
+      ) : null}
+      {selectedProjectLog ? (
+        <div
+          className="project-log-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedProjectLogPath("");
+            }
+          }}
+        >
+          <section
+            className="project-log-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-log-modal-title"
+          >
+            <div className="project-log-modal-head">
+              <div>
+                <span className="os-module-kicker">{tx("Onboarding Log", "接入日志")}</span>
+                <h2 id="project-log-modal-title">{selectedProjectLog.name}</h2>
+                <p>{selectedProjectLog.path}</p>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={tx("Close onboarding log", "关闭接入日志")}
+                onClick={() => setSelectedProjectLogPath("")}
+              >
+                ×
+              </button>
+            </div>
+            {projectRepairFeedback?.projectPath === selectedProjectLog.path ? (
+              <div className={`project-log-current status-${projectRepairFeedback.status}`}>
+                <strong>
+                  {projectRepairFeedback.status === "running"
+                    ? tx("Repairing", "修正中")
+                    : projectRepairFeedback.status === "completed"
+                      ? tx("Repair complete", "修正完成")
+                      : projectRepairFeedback.status === "connected-awaiting-skill"
+                        ? tx("Connected, awaiting Skill", "已连接待触发")
+                      : projectRepairFeedback.status === "connection-required"
+                        ? tx("Connection incomplete", "连接未完成")
+                        : projectRepairFeedback.status === "failed"
+                          ? tx("Repair failed", "修正失败")
+                          : tx("Action required", "需要确认")}
+                </strong>
+                <p>{projectRepairFeedback.detail}</p>
+              </div>
+            ) : null}
+            <div className="project-log-list">
+              {selectedProjectLogEntries.length > 0 ? (
+                selectedProjectLogEntries.map((entry) => (
+                  <div className={`project-log-entry tone-${entry.tone}`} key={entry.id}>
+                    <i aria-hidden="true" />
+                    <div>
+                      <span>
+                        {entry.stage === "scan"
+                          ? tx("Folder Scan", "目录扫描")
+                          : entry.stage === "skills"
+                            ? tx("Skill Index", "技能索引")
+                            : entry.stage === "workflow"
+                              ? tx("Workflow", "工作流")
+                              : entry.stage === "telemetry"
+                                ? tx("Permission", "监控授权")
+                                : entry.stage === "connection"
+                                  ? tx("Codex Connection", "Codex 连接")
+                                  : tx("Complete", "完成")}
+                      </span>
+                      <p>{entry.message}</p>
+                    </div>
+                    <time>{formatDateTime(entry.occurredAt)}</time>
+                  </div>
+                ))
+              ) : (
+                <div className="project-log-empty">
+                  <strong>{tx("No onboarding log yet", "还没有接入日志")}</strong>
+                  <p>{tx("Run Detect and Repair to generate a step-by-step log.", "点击“检测并修正”后，这里会逐步记录检查过程。")}</p>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {skillRunDetail ? (
+        <SkillRunDetailModal
+          skill={skillRunDetail.skill}
+          runs={skillRunDetail.runs}
+          loading={skillRunDetail.loading}
+          onClose={() => setSkillRunDetail(null)}
+        />
+      ) : null}
+      {pendingBindProjectRoot ? (
+        <div
+          className="bind-project-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && busyAction !== "project-scan") {
+              closePendingBindProjectDialog();
+            }
+          }}
+        >
+          <section
+            className="bind-project-modal entity-project"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bind-project-modal-title"
+          >
+            <div className="bind-project-modal-head">
+              <div>
+                <span className="os-module-kicker">{tx("Bind Project", "绑定项目")}</span>
+                <h2 id="bind-project-modal-title">{tx("Confirm Project Folder", "确认项目目录")}</h2>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={tx("Close bind project dialog", "关闭绑定项目弹窗")}
+                disabled={busyAction === "project-scan"}
+                onClick={closePendingBindProjectDialog}
+              >
+                ×
+              </button>
+            </div>
+            <p className="bind-project-modal-copy">
+              {tx(
+                "This folder has only been selected. It will be added to Project Management after scan completes.",
+                "当前只是选中了这个目录。扫描完成后，它才会加入项目管理列表。"
+              )}
+            </p>
+            <div className="bind-project-path" aria-label={tx("Selected folder", "已选择目录")}>
+              <span>{pendingBindProjectRoot}</span>
+            </div>
+            {busyAction === "project-scan" ? (
+              <div className="bind-project-loading" role="status" aria-live="polite">
+                <span className="loading-dot" />
+                <strong>{tx("Scanning and binding project...", "正在扫描并绑定项目...")}</strong>
+              </div>
+            ) : null}
+            <div className="bind-project-modal-actions">
+              <button
+                type="button"
+                disabled={busyAction === "project-scan"}
+                onClick={closePendingBindProjectDialog}
+              >
+                {tx("Close", "关闭")}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={busyAction === "project-scan"}
+                onClick={() => void scanAndBindPendingProject()}
+              >
+                <ScanIcon />
+                <span>
+                  {busyAction === "project-scan"
+                    ? tx("Scanning...", "扫描中...")
+                    : tx("Scan and Bind", "扫描并绑定")}
+                </span>
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {scanResultDialog ? (
+        <div
+          className="scan-result-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setScanResultDialog(null);
+            }
+          }}
+        >
+          <section
+            className="scan-result-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="scan-result-modal-title"
+          >
+            <div className="scan-result-modal-head">
+              <div>
+                <span className="os-module-kicker">
+                  {scanResultDialog.scanScope === "project"
+                    ? tx("Project scan complete", "项目扫描完成")
+                    : tx("Project scan complete", "项目扫描完成")}
+                </span>
+                <h2 id="scan-result-modal-title">{tx("Scan Result", "扫描结果")}</h2>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={tx("Close scan result", "关闭扫描结果")}
+                onClick={() => setScanResultDialog(null)}
+              >
+                ×
+              </button>
+            </div>
+            <p className="scan-result-modal-copy">
+              {scanResultDialog.scanScope === "project"
+                ? tx("Skill OS only inspected the selected project folder.", "Skill OS 只检查了已选择的项目文件夹。")
+                : tx("Skill OS only inspected the selected project folder.", "Skill OS 只检查了已选择的项目文件夹。")}
+            </p>
+            <div className="scan-result-modal-paths">
+              {scanResultDialog.rootPaths.map((rootPath) => (
+                <span key={rootPath}>{rootPath}</span>
+              ))}
+            </div>
+            <form
+              className="scan-result-rename-panel"
+              onSubmit={(event) => {
+                event.preventDefault();
+                saveScanResultProjectName();
+              }}
+            >
+              <div>
+                <span className="os-module-kicker">{tx("Project Name", "项目名称")}</span>
+                <strong>{tx("Rename this project for easier management", "给这个项目起个方便管理的名字")}</strong>
+                <small>
+                  {scanResultDialogProject
+                    ? tx("This only changes the display name inside Skill OS.", "这里只修改 Skill OS 内的显示名称。")
+                    : tx("The project will be kept in the bound project list.", "该项目会保留在已绑定项目列表中。")}
+                </small>
+              </div>
+              <label>
+                <span>{tx("Display Name", "显示名称")}</span>
+                <input
+                  value={scanResultProjectName}
+                  onChange={(event) => setScanResultProjectName(event.currentTarget.value)}
+                  placeholder={tx("Project display name", "项目显示名称")}
+                />
+              </label>
+              <button type="submit" disabled={!scanResultDialogProjectRoot || !scanResultProjectName.trim()}>
+                {tx("Save Name", "保存名称")}
+              </button>
+            </form>
+            <div className="scan-result-modal-grid">
+              <div>
+                <span>{tx("Skills", "技能")}</span>
+                <strong>{scanResultDialog.skillsFound}</strong>
+              </div>
+              <div>
+                <span>{tx("Files", "文件")}</span>
+                <strong>{scanResultDialog.filesSeen}</strong>
+              </div>
+              <div>
+                <span>{tx("Changed", "变化")}</span>
+                <strong>{scanResultDialog.skillsChanged}</strong>
+              </div>
+              <div>
+                <span>{tx("Skipped", "跳过")}</span>
+                <strong>{scanResultDialog.skippedEntryCount}</strong>
+              </div>
+              <div>
+                <span>{tx("Errors", "错误")}</span>
+                <strong>{scanResultDialog.errorCount}</strong>
+              </div>
+            </div>
+            <div className="project-onboarding-checklist" aria-label={tx("Project onboarding checks", "项目接入检查") }>
+              <div className="is-ready">
+                <span>✓</span>
+                <strong>{tx("Project folder bound", "项目目录已绑定")}</strong>
+                <small>{scanResultDialogProjectRoot}</small>
+              </div>
+              <div className={scanResultDialog.skillsFound > 0 ? "is-ready" : "needs-action"}>
+                <span>{scanResultDialog.skillsFound > 0 ? "✓" : "!"}</span>
+                <strong>{tx("Project Skills indexed", "项目技能已索引")}</strong>
+                <small>
+                  {scanResultDialog.skillsFound > 0
+                    ? tx(`${scanResultDialog.skillsFound} Skill(s) found`, `发现 ${scanResultDialog.skillsFound} 个技能`)
+                    : tx("No Skill found; repair is required", "未发现技能，需要修正")}
+                </small>
+              </div>
+              <div className={scanResultDialog.workflowDetected ? "is-ready" : "needs-action"}>
+                <span>{scanResultDialog.workflowDetected ? "✓" : "!"}</span>
+                <strong>{tx("Workflow configuration", "工作流配置")}</strong>
+                <small>
+                  {scanResultDialog.workflowDetected
+                    ? tx("Workflow markers detected", "已检测到工作流标记")
+                    : tx("Workflow is incomplete; preview a repair plan", "工作流不完整，请预览修正方案")}
+                </small>
+              </div>
+              <div className="needs-connection">
+                <span>→</span>
+                <strong>{tx("Codex project connection", "Codex 项目连接")}</strong>
+                <small>{tx("Start a Codex task from this exact project directory, then refresh evidence.", "请从该项目目录启动 Codex 任务，然后刷新运行证据。")}</small>
+              </div>
+              <div className={boot?.policy?.telemetryMode !== "disabled" ? "is-ready" : "needs-action"}>
+                <span>{boot?.policy?.telemetryMode !== "disabled" ? "✓" : "!"}</span>
+                <strong>{tx("Runtime monitoring permission", "运行监控授权")}</strong>
+                <small>
+                  {boot?.policy?.telemetryMode !== "disabled"
+                    ? tx("Runtime evidence import is authorized", "运行证据导入已授权")
+                    : tx("Open project detail and enable telemetry", "请打开项目详情并开启遥测")}
+                </small>
+              </div>
+            </div>
+            <div className={`scan-result-modal-next ${isEmptyScanDialogProject && !isWorkflowAppliedToScanDialogProject ? "tone-empty" : "tone-ready"}`}>
+              {isEmptyScanDialogProject ? (
+                <span className="scan-result-recommendation-badge">
+                  {isWorkflowAppliedToScanDialogProject
+                    ? tx("Workflow applied", "工作流已应用")
+                    : tx("Selected recommendation", "已选择推荐")}
+                </span>
+              ) : null}
+              <strong>
+                {isWorkflowAppliedToScanDialogProject
+                    ? tx("Project skills-workflow is ready.", "项目技能工作流已就绪。")
+                  : isEmptyScanDialogProject
+                  ? tx("No Skills found. Recommended skills-workflow is available.", "未发现 Skill。可应用推荐 skills-workflow。")
+                  : tx("Indexed results are ready.", "索引结果已就绪。")}
+              </strong>
+              <p>
+                {isWorkflowAppliedToScanDialogProject
+                  ? tx("Review the project assets in Skill Library or return to Project Management.", "可在技能库查看项目资产，也可以返回项目管理。")
+                  : isEmptyScanDialogProject
+                  ? tx("Preview the bundled skills-workflow before writing anything into this project.", "写入任何内容前，可以先预览内置 skills-workflow。")
+                  : tx("The indexed Skills are now stored in Skill Library and attached to this project.", "已索引技能会存入技能库，并关联到这个项目。")}
+              </p>
+            </div>
+            <div className="scan-result-modal-actions">
+              <button type="button" onClick={() => setScanResultDialog(null)}>
+                {tx("Stay in Project Management", "留在项目管理")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setScanResultDialog(null);
+                  navigateToProductSection("#local-skills");
+                }}
+              >
+                {tx("Review Project Skills", "查看项目技能")}
+              </button>
+              {isWorkflowAppliedToScanDialogProject ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScanResultDialog(null);
+                      navigateToProductSection("#evaluate");
+                    }}
+                  >
+                    {tx("Open Reports", "打开评测报告")}
+                  </button>
+                  {scanResultDialogProject ? (
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => {
+                        setScanResultDialog(null);
+                        void repairManagedProject(scanResultDialogProject);
+                      }}
+                    >
+                      <RepairIcon />
+                      {tx("Check connection", "检查连接")}
+                    </button>
+                  ) : null}
+                </>
+              ) : isEmptyScanDialogProject ? (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => {
+                    setScanResultDialog(null);
+                    void previewRecommendedWorkflowStarter("scan-dialog");
+                  }}
+                >
+                  {tx("Use recommended skills-workflow", "使用推荐 skills-workflow")}
+                </button>
+              ) : !scanResultDialog.workflowDetected && scanResultDialogProject ? (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => {
+                    setScanResultDialog(null);
+                    void repairManagedProject(scanResultDialogProject);
+                  }}
+                >
+                  <RepairIcon />
+                  {tx("Detect and repair", "检测并修正")}
+                </button>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
     </LanguageContext.Provider>
   );

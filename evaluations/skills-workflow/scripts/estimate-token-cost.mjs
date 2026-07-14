@@ -20,6 +20,7 @@ const budgets = {
 
 const bundles = {
   "fast-task": [
+    "project-profile-router",
     "project-requirement-gate",
     "project-dev-core",
     "project-code-generation",
@@ -27,8 +28,8 @@ const bundles = {
     "project-test-and-report"
   ],
   "ordinary-dev": [
+    "project-profile-router",
     "project-requirement-gate",
-    "project-codebase-onboarding",
     "project-scope-impact-guard",
     "project-dev-core",
     "project-stack-standards",
@@ -37,22 +38,44 @@ const bundles = {
     "project-test-and-report"
   ],
   frontend: [
+    "project-profile-router",
     "project-requirement-gate",
-    "project-codebase-onboarding",
     "project-scope-impact-guard",
     "project-dev-core",
     "project-stack-standards",
     "project-frontend-standards",
-    "project-frontend-react",
-    "project-frontend-css",
     "project-code-generation",
     "project-code-review",
     "project-verification-loop",
     "project-test-and-report"
   ],
-  security: [
+  backend: [
+    "project-profile-router",
     "project-requirement-gate",
-    "project-codebase-onboarding",
+    "project-scope-impact-guard",
+    "project-dev-core",
+    "project-stack-standards",
+    "project-backend-standards",
+    "project-code-generation",
+    "project-code-review",
+    "project-verification-loop",
+    "project-test-and-report"
+  ],
+  "frontend-react": [
+    "project-frontend-standards",
+    "project-frontend-react"
+  ],
+  "frontend-vue": [
+    "project-frontend-standards",
+    "project-frontend-vue"
+  ],
+  "frontend-css": [
+    "project-frontend-standards",
+    "project-frontend-css"
+  ],
+  security: [
+    "project-profile-router",
+    "project-requirement-gate",
     "project-scope-impact-guard",
     "project-dev-core",
     "project-stack-standards",
@@ -71,11 +94,17 @@ const bundles = {
     "project-skill-upgrade-advisor"
   ],
   "enhanced-ui": [
+    "project-profile-router",
     "project-superpowers-router",
     "project-frontend-standards",
     "project-code-review",
     "project-verification-loop",
     "project-test-and-report"
+  ],
+  "profile-refresh": [
+    "project-profile-router",
+    "project-codebase-onboarding",
+    "project-stack-standards"
   ]
 };
 

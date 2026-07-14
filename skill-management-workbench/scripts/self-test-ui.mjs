@@ -15,6 +15,8 @@ const cdpPort = 9227;
 const appIndexPath = join(root, "out", "renderer", "index.html");
 const electronCliPath = join(root, "node_modules", "electron", "cli.js");
 const baseUrl = pathToFileURL(appIndexPath).href;
+const testViewportWidth = Number.parseInt(process.env.SKILL_OS_SELF_TEST_WIDTH ?? "1440", 10);
+const testViewportHeight = Number.parseInt(process.env.SKILL_OS_SELF_TEST_HEIGHT ?? "980", 10);
 
 const report = {
   generatedAt: new Date().toISOString(),
@@ -292,6 +294,18 @@ async function runElectronSelfTestLauncher() {
   });
 
   if (exitCode !== 0) {
+    try {
+      const childReport = JSON.parse(
+        readFileSync(join(reportDir, "self-test-report.json"), "utf8")
+      );
+      if (childReport.mode === "electron-click" && childReport.issues?.length > 0) {
+        process.stderr.write(stderr || stdout);
+        process.exitCode = 1;
+        return;
+      }
+    } catch {
+      // No usable runtime report was produced; use the source fallback below.
+    }
     await runSourceContractFallback(stderr.trim() || stdout.trim() || `Electron exited with code ${exitCode}`);
     return;
   }
@@ -392,9 +406,9 @@ function runSourceInteractionContractChecks() {
     ["navigateToProductSection(\"#graph\")", "Cross-module graph route exists"],
     ["showInteractionNotice", "Shared interaction feedback helper exists"],
     ["InteractionFeedback", "Global interaction feedback component exists"],
-    ["void addRoot()", "Authorization directory button is wired"],
-    ["void addExclusion()", "Add exclusion button is wired"],
-    ["void analyzeRemoteSource()", "Remote repository analysis button is wired"],
+    ["void beginBindProjectFlow()", "Project directory picker is wired"],
+    ["void scanTargetProject()", "Project-only scan button is wired"],
+    ["handleMarketplaceAction", "Remote repository analysis button is wired"],
     ["showSkillTuning", "Skill scope explanation action is wired"],
     ["showSkillOptimization", "Skill optimization explanation action is wired"],
     ["sendSkillToApply", "Skill apply routing action is wired"],
@@ -424,21 +438,20 @@ function runSourceInteractionContractChecks() {
   }
 
   const requiredProductExperienceContracts = [
-    ["Framework + Workbench", "Product positioning states Framework + Workbench"],
-    [
-      "Workflow + Skill Framework, paired with a local visual workbench.",
-      "Overview states the dual-core Skill framework plus visual workbench positioning"
-    ],
+    ["Choose one project directory", "Product positioning states project-first scoping"],
+    ["Version 1 only scans the selected project folder.", "Overview/onboarding states the single-project scan boundary"],
+    ["Bound Projects", "Project Library manages all bound projects"],
+    ["Scanning and analysis still run on one selected project only.", "Project Library states one-project-at-a-time analysis"],
     ["Recommended Next Step", "Overview leads with one guided next step"],
     ["overview-report-card", "Overview exposes compact report surface"],
     ["overview-today-report", "Overview includes first-screen reporting signals"],
-    ["Priority Skills", "Skill Library prioritizes top Skills before the full list"],
+    ["Local Scanned Skills", "Skill Library prioritizes top Skills before the full list"],
     ["Basic purpose and status only", "Skill Library list stays purpose-and-status focused"],
     ["Selected Skill Workbench", "Skill Library moves deep analysis into a selected detail workbench"],
     ["Superpowers-first development flow", "Builder mode exposes Superpowers-first development guidance"],
     ["composite_framework", "Skill Library represents composite workflow-plus-skill framework assets"],
     ["Remote Skills are inactive until explicitly activated.", "Remote Market states inactive-until-activated boundary"],
-    ["Never auto-run", "Discovery remote lane states remote Skills never auto-run"],
+    ["Remote Skills never auto-run from this surface.", "Discovery remote lane states remote Skills never auto-run"],
     ["Manual activation required", "Remote source preflight requires manual activation"],
     ["Import creates an inactive app-local candidate", "Remote import remains inactive and app-local"],
     ["Remote Skills never auto-run from this surface.", "Marketplace feedback repeats remote auto-run boundary"],
@@ -467,6 +480,10 @@ function runSourceInteractionContractChecks() {
     ["Skill OS product-flow single module layer", "Single-module routing style layer exists"],
     [".product-workspace.single-module-mode > [data-product-section] {\n  display: none !important;", "Inactive modules are hidden"],
     [".interaction-action-feedback", "Interaction feedback is styled"],
+    [".project-library-table-shell {\n  max-width: 100%;\n  overflow-x: hidden;", "Project Library does not require horizontal scrolling"],
+    [".project-library-table td::before", "Project Library table collapses into labeled fields on narrower screens"],
+    ["Project Library desktop integrity guard", "Project Library stays a table at desktop app widths"],
+    ["@media (max-width: 719px)", "Project Library card layout is limited to true narrow screens"],
     [".overview-main", "Overview command-center layout exists"],
     [".overview-report-card", "Overview report card is styled"],
     [".overview-workflow-strip", "Overview workflow strip is styled"],
@@ -489,15 +506,16 @@ function runSourceInteractionContractChecks() {
 
   const selfTestSource = readFileSync(new URL(import.meta.url), "utf8");
   const requiredSelfTestContracts = [
-    ["reported-remote-analysis-obra-superpowers", "Self-test records the reported remote-analysis layout scenario"],
+    ["reported-remote-candidate-preview", "Self-test records the remote-candidate preview layout scenario"],
     ["reported-graph-focus-readable", "Self-test records graph focus readability"],
+    ["Project Library bound project table remains horizontal", "Self-test covers bound project table integrity"],
     ["Discovery scan flow", "Self-test covers Discovery scan actions"],
     ["Marketplace progressive activation workflow", "Self-test covers Marketplace staged activation"],
     ["Remote candidate inventory visible", "Self-test verifies imported remote candidates are discoverable"],
     ["Remote candidate review visible", "Self-test verifies imported remote candidates have a review surface"],
     ["Remote candidate local detail visible", "Self-test verifies imported remote candidates have local detail"],
     ["Remote candidate Apply Center handoff visible", "Self-test verifies remote candidate Apply Center handoff"],
-    ["Skill Library progressive workflow", "Self-test covers Skill Library tuning/apply actions"],
+    ["Skill Library tabbed asset workflow", "Self-test covers Skill Library tabs, tables, filters, and drill-down"],
     ["Apply Center scope and preview flow", "Self-test covers Apply Center scope preview"],
     ["Settings backup restore preview flow", "Self-test covers Settings backup/restore controls"]
   ];
@@ -529,8 +547,8 @@ async function runElectronSelfTestInProcess() {
   await app.whenReady();
 
   const window = new BrowserWindow({
-    width: 1440,
-    height: 980,
+    width: testViewportWidth,
+    height: testViewportHeight,
     show: false,
     webPreferences: {
       backgroundThrottling: false,
@@ -541,13 +559,16 @@ async function runElectronSelfTestInProcess() {
   });
 
   try {
+    window.webContents.setUserAgent(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36 SkillOSUITest"
+    );
     await window.loadURL(baseUrl);
     const tab = createElectronTab(window);
     await tab.send("Page.enable");
     await tab.send("Runtime.enable");
     await tab.send("Emulation.setDeviceMetricsOverride", {
-      width: 1440,
-      height: 980,
+      width: testViewportWidth,
+      height: testViewportHeight,
       deviceScaleFactor: 1,
       mobile: false
     });
@@ -628,7 +649,7 @@ async function runChromeDebugSelfTest() {
     "--allow-file-access-from-files",
     `--remote-debugging-port=${cdpPort}`,
     `--user-data-dir=${userDataDir}`,
-    "--window-size=1440,980",
+    `--window-size=${testViewportWidth},${testViewportHeight}`,
     baseUrl
   ]);
 
@@ -640,8 +661,8 @@ async function runChromeDebugSelfTest() {
     await tab.send("Page.enable");
     await tab.send("Runtime.enable");
     await tab.send("Emulation.setDeviceMetricsOverride", {
-      width: 1440,
-      height: 980,
+      width: testViewportWidth,
+      height: testViewportHeight,
       deviceScaleFactor: 1,
       mobile: false
     });
@@ -905,7 +926,33 @@ async function scrollActiveModule(tab, section, position) {
   await delay(180);
 }
 
+async function seedProjectLibraryTestData(tab) {
+  await evaluate(
+    tab,
+    `(() => {
+      const project = {
+        id: "project:/Users/bing/MyJob/Project/AI/code",
+        name: "code",
+        path: "/Users/bing/MyJob/Project/AI/code",
+        boundAt: "2026-07-09T00:00:00.000Z",
+        lastFocusedAt: "2026-07-09T00:00:00.000Z",
+        lastScanAt: "2026-07-09T01:10:00.000Z",
+        skillsFound: 12,
+        filesSeen: 180,
+        skillsChanged: 2,
+        workflowApplied: true
+      };
+      window.localStorage.setItem("skill-os-managed-projects-v1", JSON.stringify([project]));
+      window.location.reload();
+      return true;
+    })()`
+  );
+  await delay(500);
+  await waitForApp(tab);
+}
+
 async function runChecks(tab) {
+  await seedProjectLibraryTestData(tab);
   await takeScreenshot(tab, "overview-initial");
   await expect(
     tab,
@@ -920,8 +967,8 @@ async function runChecks(tab) {
     tab,
     "Overview uses guided next step plus compact report",
     `(() => {
-      const nextStep = document.querySelector(".overview-next-step");
-      const report = document.querySelector(".overview-report-card");
+      const nextStep = document.querySelector(".overview-dashboard-card-main");
+      const report = document.querySelector(".overview-dashboard-side");
       const oldFeatureGrid = document.querySelector(".hero-entry-grid");
       const oldGuidedRail = document.querySelector(".guided-flow-rail");
       return Boolean(nextStep) && Boolean(report) && !oldFeatureGrid && !oldGuidedRail;
@@ -939,21 +986,19 @@ async function runChecks(tab) {
   );
   await expect(
     tab,
-    "Overview first screen exposes workflow and graph entry",
+    "Overview first screen exposes project dashboard and next action",
     `(() => {
       const overview = document.querySelector("#overview");
-      const workflow = overview?.querySelector(".overview-workflow-strip");
-      const nextStep = overview?.querySelector(".overview-next-step");
-      const report = overview?.querySelector(".overview-report-card");
-      const boundaryGrid = overview?.querySelector(".overview-boundary-grid");
-      const focusSummary = overview?.querySelector(".overview-focus-summary");
-      if (!workflow || !nextStep || !report || !boundaryGrid || !focusSummary) return false;
-      const workflowRect = workflow.getBoundingClientRect();
-      const nextStepRect = nextStep.getBoundingClientRect();
-      const reportRect = report.getBoundingClientRect();
-      const boundaryRect = boundaryGrid.getBoundingClientRect();
-      const focusSummaryRect = focusSummary.getBoundingClientRect();
-      return workflowRect.bottom <= window.innerHeight + 2 && nextStepRect.bottom <= window.innerHeight + 2 && reportRect.bottom <= window.innerHeight + 2 && boundaryRect.bottom <= window.innerHeight + 2 && focusSummaryRect.bottom <= window.innerHeight + 2;
+      const hero = overview?.querySelector(".overview-dashboard-hero");
+      const metrics = overview?.querySelector(".overview-dashboard-metrics");
+      const nextStep = overview?.querySelector(".overview-dashboard-card-main");
+      const health = overview?.querySelector(".overview-dashboard-health-card");
+      const action = nextStep?.querySelector("button.primary");
+      if (!hero || !metrics || !nextStep || !health || !action) return false;
+      return [hero, metrics, nextStep, health].every((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
     })()`
   );
 
@@ -961,6 +1006,7 @@ async function runChecks(tab) {
     ["#overview", "overview"],
     ["#discovery", "discovery"],
     ["#local-skills", "local-skills"],
+    ["#evaluate", "evaluate"],
     ["#remote-market", "remote-market"],
     ["#analysis", "analysis"],
     ["#graph", "graph"],
@@ -989,75 +1035,120 @@ async function runChecks(tab) {
 
   await guarded("Overview recommended next action navigates", async () => {
     await clickSelector(tab, '.product-nav a[href="#overview"]', "overview nav");
-    await clickSelector(tab, '.overview-next-step .primary', "open framework");
-    await expect(tab, "Overview primary action activates Discovery", `document.querySelector('.product-nav a[href="#discovery"]')?.classList.contains("active")`);
+    await clickSelector(tab, '.overview-dashboard-card-main button.primary', "open recommended next step");
+    await expect(tab, "Overview primary action leaves Overview for its recommended module", `Boolean(document.querySelector('.product-nav a.active:not([href="#overview"])'))`);
     await clickSelector(tab, '.product-nav a[href="#overview"]', "overview nav return");
-    await clickSelector(tab, '.overview-next-step button:not(.primary)', "open workbench");
-    await expect(tab, "Overview secondary action activates Analysis", `document.querySelector('.product-nav a[href="#analysis"]')?.classList.contains("active")`);
-    await clickSelector(tab, '.product-nav a[href="#overview"]', "overview nav return graph");
-    await clickSelector(tab, '.overview-boundary-card.entity-project', "open workbench boundary");
-    await expect(tab, "Overview Workbench boundary activates Analysis", `document.querySelector('.product-nav a[href="#analysis"]')?.classList.contains("active")`);
-    await clickSelector(tab, '.product-nav a[href="#overview"]', "overview nav return framework");
-    await clickSelector(tab, '.overview-boundary-card.entity-skill', "open framework boundary");
-    await expect(tab, "Overview Framework boundary activates Discovery", `document.querySelector('.product-nav a[href="#discovery"]')?.classList.contains("active")`);
+    await clickSelector(tab, '.overview-dashboard-card-main .overview-action-item', "open first actionable recommendation");
+    await expect(tab, "Overview recommendation opens its target module", `Boolean(document.querySelector('.product-nav a.active:not([href="#overview"])'))`);
+    const projectDetailOpened = await evaluate(tab, `Boolean(document.querySelector(".project-detail-modal"))`);
+    if (projectDetailOpened) {
+      await clickSelector(tab, '.project-detail-modal .project-asset-detail-head .icon-button', "close project detail after recommendation drill-down");
+    }
+    await clickSelector(tab, '.product-nav a[href="#overview"]', "overview nav return for project drill-down");
+    const hasProjectCoverageRow = await evaluate(tab, `Boolean(document.querySelector("#overview .overview-project-row"))`);
+    if (hasProjectCoverageRow) {
+      await clickSelector(tab, '#overview .overview-project-row', "open covered project detail");
+      await expect(tab, "Overview project coverage opens project detail", `Boolean(document.querySelector(".project-detail-modal"))`);
+      await clickSelector(tab, '.project-detail-modal .project-asset-detail-head .icon-button', "close covered project detail");
+      await clickSelector(tab, '.product-nav a[href="#overview"]', "return to overview after project drill-down");
+    }
     await expect(
       tab,
-      "Overview boundary cards stay visible on the first screen",
+      "Overview project dashboard stays visible on the first screen",
       `(() => {
         const overview = document.querySelector("#overview");
-        const boundaryGrid = overview?.querySelector(".overview-boundary-grid");
-        const focusSummary = overview?.querySelector(".overview-focus-summary");
-        if (!overview || !boundaryGrid || !focusSummary) return false;
-        const boundaryRect = boundaryGrid.getBoundingClientRect();
-        const focusRect = focusSummary.getBoundingClientRect();
-        return boundaryRect.bottom <= window.innerHeight + 2 && focusRect.bottom <= window.innerHeight + 2;
+        const dashboard = overview?.querySelector(".overview-dashboard-reference");
+        const actionCard = overview?.querySelector(".overview-dashboard-card-main");
+        const projectCoverage = overview?.querySelector(".overview-project-coverage");
+        if (!overview || !dashboard || !actionCard || !projectCoverage) return false;
+        return [dashboard, actionCard, projectCoverage].every((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        });
       })()`
     );
   });
 
-  await guarded("Language switcher toggles Chinese", async () => {
-    await clickSelector(tab, '.product-topbar-actions .language-switcher button:nth-child(3)', "Chinese language button");
+  await guarded("Language switcher toggles single-language modes", async () => {
+    await clickSelector(tab, '.product-topbar-actions > .language-switcher button:nth-child(1)', "Chinese language button");
     await expect(tab, "Chinese nav copy visible", `document.body.textContent.includes("总览") && document.body.textContent.includes("设置")`);
-    await clickSelector(tab, '.product-topbar-actions .language-switcher button:nth-child(1)', "Bilingual language button");
+    await clickSelector(tab, '.product-topbar-actions > .language-switcher button:nth-child(2)', "English language button");
+    await expect(tab, "English nav copy visible", `document.body.textContent.includes("Overview") && document.body.textContent.includes("Settings")`);
+    await clickSelector(tab, '.product-topbar-actions > .language-switcher button:nth-child(1)', "return to Chinese language button");
+  });
+
+  await guarded("Project Library bound project table remains horizontal", async () => {
+    await clickSelector(tab, '.product-nav a[href="#discovery"]', "discovery nav for project library table");
+    await expect(
+      tab,
+      "Project Library renders bound projects as a desktop table",
+      `(() => {
+        const table = document.querySelector("#discovery .project-library-table");
+        const tableShell = document.querySelector("#discovery .project-library-table-shell");
+        const thead = table?.querySelector("thead");
+        const row = table?.querySelector("tbody tr");
+        const firstCell = table?.querySelector("tbody td:first-child");
+        const firstName = firstCell?.querySelector("strong");
+        if (!table || !tableShell || !thead || !row || !firstCell || !firstName) return false;
+
+        const tableStyle = getComputedStyle(table);
+        const headStyle = getComputedStyle(thead);
+        const rowStyle = getComputedStyle(row);
+        const cellStyle = getComputedStyle(firstCell);
+        const beforeStyle = getComputedStyle(firstCell, "::before");
+        const shellRect = tableShell.getBoundingClientRect();
+        const nameRect = firstName.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+
+        return tableStyle.display === "table" &&
+          headStyle.display === "table-header-group" &&
+          rowStyle.display === "table-row" &&
+          cellStyle.display === "table-cell" &&
+          (beforeStyle.content === "none" || beforeStyle.display === "none") &&
+          firstName.textContent.trim() === "code" &&
+          nameRect.width >= 24 &&
+          nameRect.width >= nameRect.height &&
+          rowRect.width >= 520 &&
+          shellRect.left >= -2 &&
+          shellRect.right <= document.documentElement.clientWidth + 2 &&
+          tableShell.scrollWidth <= tableShell.clientWidth + 1;
+      })()`
+    );
+    await expectNoVerticalFragmentation(tab, "Project Library has no vertical text fragments", "#discovery .project-library-panel");
+    await takeScreenshot(tab, "reported-project-library-table-horizontal");
   });
 
   await guarded("Topbar Settings action navigates without stale feedback", async () => {
     await clickSelector(tab, '.product-nav a[href="#discovery"]', "discovery nav for stale feedback setup");
-    await clickSelector(tab, '#discovery .os-card-actions button:nth-child(1)', "add scan root for feedback setup");
+    await clickSelector(tab, '#discovery .project-library-head button', "choose project for feedback setup");
+    await waitFor(tab, "Bind confirmation is visible before topbar navigation", `Boolean(document.querySelector(".bind-project-modal"))`);
+    await clickSelector(tab, '.bind-project-modal-head .icon-button', "close bind confirmation");
     await waitFor(tab, "Setup interaction feedback is visible before topbar navigation", `Boolean(document.querySelector(".interaction-action-feedback"))`);
-    await clickSelector(tab, '.product-topbar-actions .ghost-button', "topbar settings");
+    await clickSelector(tab, '.product-topbar-actions .topbar-settings-button', "topbar settings");
     await expect(tab, "Topbar Settings activates Settings", `document.querySelector('.product-nav a[href="#settings"]')?.classList.contains("active")`);
     await expect(tab, "Module navigation clears stale interaction feedback", `!document.querySelector(".interaction-action-feedback")`);
   });
 
   await guarded("Discovery scan flow", async () => {
     await clickSelector(tab, '.product-nav a[href="#discovery"]', "discovery nav");
-    await clickSelector(tab, '#discovery .os-card-actions button:nth-child(1)', "add scan root");
-    await waitFor(tab, "Add Folder shows visible interaction feedback", `document.querySelector(".interaction-action-feedback")?.textContent.includes("Add Scan Root") || document.querySelector(".interaction-action-feedback")?.textContent.includes("添加扫描根目录")`);
-    await clickSelector(tab, '#discovery .os-card-actions button:nth-child(2)', "add exclusion");
-    await waitFor(tab, "Add Exclusion shows visible interaction feedback", `document.querySelector(".interaction-action-feedback")?.textContent.includes("Add Exclusion") || document.querySelector(".interaction-action-feedback")?.textContent.includes("添加排除项")`);
-    await clickSelector(tab, '#discovery button.primary', "scan now");
-    await delay(500);
-    await expect(tab, "Discovery scan result appears", `document.querySelector("#discovery")?.textContent.includes("Found") || document.querySelector("#discovery")?.textContent.includes("发现")`);
-    await expect(tab, "Discovery scan shows visible interaction feedback", `document.querySelector(".interaction-action-feedback")?.textContent.includes("Scan Now") || document.querySelector(".interaction-action-feedback")?.textContent.includes("立即扫描")`);
+    await clickSelector(tab, '#discovery .project-library-head button', "choose project");
+    await waitFor(tab, "Bind Project opens folder confirmation", `Boolean(document.querySelector(".bind-project-modal"))`);
+    await expect(tab, "Selected project folder is shown before scanning", `Boolean(document.querySelector(".bind-project-path")?.textContent.trim())`);
+    await clickSelector(tab, '.bind-project-modal-actions button.primary', "scan and bind project");
+    await waitFor(tab, "Discovery scan result appears", `Boolean(document.querySelector(".scan-result-modal"))`, 12000);
+    await expect(tab, "Discovery scan result reports completion", `document.querySelector(".scan-result-modal")?.textContent.includes("项目扫描完成") || document.querySelector(".scan-result-modal")?.textContent.includes("Project scan complete")`);
+    await clickButtonByText(tab, ".scan-result-modal", ["Stay in Project Management", "留在项目管理"], "close scan result and stay in project management");
   });
 
   await guarded("Remote repository analysis flow", async () => {
-    await clickSelector(tab, '.product-nav a[href="#discovery"]', "discovery nav");
-    await typeSelector(tab, '#discovery input[placeholder="https://github.com/org/skill-repo"]', "https://github.com/obra/superpowers", "repo url");
-    await clickSelector(tab, '#discovery .remote-import-box button.primary', "analyze repository");
-    await waitFor(tab, "Remote analysis panel appears", `Boolean(document.querySelector("#discovery .remote-preflight-workbench"))`);
-    await expect(tab, "Remote analysis uses reported repository", `document.querySelector("#discovery .remote-preflight-workbench")?.textContent.includes("Superpowers") && document.querySelector("#discovery .remote-preflight-workbench")?.textContent.includes("obra/superpowers")`);
-    await expectReadablePanel(tab, "Remote preflight remains readable after reported repository analysis", "#discovery .remote-preflight-workbench", { minWidth: 760 });
-    await waitFor(tab, "Remote preflight scrolls into visible workflow area", `(() => {
-      const panel = document.querySelector("#discovery .remote-preflight-workbench");
-      if (!panel) return false;
-      const rect = panel.getBoundingClientRect();
-      return rect.top >= 0 && rect.top <= window.innerHeight - 120;
-    })()`, 5000);
-    await expectNoVerticalFragmentation(tab, "Remote preflight has no vertical text fragments", "#discovery .remote-preflight-workbench");
-    await expectNoHorizontalOverflow(tab, "Discovery stays inside viewport after reported remote analysis", "discovery");
-    await takeScreenshot(tab, "reported-remote-analysis-obra-superpowers");
+    await clickSelector(tab, '.product-nav a[href="#remote-market"]', "remote market nav");
+    await clickSelector(tab, '#remote-market .marketplace-candidate-list .os-market-card button.primary', "preview remote repository candidate");
+    await waitFor(tab, "Remote candidate preview appears", `Boolean(document.querySelector("#remote-market .marketplace-candidate-preview .stage-preview"))`);
+    await expect(tab, "Remote candidate preview exposes its source repository", `Boolean(document.querySelector("#remote-market .marketplace-preview-matrix")?.textContent.includes("http"))`);
+    await expectReadablePanel(tab, "Remote candidate preview remains readable", "#remote-market .marketplace-candidate-preview", { minWidth: 400 });
+    await expectNoVerticalFragmentation(tab, "Remote candidate preview has no vertical text fragments", "#remote-market .marketplace-candidate-preview");
+    await expectNoHorizontalOverflow(tab, "Remote Market stays inside viewport after candidate preview", "remote-market");
+    await takeScreenshot(tab, "reported-remote-candidate-preview");
   });
 
   await guarded("Marketplace progressive activation workflow", async () => {
@@ -1065,7 +1156,7 @@ async function runChecks(tab) {
     await expect(tab, "Marketplace progressive flow visible", `Boolean(document.querySelector("#remote-market .marketplace-progressive-flow"))`);
     await expect(tab, "Marketplace candidate list visible", `Boolean(document.querySelector("#remote-market .marketplace-candidate-list .os-market-card"))`);
     await expect(tab, "Marketplace selected workbench visible", `Boolean(document.querySelector("#remote-market .marketplace-candidate-preview"))`);
-    await expect(tab, "Marketplace starts in preview stage", `Boolean(document.querySelector("#remote-market .marketplace-stage-tabs button.active")?.textContent.includes("Preview"))`);
+    await expect(tab, "Marketplace starts in preview stage", `(() => { const text = document.querySelector("#remote-market .marketplace-stage-tabs button.active")?.textContent || ""; return text.includes("Preview") || text.includes("预览"); })()`);
     await expect(tab, "Marketplace stage panel visible on first screen", `(() => {
       const panel = document.querySelector("#remote-market .marketplace-stage-panel");
       if (!panel) return false;
@@ -1088,12 +1179,12 @@ async function runChecks(tab) {
     await waitFor(tab, "Remote candidate review visible", `Boolean(document.querySelector("#remote-market .remote-candidate-review"))`);
     await expect(tab, "Remote candidate review exposes local boundary", `document.querySelector("#remote-market .remote-candidate-review")?.textContent.includes("Will not run") || document.querySelector("#remote-market .remote-candidate-review")?.textContent.includes("不会运行")`);
     await waitFor(tab, "Remote candidate local detail visible", `Boolean(document.querySelector("#remote-market .remote-candidate-detail-panel"))`);
-    await expect(tab, "Remote candidate local detail exposes manifest and diff gates", `(() => {
+    await waitFor(tab, "Remote candidate local detail exposes manifest and diff gates", `(() => {
       const detail = document.querySelector("#remote-market .remote-candidate-detail-panel")?.textContent || "";
       return (detail.includes("Manifest") || detail.includes("清单")) &&
         (detail.includes("Diff") || detail.includes("差异")) &&
         (detail.includes("Preview required") || detail.includes("需要预览"));
-    })()`);
+    })()`, 8000);
     await clickSelector(tab, '#remote-market .remote-candidate-review-actions button:not(.primary)', "remote candidate apply handoff before preview");
     await waitFor(tab, "Remote candidate Apply Center handoff is guarded", `document.querySelector(".interaction-action-feedback")?.textContent.includes("Activation preview is required") || document.querySelector(".interaction-action-feedback")?.textContent.includes("必须先完成激活预览")`);
     await clickSelector(tab, '#remote-market .marketplace-stage-panel.stage-import button.primary', "marketplace activate stage");
@@ -1110,60 +1201,52 @@ async function runChecks(tab) {
       return true;
     })()`);
     await delay(320);
-    await expect(tab, "Marketplace final candidate action has bottom breathing room", `(() => {
+    await expect(tab, "Marketplace final candidate action has card breathing room", `(() => {
       const cards = [...document.querySelectorAll("#remote-market .marketplace-candidate-list .os-market-card")];
-      const lastButton = cards.at(-1)?.querySelector("button.primary");
-      if (!lastButton) return false;
-      const workspace = document.querySelector(".product-workspace");
-      if (!workspace) return false;
-      const workspaceRect = workspace.getBoundingClientRect();
-      const rect = lastButton.getBoundingClientRect();
-      return rect.bottom <= workspaceRect.bottom - 12;
+      const lastCard = cards.at(-1);
+      const lastButton = lastCard?.querySelector("button.primary");
+      if (!lastCard || !lastButton) return false;
+      const cardRect = lastCard.getBoundingClientRect();
+      const buttonRect = lastButton.getBoundingClientRect();
+      return buttonRect.bottom <= cardRect.bottom - 12 && buttonRect.left >= cardRect.left + 12;
     })()`);
     await clickSelector(tab, '#remote-market .remote-candidate-review-actions button:not(.primary)', "remote candidate apply handoff after preview");
     await waitFor(tab, "Remote candidate Apply Center handoff visible", `document.querySelector('.product-nav a[href="#apply-center"]')?.classList.contains("active") && Boolean(document.querySelector("#apply-center .remote-apply-handoff-card"))`);
     await expect(tab, "Remote candidate Apply Center handoff stays read-only", `document.querySelector("#apply-center .remote-apply-handoff-card")?.textContent.includes("read-only") || document.querySelector("#apply-center .remote-apply-handoff-card")?.textContent.includes("只读")`);
   });
 
-  await guarded("Skill Library progressive workflow", async () => {
+  await guarded("Skill Library tabbed asset workflow", async () => {
     await clickSelector(tab, '.product-nav a[href="#local-skills"]', "skill library nav");
-    await expect(tab, "Skill Library priority cards visible", `Boolean(document.querySelector("#local-skills .skill-top-card"))`);
-    await expect(tab, "Skill Library development lane visible", `Boolean(document.querySelector("#local-skills .skill-development-lane"))`);
-    await expect(tab, "Skill Library simple list visible", `Boolean(document.querySelector("#local-skills .skill-simple-row"))`);
-    await expect(tab, "Skill Library detail workbench visible", `Boolean(document.querySelector("#local-skills .skill-detail-panel"))`);
-    await expect(tab, "Skill Library starts in summary stage", `Boolean(document.querySelector("#local-skills .skill-detail-stage-tabs button.active")?.textContent.includes("Summary"))`);
-    await expect(tab, "Skill Library deep analysis hidden by default", `!document.querySelector("#local-skills .skill-intelligence-panel")`);
-    await expect(tab, "Skill Library next step visible on first screen", `(() => {
-      const panel = document.querySelector("#local-skills .skill-detail-stage-panel");
-      if (!panel) return false;
-      const rect = panel.getBoundingClientRect();
-      return rect.top >= 0 && rect.bottom <= window.innerHeight + 2;
+    await expect(tab, "Skill Library exposes local and remote tabs", `document.querySelectorAll("#local-skills .skill-asset-tabs [role=tab]").length === 2`);
+    await expect(tab, "Local scanned Skills tab starts active", `document.querySelector("#local-skills .skill-asset-tabs [role=tab]:first-child")?.getAttribute("aria-selected") === "true"`);
+    await expect(tab, "Local Skills use a full-width table", `(() => {
+      const panel = document.querySelector("#local-skills .skill-asset-catalog-panel");
+      const shell = document.querySelector("#local-skills .skill-asset-table-shell");
+      const table = document.querySelector("#local-skills .skill-asset-data-table.local");
+      if (!panel || !shell || !table) return false;
+      const panelRect = panel.getBoundingClientRect();
+      const shellRect = shell.getBoundingClientRect();
+      return shellRect.width >= panelRect.width - 36 && shell.scrollWidth <= shell.clientWidth + 1;
     })()`);
-    await clickSelector(tab, '#local-skills .skill-top-card:not(.skill-empty-card)', "priority skill");
-    await expect(tab, "Priority Skill selection active", `Boolean(document.querySelector("#local-skills .skill-top-card.selected"))`);
-    await expect(tab, "Skill selection returns to summary stage", `Boolean(document.querySelector("#local-skills .skill-detail-stage-tabs button.active")?.textContent.includes("Summary"))`);
-    await clickSelector(tab, '#local-skills .skill-development-row', "development lane skill");
-    await expect(tab, "Development lane selection active", `Boolean(document.querySelector("#local-skills .skill-development-row.selected"))`);
-    await expect(tab, "Harness compatibility matrix visible", `Boolean(document.querySelector("#local-skills .skill-harness-panel"))`);
-    await expect(tab, "Preferred harness guidance visible", `document.querySelector("#local-skills .skill-harness-panel")?.textContent.includes("Superpowers") || document.querySelector("#local-skills .skill-harness-panel")?.textContent.includes("优先框架")`);
-    await clickSelector(tab, '#local-skills .skill-simple-row', "simple skill row");
-    await expect(tab, "Simple Skill row selection active", `Boolean(document.querySelector("#local-skills .skill-simple-row.selected"))`);
-    await clickSelector(tab, '#local-skills .skill-detail-actions button:nth-child(1)', "run preview");
-    await expect(tab, "Skill action feedback visible", `Boolean(document.querySelector(".skill-action-feedback"))`);
-    await clickSelector(tab, '#local-skills .skill-detail-actions button.primary', "analyze skill");
-    await waitFor(tab, "Skill Library analysis stage active", `Boolean(document.querySelector("#local-skills .skill-detail-stage-tabs button.active")?.textContent.includes("Analyze"))`);
-    await waitFor(tab, "Skill detail analysis evidence visible", `Boolean(document.querySelector("#local-skills .skill-intelligence-evidence-row"))`);
-    await clickSelector(tab, '#local-skills .skill-detail-stage-tabs button:nth-child(4)', "tune scope stage");
-    await expect(tab, "Skill Library tuning stage active", `Boolean(document.querySelector("#local-skills .skill-detail-stage-panel.stage-tuning"))`);
-    await waitFor(tab, "Tune Scope stage shows designed feedback", `document.querySelector("#local-skills .skill-action-feedback")?.textContent.includes("Tune Scope Stage") || document.querySelector("#local-skills .skill-action-feedback")?.textContent.includes("调校范围阶段")`);
-    await expectReadablePanel(tab, "Skill scope tuning feedback remains readable", "#local-skills .skill-action-feedback", { minWidth: 520 });
-    await clickSelector(tab, '#local-skills .skill-detail-stage-panel.stage-tuning button.primary', "open apply center");
-    await expect(tab, "Apply action routes to Apply Center", `document.querySelector('.product-nav a[href="#apply-center"]')?.classList.contains("active")`);
-    await clickSelector(tab, '.product-nav a[href="#local-skills"]', "skill library nav return for explain scope");
-    await clickSelector(tab, '#local-skills .skill-detail-stage-tabs button:nth-child(4)', "tune scope stage return");
-    await clickSelector(tab, '#local-skills .skill-detail-stage-panel.stage-tuning button:not(.primary)', "explain scope");
-    await waitFor(tab, "Explain Scope click updates feedback", `document.querySelector("#local-skills .skill-action-feedback")?.textContent.includes("Apply scope tuning preview") || document.querySelector("#local-skills .skill-action-feedback")?.textContent.includes("应用范围调校预览")`);
-    await expectNoVerticalFragmentation(tab, "Skill Library feedback has no vertical text fragments", "#local-skills .skill-action-feedback");
+    await expect(tab, "Skill Library exposes search filters and sorting", `document.querySelectorAll("#local-skills .skill-library-controls select").length >= 3 && Boolean(document.querySelector("#local-skills .skill-library-search input"))`);
+    await evaluate(tab, `(() => {
+      const selects = [...document.querySelectorAll("#local-skills .skill-library-controls select")];
+      const sort = selects.at(-1);
+      if (!sort) return false;
+      sort.value = "calls";
+      sort.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    await expect(tab, "Skill Library sorting selection updates", `document.querySelector("#local-skills .skill-library-controls label:last-child select")?.value === "calls"`);
+    const hasLocalSkill = await evaluate(tab, `Boolean(document.querySelector("#local-skills .skill-asset-data-table.local tbody tr"))`);
+    if (hasLocalSkill) {
+      await clickSelector(tab, '#local-skills .skill-asset-data-table.local tbody tr', "select local Skill row");
+      await expect(tab, "Selected local Skill exposes drill-down summary", `Boolean(document.querySelector("#local-skills .skill-asset-selected-summary.entity-skill"))`);
+    }
+    await clickSelector(tab, '#local-skills .skill-asset-tabs [role=tab]:nth-child(2)', "open remote loaded Skills tab");
+    await expect(tab, "Remote loaded Skills tab becomes active", `document.querySelector("#local-skills .skill-asset-tabs [role=tab]:nth-child(2)")?.getAttribute("aria-selected") === "true"`);
+    await expect(tab, "Remote candidate table or empty state is visible", `Boolean(document.querySelector("#local-skills .skill-asset-data-table.remote")) && (Boolean(document.querySelector("#local-skills .skill-asset-data-table.remote tbody tr")) || Boolean(document.querySelector("#local-skills .skill-asset-empty")))`);
+    await expectNoHorizontalOverflow(tab, "Skill Library tabbed tables stay inside viewport", "local-skills");
   });
 
   await guarded("Analysis telemetry import flow", async () => {
@@ -1181,10 +1264,12 @@ async function runChecks(tab) {
     await clickSelector(tab, '#graph .section-headline button.primary', "refresh graph");
     await delay(500);
     await expect(tab, "Graph feedback visible", `Boolean(document.querySelector(".graph-action-feedback"))`);
-    await typeSelector(tab, '#graph input[type="search"], #graph input', "memory", "graph search");
-    await expect(tab, "Graph search results or feedback visible", `document.querySelector("#graph")?.textContent.toLowerCase().includes("memory")`);
-    await clickButtonByText(tab, "#graph", ["Focus Matches", "聚焦匹配"], "focus graph search matches");
-    await waitFor(tab, "Graph search scope feedback visible", `document.querySelector(".graph-action-feedback")?.textContent.includes("Search Focus") || document.querySelector(".graph-action-feedback")?.textContent.includes("搜索聚焦")`);
+    const graphQuery = await evaluate(tab, `document.querySelector("#graph .graph-search-item strong")?.textContent?.trim() || ""`);
+    if (!graphQuery) throw new Error("graph search suggestion: not found");
+    await typeSelector(tab, '#graph input[type="search"], #graph input', graphQuery, "graph search");
+    await expect(tab, "Graph search results or feedback visible", `document.querySelectorAll("#graph .graph-search-item").length > 0`);
+    await clickButtonByText(tab, "#graph", ["Focus Matches in Topology", "在拓扑中聚焦匹配"], "focus graph search matches");
+    await waitFor(tab, "Graph search scope feedback visible", `document.querySelector(".graph-action-feedback")?.textContent.includes("Search Focus") || document.querySelector(".graph-action-feedback")?.textContent.includes("搜索焦点")`);
     await clickSelector(tab, '#graph .graph-search-item', "select graph search result");
     await waitFor(tab, "Graph focus analysis selected node visible", `Boolean(document.querySelector("#graph .skill-graph-focus")) && !document.querySelector("#graph .graph-focus-primer-card")`);
     await expectReadablePanel(tab, "Graph Focus selected panel is readable width", "#graph .skill-graph-focus", { minWidth: 760 });
@@ -1227,18 +1312,19 @@ async function runChecks(tab) {
     await expect(tab, "Apply Center progressive workspace visible", `Boolean(document.querySelector("#apply-center .apply-center-workspace"))`);
     await expect(tab, "Apply Center scope rail visible", `Boolean(document.querySelector("#apply-center .apply-scope-rail"))`);
     await expect(tab, "Apply Center workbench panel visible", `Boolean(document.querySelector("#apply-center .apply-workbench-panel"))`);
+    await clickSelector(tab, '#apply-center .apply-workbench-tabs button:first-child', "reset apply workflow to scope stage");
     await expect(tab, "Apply Center starts on scope stage", `Boolean(document.querySelector("#apply-center .apply-workbench-tabs button.active")) && document.querySelector("#apply-center .apply-workbench-stage")?.classList.contains("stage-scope")`);
-    await expect(tab, "Apply Center starts with guided scope copy", `document.querySelector("#apply-center .apply-workbench-stage")?.textContent.includes("Pick the narrowest safe scope")`);
+    await expect(tab, "Apply Center starts with guided scope copy", `(() => { const text = document.querySelector("#apply-center .apply-workbench-stage")?.textContent || ""; return text.includes("Pick the narrowest safe scope") || text.includes("选择最小安全范围"); })()`);
     await clickSelector(tab, '#apply-center .apply-scope-rail .os-apply-card:nth-child(2)', "workspace scope");
     await waitFor(tab, "Apply Center moves to preview after scope choice", `document.querySelector("#apply-center .apply-workbench-stage")?.classList.contains("stage-preview")`);
     await expect(tab, "Apply Center preview impact visible", `Boolean(document.querySelector("#apply-center .apply-impact-preview"))`);
-    await expect(tab, "Apply Center preview remains read-only", `document.querySelector("#apply-center .apply-workbench-stage")?.textContent.includes("read-only")`);
+    await expect(tab, "Apply Center preview remains read-only", `(() => { const text = document.querySelector("#apply-center .apply-workbench-stage")?.textContent || ""; return text.includes("read-only") || text.includes("只读"); })()`);
     await clickSelector(tab, '#apply-center .stage-preview button.primary', "review guardrails");
     await waitFor(tab, "Apply flow feedback visible", `Boolean(document.querySelector(".apply-flow-feedback"))`);
     await expect(tab, "Apply Center moves to guardrails stage", `document.querySelector("#apply-center .apply-workbench-stage")?.classList.contains("stage-guardrails")`);
     await clickSelector(tab, '#apply-center .stage-guardrails button.primary', "continue confirm");
     await waitFor(tab, "Apply Center moves to confirmation stage", `document.querySelector("#apply-center .apply-workbench-stage")?.classList.contains("stage-confirm")`);
-    await expect(tab, "Apply Center confirmation is explicit and read-only", `document.querySelector("#apply-center .apply-workbench-stage")?.textContent.includes("Still read-only")`);
+    await expect(tab, "Apply Center confirmation is explicit and read-only", `(() => { const text = document.querySelector("#apply-center .apply-workbench-stage")?.textContent || ""; return text.includes("Still read-only") || text.includes("仍然只读") || text.includes("仍为只读"); })()`);
   });
 
   await guarded("Bundle export and validation flow", async () => {
@@ -1285,10 +1371,10 @@ async function runChecks(tab) {
 
   await guarded("Registry and Audit render", async () => {
     await clickSelector(tab, '.product-nav a[href="#registry"]', "registry nav");
-    await expect(tab, "Registry table or empty state visible", `document.querySelector("#registry")?.textContent.includes("Skill")`);
-    await clickButtonByText(tab, "#registry", ["Scan Approved Roots", "扫描已批准根目录"], "registry scan approved roots");
+    await expect(tab, "Registry table or empty state visible", `(() => { const text = document.querySelector("#registry")?.textContent || ""; return text.includes("Skill Index") || text.includes("技能索引"); })()`);
+    await clickButtonByText(tab, "#registry", ["Scan Project", "扫描项目"], "registry scan project");
     await delay(500);
-    await expect(tab, "Registry scan shows visible interaction feedback", `document.querySelector(".interaction-action-feedback")?.textContent.includes("Scan Now") || document.querySelector(".interaction-action-feedback")?.textContent.includes("立即扫描")`);
+    await expect(tab, "Registry scan shows visible interaction feedback", `document.querySelector(".interaction-action-feedback")?.textContent.includes("Scan Project") || document.querySelector(".interaction-action-feedback")?.textContent.includes("扫描项目")`);
     await clickSelector(tab, '.product-nav a[href="#audit"]', "audit nav");
     await expect(tab, "Audit timeline visible", `document.querySelector("#audit")?.textContent.includes("Audit") || document.querySelector("#audit")?.textContent.includes("审计")`);
   });

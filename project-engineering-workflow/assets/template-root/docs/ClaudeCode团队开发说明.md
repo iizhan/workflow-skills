@@ -36,8 +36,9 @@ Claude Code 可以按项目需要增加：
 
 ## 推荐工作流
 
-Claude Code 中仍按项目 skills 顺序执行：
+Claude Code 中仍按项目 skills 顺序执行。每次任务先检查 `project-profile-router`；Profile 新鲜时只读相关章节，Profile 失效时按证据范围刷新，不重复扫描整个项目。
 
+0. `project-profile-router`
 1. `project-requirement-gate`
 2. `project-codebase-onboarding`
 3. `project-scope-impact-guard`
@@ -45,14 +46,15 @@ Claude Code 中仍按项目 skills 顺序执行：
 5. `project-superpowers-router`
 6. `project-dev-core`
 7. `project-stack-standards`
-8. 前端任务进入 `project-frontend-standards` 和对应栈 skill
-9. 安全敏感任务进入 `project-security-review`
-10. `project-code-generation`
-11. `project-code-review`
-12. 重要变更进入 `project-verification-loop`
-13. `project-test-and-report`
-14. `project-session-summary`
-15. 重复摩擦进入 `project-skill-upgrade-advisor`
+8. 后端任务进入 `project-backend-standards`，按 Profile 和变更信号加载引用
+9. 前端任务进入 `project-frontend-standards`，再选择实际改变的栈 skill
+10. 安全敏感任务进入 `project-security-review`
+11. `project-code-generation`
+12. `project-code-review`
+13. 重要变更进入 `project-verification-loop`
+14. `project-test-and-report`
+15. `project-session-summary`
+16. 重复摩擦进入 `project-skill-upgrade-advisor`
 
 ## Hooks 使用边界
 

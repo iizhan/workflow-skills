@@ -152,13 +152,30 @@ export class AuthorizationService {
 
     const timestamp = nowIso();
     const policyId = randomUUID();
-    const roots = Array.from(new Set(input.scanRoots.map((path) => resolve(path.trim())).filter(Boolean)));
-    const exclusions = Array.from(
-      new Set(input.scanExclusions.map((path) => resolve(path.trim())).filter(Boolean))
+    const currentPolicy = this.getActivePolicy();
+    const currentRoots = currentPolicy ? this.listRoots(currentPolicy.id).map((root) => root.path) : [];
+    const currentExclusions = currentPolicy
+      ? this.listExclusions(currentPolicy.id).map((entry) => entry.path)
+      : [];
+    const roots = Array.from(
+      new Set([...currentRoots, ...input.scanRoots].map((path) => resolve(path.trim())).filter(Boolean))
     );
+    const exclusions = Array.from(
+      new Set(
+        [...currentExclusions, ...input.scanExclusions]
+          .map((path) => resolve(path.trim()))
+          .filter(Boolean)
+      )
+    );
+    const telemetryMode =
+      input.telemetryMode !== "disabled"
+        ? input.telemetryMode
+        : currentPolicy?.telemetryMode ?? input.telemetryMode;
+    const allowRawContent = input.allowRawContent || currentPolicy?.allowRawContent === true;
+    const allowBackgroundWatch =
+      input.allowBackgroundWatch || currentPolicy?.allowBackgroundWatch === true;
 
     const transaction = this.database.db.transaction(() => {
-      const currentPolicy = this.getActivePolicy();
       if (currentPolicy) {
         this.database.db
           .prepare(
@@ -204,9 +221,9 @@ export class AuthorizationService {
         .run(
           policyId,
           input.name.trim(),
-          input.telemetryMode,
-          input.allowRawContent ? 1 : 0,
-          input.allowBackgroundWatch ? 1 : 0,
+          telemetryMode,
+          allowRawContent ? 1 : 0,
+          allowBackgroundWatch ? 1 : 0,
           this.database.paths.root,
           timestamp,
           timestamp,
@@ -248,14 +265,14 @@ export class AuthorizationService {
         .run(
           randomUUID(),
           policyId,
-          `Authorized ${roots.length} scan root(s) with telemetry mode ${input.telemetryMode}.`,
+          `Authorized ${roots.length} scan root(s) with telemetry mode ${telemetryMode}.`,
           timestamp,
           JSON.stringify({
             scanRoots: roots,
             scanExclusions: exclusions,
-            telemetryMode: input.telemetryMode,
-            allowRawContent: input.allowRawContent,
-            allowBackgroundWatch: input.allowBackgroundWatch
+            telemetryMode,
+            allowRawContent,
+            allowBackgroundWatch
           })
         );
     });

@@ -1,14 +1,18 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import type { OpenDialogOptions } from "electron";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   AuthorizationInput,
   BootstrapState,
   LocalBackupRestoreImpactResult,
   LocalBackupValidationResult,
+  LocalToolTelemetryImportResult,
+  LocalToolTelemetryPreview,
+  LocalToolTelemetrySource,
   OptimizationProposalStatus,
   LocalBackupSummary,
+  ProjectRuntimeEvidenceRefreshResult,
   RemoteSkillActivationPreview,
   RemoteSkillCandidateDetail,
   RemoteSkillCandidateSummary,
@@ -16,7 +20,9 @@ import type {
   SkillApplyPreviewInput,
   SkillBundleExportInput,
   SkillHealthScorePolicyInput,
-  SkillBundleImportInput
+  SkillBundleImportInput,
+  WorkflowStarterApplyResult,
+  WorkflowStarterPreview
 } from "../shared/types";
 import { AuthorizationService } from "./authorization-service";
 import { ApplyPreviewService } from "./apply-preview-service";
@@ -25,13 +31,17 @@ import { BundleService } from "./bundle-service";
 import { WorkbenchDatabase } from "./database";
 import { GraphService } from "./graph-service";
 import { HealthScorePolicyService } from "./health-score-policy-service";
+import { LocalToolTelemetryService } from "./local-tool-telemetry-service";
 import { MarketplaceService } from "./marketplace-service";
 import { OptimizationService } from "./optimization-service";
+import { ProjectService } from "./project-service";
+import { ProjectProfileService } from "./project-profile-service";
 import { RegistryService } from "./registry-service";
 import { RemoteSkillService } from "./remote-skill-service";
 import { SkillIntelligenceService } from "./skill-intelligence-service";
 import { ensureStorage } from "./storage";
 import { TelemetryService } from "./telemetry-service";
+import { WorkflowStarterService } from "./workflow-starter-service";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -47,6 +57,8 @@ const healthScorePolicyService = new HealthScorePolicyService(database);
 const registryService = new RegistryService(database, authorizationService, healthScorePolicyService);
 const telemetryService = new TelemetryService(database, authorizationService);
 const optimizationService = new OptimizationService(database, authorizationService);
+const projectService = new ProjectService(database);
+const projectProfileService = new ProjectProfileService();
 const bundleService = new BundleService(database, authorizationService);
 const graphService = new GraphService(database, authorizationService);
 const backupService = new BackupService(database, authorizationService);
@@ -54,6 +66,17 @@ const applyPreviewService = new ApplyPreviewService(database, authorizationServi
 const marketplaceService = new MarketplaceService();
 const skillIntelligenceService = new SkillIntelligenceService(database, registryService);
 const remoteSkillService = new RemoteSkillService(database);
+const localToolTelemetryService = new LocalToolTelemetryService(
+  database,
+  authorizationService,
+  telemetryService,
+  storagePaths
+);
+const appRoot = app.getAppPath();
+const workflowStarterService = new WorkflowStarterService(
+  resolve(appRoot, "../project-engineering-workflow/assets/template-root"),
+  resolve(appRoot, "../project-engineering-workflow/package.json")
+);
 
 function buildBootstrapState(): BootstrapState {
   const policy = authorizationService.getActivePolicy();
@@ -72,14 +95,18 @@ function buildBootstrapState(): BootstrapState {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1320,
-    height: 900,
-    minWidth: 1080,
-    minHeight: 720,
+    width: 1120,
+    height: 740,
+    minWidth: 960,
+    minHeight: 640,
     title: "Skill OS",
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 14, y: 14 },
+    backgroundColor: "#050814",
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: join(__dirname, "../preload/index.mjs"),
       contextIsolation: true,
+      sandbox: false,
       nodeIntegration: false
     }
   });
@@ -93,16 +120,33 @@ function createWindow() {
 
 function registerIpcHandlers() {
   ipcMain.handle("workbench:bootstrap", () => buildBootstrapState());
+  ipcMain.handle("workbench:list-managed-projects", () => projectService.list());
+  ipcMain.handle("workbench:save-managed-projects", (_event, projects) =>
+    projectService.saveAll(projects)
+  );
+  ipcMain.handle("workbench:delete-managed-project", (_event, projectPath: string) => {
+    projectService.delete(projectPath);
+  });
+  ipcMain.handle("workbench:get-project-profile", (_event, projectRoot: string) =>
+    projectProfileService.read(projectRoot)
+  );
 
-  ipcMain.handle("workbench:pick-directory", async () => {
+  ipcMain.handle("workbench:pick-directory", () => {
     const options: OpenDialogOptions = {
-      properties: ["openDirectory", "createDirectory"]
+      title: "Choose Project Folder",
+      buttonLabel: "Choose Project",
+      defaultPath: app.getPath("home"),
+      message: "Choose the project folder to analyze",
+      properties: ["openDirectory", "dontAddToRecent"]
     };
-    const result = mainWindow
-      ? await dialog.showOpenDialog(mainWindow, options)
-      : await dialog.showOpenDialog(options);
+    mainWindow?.show();
+    mainWindow?.focus();
+    app.focus({ steal: true });
+    console.info("[workbench] opening project directory picker");
+    const filePaths = dialog.showOpenDialogSync(options);
+    console.info("[workbench] project directory picker result", filePaths?.[0] ?? "canceled");
 
-    return result.canceled ? null : result.filePaths[0] ?? null;
+    return filePaths?.[0] ?? null;
   });
 
   ipcMain.handle("workbench:pick-telemetry-file", async () => {
@@ -170,7 +214,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle("workbench:grant-authorization", async (_event, input: AuthorizationInput) => {
     authorizationService.grantAuthorization(input);
-    registryService.scanApprovedRoots();
+    if (input.scanRoots[0]) {
+      registryService.scanProjectRoot(input.scanRoots[0]);
+    }
     return buildBootstrapState();
   });
 
@@ -199,6 +245,22 @@ function registerIpcHandlers() {
   );
 
   ipcMain.handle("workbench:scan-skills", async () => registryService.scanApprovedRoots());
+
+  ipcMain.handle("workbench:scan-project-skills", async (_event, projectRoot: string) =>
+    registryService.scanProjectRoot(projectRoot)
+  );
+
+  ipcMain.handle(
+    "workbench:preview-recommended-workflow-starter",
+    async (_event, projectRoot: string): Promise<WorkflowStarterPreview> =>
+      workflowStarterService.previewRecommendedStarter(projectRoot)
+  );
+
+  ipcMain.handle(
+    "workbench:apply-recommended-workflow-starter",
+    async (_event, projectRoot: string): Promise<WorkflowStarterApplyResult> =>
+      workflowStarterService.applyRecommendedStarter(projectRoot)
+  );
 
   ipcMain.handle("workbench:list-skills", async () => registryService.listSkills());
 
@@ -279,8 +341,40 @@ function registerIpcHandlers() {
     telemetryService.importJsonlFile(filePath)
   );
 
+  ipcMain.handle(
+    "workbench:discover-local-tool-telemetry-sources",
+    async (): Promise<LocalToolTelemetrySource[]> => localToolTelemetryService.discoverSources()
+  );
+
+  ipcMain.handle(
+    "workbench:preview-local-tool-telemetry-source",
+    async (_event, source: LocalToolTelemetrySource): Promise<LocalToolTelemetryPreview> =>
+      localToolTelemetryService.previewSource(source)
+  );
+
+  ipcMain.handle(
+    "workbench:import-local-tool-telemetry-source",
+    async (_event, source: LocalToolTelemetrySource): Promise<LocalToolTelemetryImportResult> =>
+      localToolTelemetryService.importSource(source)
+  );
+
+  ipcMain.handle(
+    "workbench:refresh-project-runtime-evidence",
+    async (_event, projectRoot: string): Promise<ProjectRuntimeEvidenceRefreshResult> =>
+      localToolTelemetryService.refreshProjectRuntimeEvidence(projectRoot)
+  );
+  ipcMain.handle(
+    "workbench:check-project-connection",
+    async (_event, projectRoot: string): Promise<ProjectRuntimeEvidenceRefreshResult> =>
+      localToolTelemetryService.checkProjectConnection(projectRoot)
+  );
+
   ipcMain.handle("workbench:list-recent-runs", async (_event, limit?: number) =>
     telemetryService.listRecentRuns(limit)
+  );
+
+  ipcMain.handle("workbench:list-skill-runs", async (_event, skillId: string, limit?: number) =>
+    telemetryService.listSkillRuns(skillId, limit)
   );
 
   ipcMain.handle("workbench:get-daily-summary", async (_event, date?: string) =>

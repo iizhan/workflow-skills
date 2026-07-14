@@ -38,7 +38,11 @@ This skill combines:
 - For an old-project migration path from `v0.1` to `v0.2.x`, read `references/08-upgrade-compatibility-pack/v0.1-to-v0.2-upgrade-manual.md`
 - For an old-project migration path from `v0.2.x` to `v0.3.x`, read `references/08-upgrade-compatibility-pack/v0.2-to-v0.3-upgrade-manual.md`
 - For an old-project migration path from `v0.3.x` to `v0.4.x`, read `references/08-upgrade-compatibility-pack/v0.3-to-v0.4-upgrade-manual.md`
+- For an old-project migration path from `v0.4.x` to `v0.5.x`, read `references/08-upgrade-compatibility-pack/v0.4-to-v0.5-upgrade-manual.md`
+- For project Profile, architecture cache, decision reuse, and evidence freshness, read `references/08-upgrade-compatibility-pack/v0.5-to-v0.6-upgrade-manual.md`
 - For the six-lane onboarding map, read the generated `docs/AI能力地图.md` in a bootstrapped project
+- For backend role workflow rules, read the generated `.agents/skills/project-backend-standards/SKILL.md` and only the referenced backend topic required by the changed surface
+- For frontend role workflow rules, read the generated `.agents/skills/project-frontend-standards/SKILL.md` and only the referenced frontend topic required by the changed surface
 
 ## What This Skill Ships
 
@@ -61,8 +65,10 @@ This skill combines:
   - superpowers router
   - GSD router
   - gstack router
+  - project Profile and architecture routing
   - dev core
-  - frontend standards
+  - backend standards and progressive backend references
+  - frontend standards and progressive frontend references
   - frontend JS
   - frontend React
   - frontend Vue
@@ -146,7 +152,7 @@ If the repository already uses the governed branch/release lane, validate local 
 ```bash
 npx @workflow-skills/project-engineering-workflow release-doctor \
   --output-dir "/absolute/path/to/target-repo" \
-  --release-version "0.4.0" \
+  --release-version "0.6.0" \
   --json \
   --json-out "docs/workflow-release-doctor.json"
 ```
@@ -182,12 +188,14 @@ Rules:
 - review the dry-run plan before using `--overwrite-existing`
 - use `--mode current` only when the project intentionally adopts the full current workflow line
 - use `memory-index` to rebuild `.specify/memory-store/index.json` without rewriting durable memory record bodies
-- treat branch/release capability as additive for old projects; `0.4.x` retains it and adds adaptive task/confirmation governance
+- treat branch/release, role, and Profile capabilities as additive for old projects; `0.4.x` keeps adaptive confirmation, `0.5.x` adds backend/frontend roles, and `0.6.x` adds source-backed project context reuse
 
 ### 4. Pilot With One Real Requirement
 
 In the target repository, the recommended sequence is:
 
+0. `$project-profile-router`
+   - check evidence freshness, reuse only relevant Profile sections and confirmed decisions, and refresh missing/stale module facts before broad rereading
 1. `$project-requirement-gate`
    - classify `fast / standard / controlled`, inspect before asking, and bind approval to a versioned requirement/item package
 2. `$project-codebase-onboarding`
@@ -204,17 +212,18 @@ In the target repository, the recommended sequence is:
 9. `bash .specify/scripts/bash/create-feature.sh <feature-slug> "<Feature Name>"`
 10. `$project-dev-core`
 11. `$project-stack-standards`
-12. `$project-frontend-standards` when the task is frontend
-13. `$project-frontend-js`, `$project-frontend-react`, `$project-frontend-vue`, or `$project-frontend-css` when the task needs that stack
-14. `$project-security-review` when the task touches auth, secrets, user input, APIs, databases, private data, or external effects
-15. `$project-code-generation`
-16. `$project-code-review`
-17. `$project-verification-loop` for meaningful, risky, shared, frontend, security, database, or cross-module changes
+12. `$project-backend-standards` when the task changes backend APIs, services, jobs, events, data, integrations, or runtime behavior; load only the matching references
+13. `$project-frontend-standards` when the task is frontend; load only the matching experience, data-flow, accessibility, performance, or testing references
+14. `$project-frontend-js`, `$project-frontend-react`, `$project-frontend-vue`, or `$project-frontend-css` when the task needs that stack
+15. `$project-security-review` when the task touches auth, secrets, user input, APIs, databases, private data, or external effects
+16. `$project-code-generation`
+17. `$project-code-review`
+18. `$project-verification-loop` for meaningful, risky, shared, frontend, backend, security, database, or cross-module changes
    - map every approved item and impact to evidence, failure, or residual risk
-18. `$project-test-and-report`
+19. `$project-test-and-report`
    - publish a versioned report and wait for user acceptance or revision
-19. `$project-session-summary`
-20. `$project-skill-upgrade-advisor` when the same friction repeats
+20. `$project-session-summary`
+21. `$project-skill-upgrade-advisor` when the same friction repeats
 
 ## Working Principles
 

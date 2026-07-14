@@ -35,7 +35,27 @@ const expectedSkillFiles = [
   "project-engineering-workflow/assets/template-root/.agents/skills/project-superpowers-router/references/ui-automation-contract.md",
   "project-engineering-workflow/assets/template-root/.agents/skills/project-superpowers-router/references/implementation-contract.md",
   "project-engineering-workflow/assets/template-root/.agents/skills/project-superpowers-router/references/review-contract.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-profile-router/SKILL.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-profile-router/references/profile-freshness.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-profile-router/references/decision-memory.md",
+  "project-engineering-workflow/assets/template-root/.specify/project-profile/.gitignore",
+  "project-engineering-workflow/assets/template-root/.specify/project-profile/profile.yaml",
+  "project-engineering-workflow/assets/template-root/.specify/project-profile/architecture.md",
+  "project-engineering-workflow/assets/template-root/.specify/project-profile/decision-memory.yaml",
+  "project-engineering-workflow/assets/template-root/.specify/scripts/project-profile.mjs",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/SKILL.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/architecture-boundaries.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/api-contracts.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/data-consistency.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/runtime-security-observability.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/testing-delivery.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/java-spring.md",
   "project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/SKILL.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/references/experience-states.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/references/architecture-data-flow.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/references/accessibility-responsive-i18n.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/references/performance-security-observability.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/references/testing-delivery.md",
   "project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-js/SKILL.md",
   "project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-react/SKILL.md",
   "project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-vue/SKILL.md",
@@ -48,8 +68,19 @@ const expectedSkillFiles = [
   "evaluations/skills-workflow/templates/quality-metrics.md",
   "evaluations/skills-workflow/templates/token-economics.md",
   "evaluations/skills-workflow/scripts/estimate-token-cost.mjs",
+  "evaluations/skills-workflow/scripts/evaluate-task-requirements.mjs",
   "evaluations/skills-workflow/cases/adaptive-confirmation.md",
-  "evaluations/skills-workflow/runs/2026-07-14-adaptive-confirmation-validation.md"
+  "evaluations/skills-workflow/cases/task-requirement-quality.json",
+  "evaluations/skills-workflow/runs/2026-07-14-adaptive-confirmation-validation.md",
+  "evaluations/skills-workflow/runs/2026-07-14-task-requirement-quality.md",
+  "evaluations/skills-workflow/runs/2026-07-14-role-workflows-validation.md",
+  "evaluations/skills-workflow/runs/2026-07-14-project-profile-validation.md",
+  "project-engineering-workflow/references/07-v0.2-release-pack/v0.6.0-release-notes.md",
+  "project-engineering-workflow/references/07-v0.2-release-pack/v0.6.0-release-checklist.md",
+  "project-engineering-workflow/references/08-upgrade-compatibility-pack/v0.5-to-v0.6-upgrade-manual.md",
+  "project-engineering-workflow/references/07-v0.2-release-pack/v0.5.0-release-notes.md",
+  "project-engineering-workflow/references/07-v0.2-release-pack/v0.5.0-release-checklist.md",
+  "project-engineering-workflow/references/08-upgrade-compatibility-pack/v0.4-to-v0.5-upgrade-manual.md"
 ];
 
 for (const file of expectedSkillFiles) {
@@ -78,7 +109,26 @@ const superpowersRouter = read("project-engineering-workflow/assets/template-roo
 const uiAutomationContract = read("project-engineering-workflow/assets/template-root/.agents/skills/project-superpowers-router/references/ui-automation-contract.md");
 const implementationContract = read("project-engineering-workflow/assets/template-root/.agents/skills/project-superpowers-router/references/implementation-contract.md");
 const reviewContract = read("project-engineering-workflow/assets/template-root/.agents/skills/project-superpowers-router/references/review-contract.md");
+const projectProfileRouter = read("project-engineering-workflow/assets/template-root/.agents/skills/project-profile-router/SKILL.md");
+const projectProfileFreshness = read("project-engineering-workflow/assets/template-root/.agents/skills/project-profile-router/references/profile-freshness.md");
+const projectDecisionMemoryGuide = read("project-engineering-workflow/assets/template-root/.agents/skills/project-profile-router/references/decision-memory.md");
+const projectProfile = read("project-engineering-workflow/assets/template-root/.specify/project-profile/profile.yaml");
+const projectArchitecture = read("project-engineering-workflow/assets/template-root/.specify/project-profile/architecture.md");
+const projectDecisionMemory = read("project-engineering-workflow/assets/template-root/.specify/project-profile/decision-memory.yaml");
+const projectProfileScript = read("project-engineering-workflow/assets/template-root/.specify/scripts/project-profile.mjs");
+const backend = read("project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/SKILL.md");
+const backendArchitecture = read("project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/architecture-boundaries.md");
+const backendApiContracts = read("project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/api-contracts.md");
+const backendDataConsistency = read("project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/data-consistency.md");
+const backendRuntime = read("project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/runtime-security-observability.md");
+const backendTesting = read("project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/testing-delivery.md");
+const backendJavaSpring = read("project-engineering-workflow/assets/template-root/.agents/skills/project-backend-standards/references/java-spring.md");
 const frontend = read("project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/SKILL.md");
+const frontendExperience = read("project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/references/experience-states.md");
+const frontendArchitecture = read("project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/references/architecture-data-flow.md");
+const frontendAccessibility = read("project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/references/accessibility-responsive-i18n.md");
+const frontendRuntime = read("project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/references/performance-security-observability.md");
+const frontendTesting = read("project-engineering-workflow/assets/template-root/.agents/skills/project-frontend-standards/references/testing-delivery.md");
 const security = read("project-engineering-workflow/assets/template-root/.agents/skills/project-security-review/SKILL.md");
 const verification = read("project-engineering-workflow/assets/template-root/.agents/skills/project-verification-loop/SKILL.md");
 const summary = read("project-engineering-workflow/assets/template-root/.agents/skills/project-session-summary/SKILL.md");
@@ -95,11 +145,24 @@ const scorecardTemplate = read("evaluations/skills-workflow/templates/scorecard.
 const qualityMetrics = read("evaluations/skills-workflow/templates/quality-metrics.md");
 const tokenEconomics = read("evaluations/skills-workflow/templates/token-economics.md");
 const tokenEstimator = read("evaluations/skills-workflow/scripts/estimate-token-cost.mjs");
+const taskRequirementEvaluator = read("evaluations/skills-workflow/scripts/evaluate-task-requirements.mjs");
+const taskRequirementCases = read("evaluations/skills-workflow/cases/task-requirement-quality.json");
 const validationRun = read("evaluations/skills-workflow/runs/2026-07-06-initial-validation.md");
 const adaptiveValidationRun = read("evaluations/skills-workflow/runs/2026-07-14-adaptive-confirmation-validation.md");
+const taskRequirementValidationRun = read("evaluations/skills-workflow/runs/2026-07-14-task-requirement-quality.md");
+const roleWorkflowValidationRun = read("evaluations/skills-workflow/runs/2026-07-14-role-workflows-validation.md");
+const projectProfileValidationRun = read("evaluations/skills-workflow/runs/2026-07-14-project-profile-validation.md");
+const projectProfileReleaseNotes = read("project-engineering-workflow/references/07-v0.2-release-pack/v0.6.0-release-notes.md");
+const projectProfileReleaseChecklist = read("project-engineering-workflow/references/07-v0.2-release-pack/v0.6.0-release-checklist.md");
+const projectProfileUpgradeManual = read("project-engineering-workflow/references/08-upgrade-compatibility-pack/v0.5-to-v0.6-upgrade-manual.md");
+const roleWorkflowReleaseNotes = read("project-engineering-workflow/references/07-v0.2-release-pack/v0.5.0-release-notes.md");
+const roleWorkflowReleaseChecklist = read("project-engineering-workflow/references/07-v0.2-release-pack/v0.5.0-release-checklist.md");
+const roleWorkflowUpgradeManual = read("project-engineering-workflow/references/08-upgrade-compatibility-pack/v0.4-to-v0.5-upgrade-manual.md");
 
 for (const required of [
   "$project-dev-core",
+  "$project-profile-router",
+  "$project-backend-standards",
   "$project-frontend-standards",
   "$project-security-review",
   "$project-verification-loop",
@@ -109,7 +172,7 @@ for (const required of [
   assertIncludes("project-engineering-workflow/assets/template-root/AGENTS.md", agents, required, "AGENTS workflow should route through required skills");
 }
 
-for (const required of ["fast", "standard", "controlled", "确认执行", "需求版本"]) {
+for (const required of ["fast", "standard", "controlled", "确认执行", "需求版本", "Reassess the lane after onboarding and impact analysis", "mark pre-execution gates `not_required`"]) {
   assertIncludes("project-requirement-gate", requirementGate, required, "Requirement gate should use adaptive, versioned confirmation");
 }
 
@@ -142,7 +205,7 @@ for (const required of ["验证报告 vN", "awaiting_user_acceptance", "确认�
   assertIncludes("project-test-and-report", testAndReport, required, "Final verification should wait for explicit user acceptance");
 }
 
-for (const required of ["task_lane:", "confirmation_gates:", "impact_assessment:", "scope_deltas:", "dissatisfaction_categories:"]) {
+for (const required of ["task_lane:", "confirmation_gates:", "confirmation_history:", "child_tasks:", "impact_assessment:", "scope_deltas:", "dissatisfaction_categories:"]) {
   assertIncludes("workflow-state-template", workflowStateTemplate, required, "Workflow state should persist adaptive confirmation state");
 }
 
@@ -157,6 +220,9 @@ for (const required of ["Fast Task", "Controlled Task", "Revision Prompt", "neve
 for (const required of [
   "project-security-review",
   "project-verification-loop",
+  "project-profile-router",
+  "project-backend-standards",
+  "project-frontend-standards",
   "references/06-ecc-benchmark.md"
 ]) {
   assertIncludes("project-engineering-workflow/SKILL.md", skill, required, "Main skill should document new workflow capabilities");
@@ -175,6 +241,18 @@ for (const required of [
 }
 
 for (const required of [
+  "const v050RoleWorkflowPaths",
+  "const v050RoleUpgradeRoutingPaths",
+  "const v060ProjectProfilePaths",
+  "const v060ProjectProfileRoutingPaths",
+  '"0.6.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths]',
+  '"0.5.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths]',
+  "...v050RoleWorkflowPaths,",
+  "...v050RoleUpgradeRoutingPaths,",
+  "...v060ProjectProfilePaths,",
+  "...v060ProjectProfileRoutingPaths,",
+  '".specify/scripts/bash/validate-workflow.sh"',
+  'minVersion: "0.5.0"',
   "const v040ProgressiveReferencePaths",
   '"0.3.1": [...v020OptionalPaths, ...branchReleaseOptionalPaths]',
   '"0.4.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths]',
@@ -187,6 +265,10 @@ for (const required of [
 }
 
 for (const required of [
+  "v050_role_workflow_paths",
+  "0.5.0)",
+  "v060_project_profile_paths",
+  "0.6.0)",
   "v040_progressive_reference_paths",
   "0.3.0|0.3.1)",
   "0.4.0)",
@@ -198,6 +280,28 @@ for (const required of [
 
 assertIncludes("project-dev-core", devCore, "KISS", "Dev core should include baseline coding quality rules");
 assertIncludes("project-dev-core", devCore, "Validate inputs at system boundaries", "Dev core should include boundary validation");
+assertIncludes("project-dev-core", devCore, "$project-backend-standards", "Dev core should route backend work into the backend role workflow");
+for (const needle of ["status --json", "fresh", "missing", "stale", "never task approval"]) {
+  assertIncludes("project-profile-router", projectProfileRouter, needle, "Project Profile router should stay a lightweight first gate");
+}
+for (const needle of ["Initial Analysis", "Freshness Rules", "source of truth overrides Profile", "Refresh only affected sections", "capture --json"]) {
+  assertIncludes("project profile freshness", projectProfileFreshness, needle, "Project Profile freshness should be evidence-driven and incremental");
+}
+for (const needle of ["What Can Be Reused", "What Must Never Be Reused As Approval", "Retrieve by module", "cannot silently approve"]) {
+  assertIncludes("project decision memory", projectDecisionMemoryGuide, needle, "Project decision memory should reduce repeated questions without reusing authority");
+}
+for (const needle of ["status: pending_analysis", "detected_languages:", "ownership_boundaries:", "source_of_truth:", "freshness:"]) {
+  assertIncludes("project profile data", projectProfile, needle, "Project Profile should hold structured reusable project facts");
+}
+for (const needle of ["Module Map", "Critical Flows", "Source Of Truth", "Unknowns And Refresh Triggers"]) {
+  assertIncludes("project architecture", projectArchitecture, needle, "Project architecture summary should expose reusable flows and unknowns");
+}
+for (const needle of ["entries:", "never_reuse_as_approval:", "destructive_or_irreversible_actions", "final_user_acceptance"]) {
+  assertIncludes("project decision memory data", projectDecisionMemory, needle, "Project decision memory data should preserve approval boundaries");
+}
+for (const needle of ["discover(root)", "compareEvidence", "changedEvidence", "@directory-structure", 'options.command === "capture"']) {
+  assertIncludes("project profile script", projectProfileScript, needle, "Project Profile script should provide deterministic status and capture evidence");
+}
 assertIncludes("project-memory-router", memoryRouter, "references/memory-governance.md", "Memory router should keep detailed policy behind progressive disclosure");
 assertIncludes("project-memory-router", memoryRouter, "references/memory-data-roles.md", "Memory router should link data roles as a scoped reference");
 assertIncludes("project-memory-router", memoryRouter, "references/memory-retention-retrieval.md", "Memory router should link retention/retrieval as a scoped reference");
@@ -221,12 +325,52 @@ assertIncludes("project-superpowers-router implementation reference", implementa
 assertIncludes("project-superpowers-router review reference", reviewContract, "Review Contract", "Review reference should exist as a separate contract");
 assertIncludes("project-superpowers-router review reference", reviewContract, "accepted` means the direction is approved", "Review reference should define accepted proposal closure semantics");
 const frontendNeedles = [
-  "Make controls visibly responsive",
+  "Make controls responsive",
   "Do not add analytics",
   "vertical fragments"
 ];
 for (const needle of frontendNeedles) {
   assertIncludes("project-frontend-standards", frontend, needle, "Frontend standards should guard UI interaction and privacy");
+}
+
+for (const needle of ["Adaptive Workflow", "Reference Router", "Do not read every reference by default", "references/java-spring.md"]) {
+  assertIncludes("project-backend-standards", backend, needle, "Backend standards should stay an adaptive role entry");
+}
+for (const needle of ["business capability", "transaction", "partial success"]) {
+  assertIncludes("backend architecture", backendArchitecture, needle, "Backend architecture reference should preserve ownership and failure boundaries");
+}
+for (const needle of ["Contract First", "idempotency", "compatibility window", "Events And Webhooks"]) {
+  assertIncludes("backend API contracts", backendApiContracts, needle, "Backend contract reference should cover public and message contracts");
+}
+for (const needle of ["source of truth", "query plans", "expand -> migrate/backfill -> verify -> switch -> contract", "Cache And Derived Stores"]) {
+  assertIncludes("backend data consistency", backendDataConsistency, needle, "Backend data reference should cover correctness and safe migration");
+}
+for (const needle of ["Authenticate identity and authorize", "bounded attempts", "Structured logs", "Measure representative latency"]) {
+  assertIncludes("backend runtime", backendRuntime, needle, "Backend runtime reference should cover resilience, security, observability, and performance");
+}
+for (const needle of ["Risk-To-Evidence Matrix", "Concurrency/idempotency", "post-deploy signals", "Map each protected invariant"]) {
+  assertIncludes("backend testing", backendTesting, needle, "Backend testing reference should map risk to delivery evidence");
+}
+for (const needle of ["constructor injection", "@Transactional", "MyBatis", "Dubbo", "REST Assured"]) {
+  assertIncludes("Java Spring profile", backendJavaSpring, needle, "Java/Spring profile should preserve JVM stack rules");
+}
+for (const needle of ["Adaptive Workflow", "Reference Router", "Do not read every reference by default", "experience contract"]) {
+  assertIncludes("project-frontend-standards", frontend, needle, "Frontend standards should stay an adaptive role entry");
+}
+for (const needle of ["Experience Contract", "observable result", "optimistic", "failed submit"]) {
+  assertIncludes("frontend experience", frontendExperience, needle, "Frontend experience reference should cover complete interaction states");
+}
+for (const needle of ["server", "URL/navigation", "stale responses", "shared abstraction"]) {
+  assertIncludes("frontend architecture", frontendArchitecture, needle, "Frontend architecture reference should preserve state and async ownership");
+}
+for (const needle of ["visible focus", "stable grid/flex tracks", "mixed CJK/Latin", "Keyboard-walk"]) {
+  assertIncludes("frontend accessibility", frontendAccessibility, needle, "Frontend accessibility reference should cover responsive and language risks");
+}
+for (const needle of ["Measure before optimizing", "Authorization must be enforced by the backend", "third-party scripts", "key journeys"]) {
+  assertIncludes("frontend runtime", frontendRuntime, needle, "Frontend runtime reference should cover performance, privacy, and diagnostics");
+}
+for (const needle of ["Risk-To-Evidence Matrix", "Start the actual app", "screenshots or a concise UI report", "static checks alone"]) {
+  assertIncludes("frontend testing", frontendTesting, needle, "Frontend testing reference should require visible risk-based evidence");
 }
 
 for (const needle of ["Secrets", "Input", "Authorization", "External effects"]) {
@@ -240,6 +384,7 @@ for (const needle of ["Build or compile", "Typecheck", "Diff Review", "Do not in
 assertIncludes("project-session-summary", summary, "Friction Signals", "Session summary should capture upgrade signals");
 assertIncludes("project-skill-upgrade-advisor", advisor, "confidence", "Upgrade advisor should reason about confidence");
 assertIncludes("project-skill-upgrade-advisor", advisor, "project-local", "Upgrade advisor should prefer project-local updates");
+assertIncludes("project-skill-upgrade-advisor", advisor, "Reopen and correct the affected `ITEM-*` first", "Upgrade advisor should repair current work before framework evolution");
 assertIncludes("docs/Codex团队开发说明.md", codexDoc, "project-verification-loop", "Codex doc should include the current verification workflow");
 assertIncludes("docs/Codex团队开发说明.md", codexDoc, "project-skill-upgrade-advisor", "Codex doc should include skill upgrade routing");
 assertIncludes("docs/ClaudeCode团队开发说明.md", claudeDoc, "hooks", "Claude Code doc should explain hook boundaries");
@@ -311,11 +456,32 @@ for (const needle of [
   "fast-task",
   "ordinary-dev",
   "frontend",
+  "backend",
+  "frontend-react",
+  "profile-refresh",
   "security",
   "skill_references",
   "--enforce"
 ]) {
   assertIncludes("scripts/estimate-token-cost.mjs", tokenEstimator, needle, "Token estimator should report budget and bundle costs");
+}
+
+for (const needle of ["--baseline-root", "behaviorMeasured", "failedRequirements", "--enforce"]) {
+  assertIncludes("scripts/evaluate-task-requirements.mjs", taskRequirementEvaluator, needle, "Task requirement evaluator should support honest candidate/baseline enforcement");
+}
+
+for (const needle of [
+  "fast-visible-copy-fix",
+  "controlled-monitoring-migration",
+  "scope-expansion-after-approval",
+  "security-remote-skill-loading",
+  "dissatisfaction-history-lost",
+  "backend-api-data-change",
+  "frontend-journey-layout",
+  "project-profile-reuse-refresh",
+  '"behaviorMeasured": false'
+]) {
+  assertIncludes("cases/task-requirement-quality.json", taskRequirementCases, needle, "Task requirement suite should cover representative workflow scenarios without claiming live behavior");
 }
 
 assertIncludes("templates/scorecard.md", scorecardTemplate, "templates/quality-metrics.md", "Scorecard should point to quality metrics");
@@ -327,6 +493,33 @@ assertIncludes("runs/2026-07-06-initial-validation.md", validationRun, "router s
 assertIncludes("runs/2026-07-14-adaptive-confirmation-validation.md", adaptiveValidationRun, "real `0.3.1` starter", "Adaptive validation should test compatibility from the real previous starter");
 assertIncludes("runs/2026-07-14-adaptive-confirmation-validation.md", adaptiveValidationRun, "existing `specs/` sentinel remained untouched", "Adaptive validation should verify upgrade safety");
 assertIncludes("runs/2026-07-14-adaptive-confirmation-validation.md", adaptiveValidationRun, "No provider-level A/B usage data", "Adaptive validation should disclose remaining measurement gaps");
+assertIncludes("runs/2026-07-14-task-requirement-quality.md", taskRequirementValidationRun, "86.3 / 100", "Task requirement validation should record the pre-fix score rather than hiding discovered gaps");
+assertIncludes("runs/2026-07-14-task-requirement-quality.md", taskRequirementValidationRun, "+84.7", "Task requirement validation should record the baseline delta");
+assertIncludes("runs/2026-07-14-task-requirement-quality.md", taskRequirementValidationRun, "does not prove live model adherence", "Task requirement validation should disclose the contract-coverage boundary");
+for (const needle of ["100 / 100 (A)", "real Git-exported `0.4.0`", "2,148", "4,643", "4,651", "live model adherence"]) {
+  assertIncludes("runs/2026-07-14-role-workflows-validation.md", roleWorkflowValidationRun, needle, "Role workflow validation should record quality, cost, compatibility, and residual evidence");
+}
+for (const needle of ["project-backend-standards", "progressive frontend references", "below the 700-token", "best-in-class claims"]) {
+  assertIncludes("v0.5.0 release notes", roleWorkflowReleaseNotes, needle, "Role workflow release notes should state capability, cost, and evidence boundaries");
+}
+for (const needle of ["Blind live backend task A/B", "Blind live frontend task A/B", "Remote publish receives separate explicit approval"]) {
+  assertIncludes("v0.5.0 release checklist", roleWorkflowReleaseChecklist, needle, "Role workflow release checklist should leave live and remote gates explicit");
+}
+for (const needle of ["v0.4.x To v0.5.x", "project facts override generic role references", "Run CLI Doctor and shell Doctor", "historical `specs/` artifacts"]) {
+  assertIncludes("v0.4 to v0.5 upgrade manual", roleWorkflowUpgradeManual, needle, "Role workflow upgrade manual should preserve explicit compatibility and validation steps");
+}
+for (const needle of ["missing", "fresh", "stale", "2,480", "4,754", "never reusable decision memory"]) {
+  assertIncludes("runs/2026-07-14-project-profile-validation.md", projectProfileValidationRun, needle, "Project Profile validation should record lifecycle, cost, and approval boundaries");
+}
+for (const needle of ["project-profile-router", "evidence fingerprints", "`0.5.0` projects remain valid", "Profile refresh does not silently change business code"]) {
+  assertIncludes("v0.6.0 release notes", projectProfileReleaseNotes, needle, "Project Profile release notes should state reuse, compatibility, and safety");
+}
+for (const needle of ["Profile starts as `pending_analysis`", "missing", "fresh", "stale", "Provider input-token comparison"]) {
+  assertIncludes("v0.6.0 release checklist", projectProfileReleaseChecklist, needle, "Project Profile release checklist should cover lifecycle and live evidence");
+}
+for (const needle of ["v0.5.x To v0.6.x", "first development task", "Refresh only Profile sections", "cannot approve permissions"]) {
+  assertIncludes("v0.5 to v0.6 upgrade manual", projectProfileUpgradeManual, needle, "Project Profile upgrade manual should define first analysis, reuse, and authority boundaries");
+}
 
 for (const [relativePath, text] of [
   ["project-engineering-workflow/assets/template-root/.specify/memory/session-history.md", sessionHistory],

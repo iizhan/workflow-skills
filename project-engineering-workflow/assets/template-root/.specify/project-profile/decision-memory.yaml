@@ -1,0 +1,31 @@
+schema_version: 1
+updated_at: null
+
+entries: []
+
+# Project-shared, confirmed, reusable choices only.
+# Example entry fields:
+# - id: DECISION-001
+#   title: ""
+#   value: ""
+#   scope: project | module | task_type
+#   modules: []
+#   tags: []
+#   source: ""
+#   owner: ""
+#   confirmed_at: ""
+#   rationale: ""
+#   alternatives: []
+#   confidence: high
+#   activation_conditions: []
+#   invalidation_conditions: []
+#   status: active | superseded | rejected | archived
+
+never_reuse_as_approval:
+  - permissions_or_credentials
+  - destructive_or_irreversible_actions
+  - remote_write_publish_push_or_deploy
+  - requirement_impact_or_plan_confirmation
+  - scope_expansion
+  - release_readiness
+  - final_user_acceptance

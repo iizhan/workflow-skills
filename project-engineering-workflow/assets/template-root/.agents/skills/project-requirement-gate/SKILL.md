@@ -18,12 +18,14 @@ Classify by uncertainty and impact, not word count. "直接做" may skip low-ris
 ## Workflow
 
 1. Restate the Chinese goal and visible outcome.
-2. Inspect code/config/logs/docs before asking; ask only when ambiguity changes outcome, scope, data, permission, compatibility, delivery, or acceptance. Stop on material ambiguity.
-3. Select a lane and create versioned `ITEM-*` with outcome and acceptance.
-4. Record constraints, assumptions, non-goals, and dependencies.
-5. For standard/controlled work, obtain `$project-scope-impact-guard` output and publish `需求与事项 vN` with `确认执行`, `修改事项`, `缩小范围`, or `补充需求`.
-6. For controlled work, require a second confirmation of child tasks, dependencies, validation, and rollback.
-7. Bind approval to the artifact version. Reconfirm only changed items/impact; an earlier unscoped "可以" does not approve expansion.
+2. Load the fresh Project Profile and matched decisions. Inspect code/config/logs/docs before asking, limited to missing or changed context; ask only when ambiguity changes outcome, scope, data, permission, compatibility, delivery, or acceptance. Stop on material ambiguity.
+3. Reassess the lane after onboarding and impact analysis; record the reason for any change. Escalate when discovered uncertainty or impact requires it.
+4. Select a lane and create versioned `ITEM-*` with outcome and acceptance.
+5. Record constraints, assumptions, non-goals, and dependencies.
+6. For fast work, mark pre-execution gates `not_required`, record the restated item, and proceed. Final user acceptance remains separate after verification.
+7. For standard/controlled work, obtain `$project-scope-impact-guard` output and publish `需求与事项 vN` with `确认执行`, `修改事项`, `缩小范围`, or `补充需求`.
+8. For controlled work, require a second confirmation of child tasks, dependencies, validation, and rollback.
+9. Bind approval to the artifact version. Reconfirm only changed items/impact; an earlier unscoped "可以" does not approve expansion.
 
 ## Output Format
 

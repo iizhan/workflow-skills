@@ -1,0 +1,63 @@
+schema_version: 1
+profile_version: 1
+status: pending_analysis
+last_analyzed_at: null
+analysis_scope: project
+
+project:
+  name: "__PROJECT_NAME__"
+  application_roots:
+    - "__APP_PATH__"
+  declared_stack: "__STACK_NAME__"
+  detected_languages: []
+  package_managers: []
+  frameworks: []
+  runtimes: []
+
+architecture:
+  styles: []
+  modules: []
+  entry_points: []
+  request_or_event_flows: []
+  ownership_boundaries: []
+  data_stores: []
+  caches_indexes: []
+  messaging_jobs: []
+  external_integrations: []
+
+source_of_truth:
+  business_rules: []
+  api_contracts: []
+  data_schema_migrations: []
+  configuration: []
+  generated_outputs:
+    - "__ENV_OUTPUT__"
+
+commands:
+  install: []
+  build: []
+  typecheck: []
+  lint: []
+  test:
+    - "__TEST_COMMAND__"
+  integration: []
+  run: []
+
+engineering_conventions:
+  naming: []
+  layering: []
+  state_or_transaction_ownership: []
+  errors_logging_observability: []
+  security_privacy: []
+  testing_delivery: []
+  review_red_lines: []
+
+evidence:
+  source_paths: []
+  unknowns: []
+  confidence: low
+
+freshness:
+  evidence_state: missing
+  last_checked_at: null
+  changed_evidence: []

@@ -8,6 +8,9 @@ Use it after changing workflow skills, template rules, session memory behavior, 
 
 - Default development rules trigger before implementation.
 - Frontend work routes through the generic frontend layer and stack-specific skill.
+- Backend work routes through the backend role entry and only the contract/data/runtime references required by the changed path.
+- Frontend work loads experience, data-flow, accessibility, performance, and testing references progressively rather than as one permanent context block.
+- Every development task checks the project Profile first; fresh context is reused and only stale or uncovered evidence triggers scoped onboarding.
 - Security-sensitive work routes through security review.
 - Meaningful changes route through staged verification.
 - Sessions produce reusable memory and upgrade signals.
@@ -84,6 +87,21 @@ For CI-style failure on hard budget violations, run:
 node evaluations/skills-workflow/scripts/estimate-token-cost.mjs --enforce
 ```
 
+### 6. Task Requirement Contract A/B
+
+Use the structured task suite to verify that workflow contracts cover fast, standard, controlled, ambiguous, scope-delta, backend, frontend, security, and dissatisfaction scenarios:
+
+```bash
+node evaluations/skills-workflow/scripts/evaluate-task-requirements.mjs \
+  --workflow-root project-engineering-workflow \
+  --baseline-root /path/to/previous/project-engineering-workflow \
+  --label candidate \
+  --baseline-label baseline \
+  --enforce
+```
+
+This is a deterministic contract-coverage check. It catches missing or contradictory workflow rules, but it does not prove live model adherence or real task outcome quality.
+
 ## Success Criteria
 
 The workflow is improved when:
@@ -91,6 +109,8 @@ The workflow is improved when:
 - required skills are triggered without user reminders
 - irrelevant skills are not loaded for small tasks
 - security, verification, and frontend state are caught earlier
+- backend contracts, data invariants, runtime failures, and rollout evidence are caught before delivery
+- project stack and architecture are not rediscovered on every task, while stale evidence cannot be silently reused
 - candidate quality score is at least 80 / 100
 - candidate beats baseline by at least 10 points
 - small-task token ratio is normally <= 1.20 versus baseline
@@ -125,6 +145,8 @@ Recommended minimum before calling a workflow upgrade successful:
 - `cases/security-sensitive.md`: security-sensitive task.
 - `cases/harness-parity.md`: Codex vs Claude Code workflow distinction.
 - `cases/adaptive-confirmation.md`: fast/controlled routing, impact scope, versioned confirmation, acceptance, and dissatisfaction handling.
+- `cases/task-requirement-quality.json`: structured multi-scenario requirements and failure signals.
+- `runs/2026-07-14-project-profile-validation.md`: Profile lifecycle, reuse, freshness, compatibility, and cost evidence.
 - `templates/run-record.md`: manual run record.
 - `templates/scorecard.md`: scoring rubric.
 - `templates/quality-metrics.md`: quality score, bands, and regression signals.
@@ -132,4 +154,5 @@ Recommended minimum before calling a workflow upgrade successful:
 - `scripts/check-contract.mjs`: static contract check.
 - `scripts/estimate-token-cost.mjs`: static token-cost estimator for skills, docs, and references.
   It reports individual skill budgets, progressive-disclosure references, bundle costs, and advisory/enforced budget status.
+- `scripts/evaluate-task-requirements.mjs`: deterministic candidate/baseline task-requirement contract comparison.
 - `runs/`: saved evaluation results over time.

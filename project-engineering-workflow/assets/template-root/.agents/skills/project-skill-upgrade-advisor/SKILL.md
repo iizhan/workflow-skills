@@ -17,16 +17,20 @@ Use this skill when repeated sessions suggest the workflow itself should improve
 
 ## Workflow
 
-1. Identify the repeated behavior or missing capability.
-2. Connect it to evidence from prior sessions or project artifacts.
-3. Classify the dissatisfaction or friction and estimate confidence:
+1. Reopen and correct the affected `ITEM-*` first when the task remains wrong or incomplete.
+2. Verify the task-level correction and record which confirmed version failed.
+3. Only then consider workflow evolution, unless the user explicitly requested analysis without task repair.
+4. Identify the repeated behavior or missing capability.
+5. Connect it to evidence from prior sessions or project artifacts.
+6. Classify the dissatisfaction or friction and estimate confidence:
    - `low`: one signal or weak evidence
    - `medium`: repeated twice or supported by a concrete artifact
    - `high`: repeated across multiple sessions or caused real rework
-4. Propose the smallest useful skill update.
-5. Decide whether the fix belongs in `SKILL.md`, a reference file, a script, or a template.
-6. Add one entry to `.specify/memory/skill-upgrade-backlog.md`.
-7. If approval is needed, stop and ask before changing the skill.
+7. Use the shared dissatisfaction categories from `$project-session-summary` rather than inventing a new taxonomy.
+8. Propose the smallest useful skill update.
+9. Decide whether the fix belongs in `SKILL.md`, a reference file, a script, or a template.
+10. Add one entry to `.specify/memory/skill-upgrade-backlog.md`.
+11. If approval is needed, stop and ask before changing the skill.
 
 ## Upgrade Boundaries
 

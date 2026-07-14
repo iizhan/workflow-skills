@@ -3,7 +3,7 @@
 本项目的 AI 协作架构可以理解为：
 
 ```text
-spec-kit + Memory Router + Evolution Router + Branch/Release Router + Superpowers + GSD + gstack + project-local skills
+spec-kit + Project Profile + Frontend/Backend Role Workflows + Memory Router + Evolution Router + Branch/Release Router + Superpowers + GSD + gstack + project-local skills
 ```
 
 更准确地说，这不是五套流程并列运行，而是用 project-local skills 把不同能力接入同一套项目规则。
@@ -16,10 +16,12 @@ spec-kit + Memory Router + Evolution Router + Branch/Release Router + Superpower
 
 ```mermaid
 flowchart TD
-  A["AGENTS.md / constitution"] --> B["Task Lane + Requirement Gate"]
+  A["AGENTS.md / constitution"] --> P0["Project Profile Router"]
+  P0 --> B["Task Lane + Requirement Gate"]
   B --> C["Codebase Onboarding"]
   C --> D["Versioned Scope + Impact Guard"]
   D --> E["Work Items + Child Tasks + Confirmation"]
+  E --> T["Frontend / Backend Role Router"]
   E --> F["Superpowers Router"]
   E --> P["Branch / Release Router"]
   E --> Q["Evolution Router"]
@@ -28,7 +30,8 @@ flowchart TD
   F --> I["gstack: role review"]
   E --> R["Memory Router"]
   P --> S["feature/* -> release/* -> tag -> merge main"]
-  G --> J["Code Generation"]
+  T --> J["Code Generation"]
+  G --> J
   H --> J
   I --> J
   S --> J
@@ -68,7 +71,7 @@ flowchart TD
 - `quickstart.md`: 验证或使用入口
 - `checklists/delivery.md`: 交付检查
 - `workflow-state.yaml`: 长任务、能力路由、角色评审和恢复状态
-- `workflow-state.yaml`: 同时保存任务通道、需求/影响/计划/验证版本、确认门禁、事项、影响维度和范围变化
+- `workflow-state.yaml`: 同时保存任务通道及变化历史、需求/影响/计划/验证版本、确认门禁与历史、事项、子任务、影响维度和范围变化
 - `memory-policy.md`: 记忆分域、保留期、检索和写入确认规则
 - `delivery-summary.md`: 面向用户的标准中文交付总结
 - `task-reflection.md`: 每次有意义任务结束后的固定复盘输出
@@ -118,7 +121,18 @@ flowchart TD
 - `GSD` 负责长任务编排，例如多轮任务、里程碑、上下文恢复、状态续航。
 - `gstack` 负责角色化判断，例如 PM、设计、工程、QA、发布、复盘。
 
-### 6. 分支与发布层
+### 6. 研发角色层
+
+`project-stack-standards` 保存项目 Profile，前端和后端 Workflow 负责把同一条交付主链适配到不同研发事实。
+
+`project-profile-router` 负责首次项目认知和后续新鲜度判断：它把技术栈、目录、架构、关键链路、配置真值、命令和已确认项目决策保存到 `.specify/project-profile/`，用证据指纹决定是否需要增量刷新。
+
+- `project-backend-standards`：追踪请求/任务/事件到数据与副作用，按架构、接口、数据、运行时、安全、可观测性、测试和 Java/Spring 信号加载引用。
+- `project-frontend-standards`：追踪用户旅程和界面状态，按体验、数据流、无障碍/响应式/i18n、性能/安全/可观测性和可见验证信号加载引用。
+- 两条 Workflow 都只加载命中的 reference。全栈任务可以同时进入两个入口，但不能默认读取两个完整角色包。
+- 项目 Profile 优先于通用 reference；角色流程需要记录加载了什么以及为什么。
+
+### 7. 分支与发布层
 
 `project-branch-release` 负责把 git 分支流和发布动作纳入项目规则。
 
@@ -133,7 +147,7 @@ flowchart TD
 
 - `main -> feature/<feature-slug> -> release/<version> -> v<version> -> merge main`
 
-### 7. 适配层
+### 8. 适配层
 
 `.agents/skills` 是项目本地适配层。
 
@@ -145,10 +159,13 @@ flowchart TD
 - `project-superpowers-router`: 所有增强能力的统一入口。
 - `project-gsd-router`: 长任务和状态续航入口。
 - `project-gstack-router`: 角色化判断入口。
+- `project-backend-standards`: 后端研发角色入口。
+- `project-frontend-standards`: 前端研发角色入口。
+- `project-profile-router`: 项目技术栈、架构摘要、决策记忆和证据新鲜度入口。
 
 这个层的作用是把外部方法变成项目可控的本地流程，而不是让外部方法绕过项目规则。
 
-### 8. 收口层
+### 9. 收口层
 
 实现、审查和验证仍由项目自己的 skills 收口。
 
@@ -159,6 +176,7 @@ flowchart TD
 ## 路由原则
 
 - 普通小改动走基础 workflow。
+- 后端表面进入 `project-backend-standards`，前端表面进入 `project-frontend-standards`；只加载获批影响对应的 references。
 - 需要工具、自动化、资产生成或外部能力时走 `project-superpowers-router`。
 - 多轮、多天、上下文容易丢失的任务再走 `project-gsd-router`。
 - 产品、设计、工程、QA、发布等角色判断再走 `project-gstack-router`。

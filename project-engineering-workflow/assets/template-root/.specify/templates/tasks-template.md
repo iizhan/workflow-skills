@@ -3,11 +3,11 @@
 **功能标识**: `[FEATURE SLUG]`  
 **日期**: [DATE]
 **关联计划版本**: v1
-**确认状态**: 待确认
+**确认状态**: fast: not_required / standard: inherited_or_pending / controlled: pending_confirmation
 
 ## 1. 准备阶段
 
-- [ ] 完成需求确认
+- [ ] 完成需求确认（fast 为已复述并记录，无执行前确认）
 - [ ] 完成代码库摸底
 - [ ] 完成范围锁定
 - [ ] 完成技术方案
