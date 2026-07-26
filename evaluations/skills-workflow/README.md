@@ -140,11 +140,14 @@ Recommended minimum before calling a workflow upgrade successful:
 
 ## Files
 
+- `test-plan.md`: layered test matrix, release gates, runtime replay evidence requirements, and the current known token-budget blocker.
+
 - `cases/dev-core.md`: general development task.
 - `cases/frontend-interaction.md`: frontend interaction/layout task.
 - `cases/security-sensitive.md`: security-sensitive task.
 - `cases/harness-parity.md`: Codex vs Claude Code workflow distinction.
 - `cases/adaptive-confirmation.md`: fast/controlled routing, impact scope, versioned confirmation, acceptance, and dissatisfaction handling.
+- `cases/formal-confirmation.md`: design, task, impact, acceptance/self-test confirmation package and scope-delta pause.
 - `cases/task-requirement-quality.json`: structured multi-scenario requirements and failure signals.
 - `runs/2026-07-14-project-profile-validation.md`: Profile lifecycle, reuse, freshness, compatibility, and cost evidence.
 - `templates/run-record.md`: manual run record.
