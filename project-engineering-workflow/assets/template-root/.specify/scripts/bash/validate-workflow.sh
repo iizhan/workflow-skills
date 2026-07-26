@@ -96,11 +96,23 @@ v060_optional_paths=(
   ".agents/skills/project-profile-router/SKILL.md"
   ".agents/skills/project-profile-router/references/profile-freshness.md"
   ".agents/skills/project-profile-router/references/decision-memory.md"
-  ".specify/project-profile/.gitignore"
+  ".specify/project-profile/gitignore"
   ".specify/project-profile/profile.yaml"
   ".specify/project-profile/architecture.md"
   ".specify/project-profile/decision-memory.yaml"
   ".specify/scripts/project-profile.mjs"
+)
+
+v080_workflow_architecture_paths=(
+  ".agents/skills/project-workflow-router/SKILL.md"
+  ".agents/skills/project-workflow-router/references/workflow-manifest-contract.md"
+  ".skill-os/workflow-registry.yaml"
+  ".skill-os/workflows/foundation-engineering-governance/workflow.yaml"
+  ".skill-os/workflows/role-frontend-engineering/workflow.yaml"
+  ".skill-os/workflows/role-backend-engineering/workflow.yaml"
+  ".skill-os/workflows/scenario-design-to-frontend/workflow.yaml"
+  ".skill-os/workflows/scenario-design-to-api/workflow.yaml"
+  ".skill-os/workflows/integration-swagger-to-frontend/workflow.yaml"
 )
 
 missing=0
@@ -144,6 +156,12 @@ case "$declared_workflow_version" in
     ;;
   0.6.0)
     version_required_paths=("${v060_optional_paths[@]}")
+    ;;
+  0.7.0)
+    version_required_paths=("${v060_optional_paths[@]}" ".specify/templates/design-template.md")
+    ;;
+  0.8.0)
+    version_required_paths=("${v060_optional_paths[@]}" ".specify/templates/design-template.md" "${v080_workflow_architecture_paths[@]}")
     ;;
   *)
     if [[ -n "$declared_workflow_version" ]]; then
@@ -191,6 +209,17 @@ if [[ -n "$declared_workflow_version" ]]; then
     check_snippet ".specify/project-profile/decision-memory.yaml" "never_reuse_as_approval:" "Decision approval boundary"
     check_snippet ".specify/scripts/project-profile.mjs" "changedEvidence" "Profile evidence fingerprint"
     check_snippet ".specify/templates/workflow-state-template.yaml" "project_profile:" "Profile workflow state"
+  fi
+
+  if [[ "$declared_workflow_version" == "0.8.0" ]]; then
+    check_snippet "AGENTS.md" '$project-workflow-router' "Workflow router entry"
+    check_snippet "AGENTS.md" "select at most one primary scenario" "Primary Workflow boundary"
+    check_snippet ".agents/skills/project-workflow-router/SKILL.md" "Loop Engineering Boundary" "Loop boundary"
+    check_snippet ".agents/skills/project-workflow-router/references/workflow-manifest-contract.md" "Scenario Loop Run" "Loop declaration contract"
+    check_snippet ".skill-os/workflow-registry.yaml" "legacy_declarations: \"read_only\"" "Legacy declaration safety"
+    check_snippet ".skill-os/workflows/scenario-design-to-frontend/workflow.yaml" "max_iterations: 3" "Bounded frontend Loop"
+    check_snippet ".skill-os/workflows/scenario-design-to-api/workflow.yaml" "on_scope_change: \"require_reconfirmation\"" "API scope confirmation"
+    check_snippet ".skill-os/workflows/integration-swagger-to-frontend/workflow.yaml" "on_budget_exhausted: \"needs_user_decision\"" "Integration budget stop"
   fi
 fi
 

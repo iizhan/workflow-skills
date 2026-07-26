@@ -1,0 +1,24 @@
+schema_version: "1.0.0"
+workflow_id: "wf_legacy_delivery"
+version: "1.0.0"
+name: "Legacy delivery workflow"
+status: "active"
+entrypoints:
+  task_types: [development]
+inputs: []
+outputs: []
+nodes:
+  - id: start
+    kind: start
+  - id: implementation
+    kind: skill
+    skill_ref: project-code-generation
+  - id: finish
+    kind: end
+edges:
+  - id: start-to-implementation
+    from: start
+    to: implementation
+  - id: implementation-to-finish
+    from: implementation
+    to: finish

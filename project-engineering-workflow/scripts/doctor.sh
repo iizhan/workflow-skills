@@ -2,6 +2,7 @@
 set -euo pipefail
 
 TARGET_DIR="${1:-}"
+PACKAGE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -z "$TARGET_DIR" ]]; then
   echo "Usage: bash scripts/doctor.sh /absolute/path/to/target-repo" >&2
@@ -49,7 +50,7 @@ core_required_paths=(
 )
 
 current_version_marker=".specify/workflow-version.txt"
-current_template_workflow_version="$(cat "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/assets/template-root/$current_version_marker")"
+current_template_workflow_version="$(cat "$PACKAGE_ROOT/assets/template-root/$current_version_marker")"
 
 v020_optional_paths=(
   ".agents/skills/project-memory-router/SKILL.md"
@@ -113,14 +114,34 @@ v060_project_profile_paths=(
   ".agents/skills/project-profile-router/SKILL.md"
   ".agents/skills/project-profile-router/references/profile-freshness.md"
   ".agents/skills/project-profile-router/references/decision-memory.md"
-  ".specify/project-profile/.gitignore"
+  ".specify/project-profile/gitignore"
   ".specify/project-profile/profile.yaml"
   ".specify/project-profile/architecture.md"
   ".specify/project-profile/decision-memory.yaml"
   ".specify/scripts/project-profile.mjs"
 )
 
-upgrade_optional_paths=("${v020_optional_paths[@]}" "${branch_release_optional_paths[@]}" "${v040_progressive_reference_paths[@]}" "${v050_role_workflow_paths[@]}" "${v060_project_profile_paths[@]}")
+v070_formal_confirmation_paths=(
+  ".specify/templates/design-template.md"
+)
+
+v080_workflow_architecture_paths=(
+  ".agents/skills/project-workflow-router/SKILL.md"
+  ".agents/skills/project-workflow-router/references/workflow-manifest-contract.md"
+  ".skill-os/workflow-registry.yaml"
+  ".skill-os/workflows/foundation-engineering-governance/workflow.yaml"
+  ".skill-os/workflows/role-frontend-engineering/workflow.yaml"
+  ".skill-os/workflows/role-backend-engineering/workflow.yaml"
+  ".skill-os/workflows/scenario-design-to-frontend/workflow.yaml"
+  ".skill-os/workflows/scenario-design-to-api/workflow.yaml"
+  ".skill-os/workflows/integration-swagger-to-frontend/workflow.yaml"
+)
+
+v081_scenario_loop_paths=(
+  ".skill-os/workflows/scenario-feature-delivery/workflow.yaml"
+)
+
+upgrade_optional_paths=("${v020_optional_paths[@]}" "${branch_release_optional_paths[@]}" "${v040_progressive_reference_paths[@]}" "${v050_role_workflow_paths[@]}" "${v060_project_profile_paths[@]}" "${v070_formal_confirmation_paths[@]}" "${v080_workflow_architecture_paths[@]}" "${v081_scenario_loop_paths[@]}")
 
 declared_workflow_version=""
 if [[ -e "$TARGET_DIR/$current_version_marker" ]]; then
@@ -145,6 +166,15 @@ if [[ -n "$declared_workflow_version" ]]; then
     0.6.0)
       current_required_optional_paths=("${v020_optional_paths[@]}" "${branch_release_optional_paths[@]}" "${v040_progressive_reference_paths[@]}" "${v050_role_workflow_paths[@]}" "${v060_project_profile_paths[@]}")
       ;;
+    0.7.0)
+      current_required_optional_paths=("${v020_optional_paths[@]}" "${branch_release_optional_paths[@]}" "${v040_progressive_reference_paths[@]}" "${v050_role_workflow_paths[@]}" "${v060_project_profile_paths[@]}" "${v070_formal_confirmation_paths[@]}")
+      ;;
+    0.8.0)
+      current_required_optional_paths=("${v020_optional_paths[@]}" "${branch_release_optional_paths[@]}" "${v040_progressive_reference_paths[@]}" "${v050_role_workflow_paths[@]}" "${v060_project_profile_paths[@]}" "${v070_formal_confirmation_paths[@]}" "${v080_workflow_architecture_paths[@]}")
+      ;;
+    0.8.1|0.8.2)
+      current_required_optional_paths=("${v020_optional_paths[@]}" "${branch_release_optional_paths[@]}" "${v040_progressive_reference_paths[@]}" "${v050_role_workflow_paths[@]}" "${v060_project_profile_paths[@]}" "${v070_formal_confirmation_paths[@]}" "${v080_workflow_architecture_paths[@]}" "${v081_scenario_loop_paths[@]}")
+      ;;
     *)
       current_required_optional_paths=("${upgrade_optional_paths[@]}")
       ;;
@@ -164,6 +194,24 @@ check_snippet() {
   if [[ -e "$TARGET_DIR/$rel" ]] && ! grep -Fq "$snippet" "$TARGET_DIR/$rel"; then
     contract_issues+=("$rel missing \"$snippet\" ($label)")
   fi
+}
+
+check_any_snippet() {
+  local rel="$1"
+  local label="$2"
+  shift 2
+
+  if [[ ! -e "$TARGET_DIR/$rel" ]]; then
+    return
+  fi
+
+  for snippet in "$@"; do
+    if grep -Fq "$snippet" "$TARGET_DIR/$rel"; then
+      return
+    fi
+  done
+
+  contract_issues+=("$rel missing one of [$*] ($label)")
 }
 
 version_at_least() {
@@ -281,12 +329,41 @@ if [[ -n "$declared_workflow_version" ]]; then
         check_snippet ".agents/skills/project-profile-router/SKILL.md" "status --json" "Project Profile status command"
         check_snippet ".agents/skills/project-profile-router/references/profile-freshness.md" "Freshness Rules" "Project Profile freshness rules"
         check_snippet ".agents/skills/project-profile-router/references/decision-memory.md" "What Must Never Be Reused As Approval" "Project decision approval boundary"
-        check_snippet ".specify/project-profile/profile.yaml" "status: pending_analysis" "Project Profile data template"
+        check_any_snippet ".specify/project-profile/profile.yaml" "Project Profile data template" "status: pending_analysis" "status: ready"
         check_snippet ".specify/project-profile/decision-memory.yaml" "never_reuse_as_approval:" "Project decision memory boundary"
         check_snippet ".specify/scripts/project-profile.mjs" "changedEvidence" "Project Profile evidence fingerprint"
         check_snippet "AGENTS.md" '$project-profile-router' "Project Profile first gate"
         check_snippet ".specify/memory/memory-policy.md" "Project Profile Cache" "Project Profile memory boundary"
         check_snippet ".specify/templates/workflow-state-template.yaml" "project_profile:" "Project Profile workflow state"
+      fi
+
+      if version_at_least "$declared_workflow_version" "0.7.0"; then
+        check_snippet "AGENTS.md" "Formal Implementation Confirmation" "Formal implementation confirmation gate"
+        check_snippet "AGENTS.md" "设计方案 vN" "Versioned design proposal gate"
+        check_snippet ".agents/skills/project-requirement-gate/SKILL.md" "Formal Implementation Handoff" "Formal requirement handoff"
+        check_snippet ".agents/skills/project-scope-impact-guard/SKILL.md" "Confirmation Boundary" "Impact confirmation boundary"
+        check_snippet ".agents/skills/project-tech-solution/SKILL.md" "任务拆解 vN" "Versioned task breakdown gate"
+        check_snippet ".agents/skills/project-verification-loop/SKILL.md" "影响范围自查" "Impact scope self-check"
+        check_snippet ".agents/skills/project-test-and-report/SKILL.md" "impact-scope self-check" "Delivery impact self-check"
+        check_snippet ".specify/templates/design-template.md" "验收与自测计划" "Design proposal template"
+        check_snippet ".specify/templates/workflow-state-template.yaml" "task_breakdown: null" "Formal confirmation workflow state"
+      fi
+
+      if version_at_least "$declared_workflow_version" "0.8.0"; then
+        check_snippet "AGENTS.md" '$project-workflow-router' "Workflow router entry"
+        check_snippet "AGENTS.md" "select at most one primary scenario" "Workflow primary selection boundary"
+        check_snippet ".agents/skills/project-workflow-router/SKILL.md" "Loop Engineering Boundary" "Workflow Loop boundary"
+        check_snippet ".agents/skills/project-workflow-router/references/workflow-manifest-contract.md" "Scenario Loop Run" "Workflow manifest reference"
+        check_snippet ".skill-os/workflow-registry.yaml" "legacy_declarations: \"read_only\"" "Legacy Workflow read-only policy"
+      fi
+
+      if version_at_least "$declared_workflow_version" "0.8.2"; then
+        check_snippet "AGENTS.md" "Conversation is the only execution entry" "Conversation-owned Loop entry"
+        check_snippet "AGENTS.md" "desktop workbench may read and display" "Desktop observation-only boundary"
+        check_snippet ".agents/skills/project-workflow-router/SKILL.md" "Conversation Initiation" "Conversation Loop routing"
+        check_snippet ".agents/skills/project-workflow-router/SKILL.md" "initiation_source: conversation" "Conversation Loop record source"
+        check_snippet ".agents/skills/project-verification-loop/SKILL.md" "workflow-state.yaml" "Conversation Loop evidence state"
+        check_snippet ".specify/templates/workflow-state-template.yaml" "initiation_source: conversation" "Conversation Loop state template"
       fi
     fi
   else
@@ -297,7 +374,7 @@ if [[ -n "$declared_workflow_version" ]]; then
     check_snippet ".agents/skills/project-memory-router/SKILL.md" "blocked_sensitive" "Legacy memory blocked sensitive role"
   fi
 
-  if [[ ${#contract_issues[@]} -gt 0 ]]; then
+if [[ ${#contract_issues[@]} -gt 0 ]]; then
     echo "Doctor failed."
     echo "This project declares workflow line $declared_workflow_version, but key workflow contract snippets are missing:"
     for issue in "${contract_issues[@]}"; do
@@ -305,6 +382,16 @@ if [[ -n "$declared_workflow_version" ]]; then
     done
     echo
     echo "Restore the missing snippets through a planned upgrade or manual template sync, then rerun doctor."
+    exit 1
+  fi
+fi
+
+if [[ -n "$declared_workflow_version" ]] && version_at_least "$declared_workflow_version" "0.8.0"; then
+  if ! node "$PACKAGE_ROOT/scripts/workflow-manifest-validator.mjs" \
+    --workflow-root "$TARGET_DIR/.skill-os/workflows" \
+    --skills-dir "$TARGET_DIR/.agents/skills"; then
+    echo
+    echo "Doctor failed because the Workflow Manifest registry is invalid." >&2
     exit 1
   fi
 fi

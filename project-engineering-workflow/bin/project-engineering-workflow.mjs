@@ -3,10 +3,26 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateWorkflowDirectory } from "../scripts/workflow-manifest-validator.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const templateRoot = join(rootDir, "assets", "template-root");
+
+// npm always strips files named `.gitignore` from a published tarball, so template
+// files with such names are stored undotted and restored while copying. Keys are the
+// path inside a bootstrapped project; values are the path inside assets/template-root.
+const templateSourceRenames = new Map([
+  [".specify/project-profile/.gitignore", ".specify/project-profile/gitignore"]
+]);
+
+const templateTargetRenames = new Map(
+  Array.from(templateSourceRenames, ([targetRelPath, sourceRelPath]) => [sourceRelPath, targetRelPath])
+);
+
+function templateSourcePath(relPath) {
+  return join(templateRoot, templateSourceRenames.get(relPath) ?? relPath);
+}
 
 const coreRequiredPaths = [
   "AGENTS.md",
@@ -100,6 +116,8 @@ const v020OptionalPaths = [
   "docs/AI能力地图.md"
 ];
 
+const memoryStorePaths = v020OptionalPaths.filter((path) => path.startsWith(".specify/memory-store/"));
+
 const branchReleaseOptionalPaths = [
   ".agents/skills/project-branch-release/SKILL.md",
   ".specify/release/release-policy.md",
@@ -176,6 +194,26 @@ const v060ProjectProfileRoutingPaths = [
   "docs/AI能力地图.md"
 ];
 
+const v070FormalConfirmationPaths = [
+  ".specify/templates/design-template.md"
+];
+
+const v080WorkflowArchitecturePaths = [
+  ".agents/skills/project-workflow-router/SKILL.md",
+  ".agents/skills/project-workflow-router/references/workflow-manifest-contract.md",
+  ".skill-os/workflow-registry.yaml",
+  ".skill-os/workflows/foundation-engineering-governance/workflow.yaml",
+  ".skill-os/workflows/role-frontend-engineering/workflow.yaml",
+  ".skill-os/workflows/role-backend-engineering/workflow.yaml",
+  ".skill-os/workflows/scenario-design-to-frontend/workflow.yaml",
+  ".skill-os/workflows/scenario-design-to-api/workflow.yaml",
+  ".skill-os/workflows/integration-swagger-to-frontend/workflow.yaml"
+];
+
+const v081ScenarioLoopPaths = [
+  ".skill-os/workflows/scenario-feature-delivery/workflow.yaml"
+];
+
 const workflowOptionalPathsByVersion = {
   "0.2.0": [...v020OptionalPaths],
   "0.2.1": [...v020OptionalPaths],
@@ -183,10 +221,14 @@ const workflowOptionalPathsByVersion = {
   "0.3.1": [...v020OptionalPaths, ...branchReleaseOptionalPaths],
   "0.4.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths],
   "0.5.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths],
-  "0.6.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths]
+  "0.6.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths],
+  "0.7.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths, ...v070FormalConfirmationPaths],
+  "0.8.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths, ...v070FormalConfirmationPaths, ...v080WorkflowArchitecturePaths],
+  "0.8.1": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths, ...v070FormalConfirmationPaths, ...v080WorkflowArchitecturePaths, ...v081ScenarioLoopPaths],
+  "0.8.2": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths, ...v070FormalConfirmationPaths, ...v080WorkflowArchitecturePaths, ...v081ScenarioLoopPaths]
 };
 
-const upgradeOptionalPaths = [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths];
+const upgradeOptionalPaths = [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths, ...v070FormalConfirmationPaths, ...v080WorkflowArchitecturePaths, ...v081ScenarioLoopPaths];
 
 const workflowContentContracts = [
   {
@@ -445,7 +487,8 @@ const workflowContentContracts = [
     minVersion: "0.6.0",
     path: ".specify/project-profile/profile.yaml",
     label: "Project Profile data contract",
-    requiredSnippets: ["status: pending_analysis", "detected_languages:", "freshness:"]
+    requiredSnippets: ["detected_languages:", "freshness:"],
+    requiredAnyOf: ["status: pending_analysis", "status: ready"]
   },
   {
     minVersion: "0.6.0",
@@ -476,6 +519,102 @@ const workflowContentContracts = [
     path: ".specify/templates/workflow-state-template.yaml",
     label: "Project Profile workflow state",
     requiredSnippets: ["project_profile:", "evidence_state:", "reused_decisions:"]
+  },
+  {
+    minVersion: "0.7.0",
+    path: "AGENTS.md",
+    label: "Formal implementation confirmation gate",
+    requiredSnippets: ["Formal Implementation Confirmation", "设计方案 vN", "任务拆解 vN", "影响范围 vN", "awaiting_user_acceptance"]
+  },
+  {
+    minVersion: "0.7.0",
+    path: ".agents/skills/project-requirement-gate/SKILL.md",
+    label: "Formal requirement handoff",
+    requiredSnippets: ["Formal Implementation Handoff", "正式实现前置包"]
+  },
+  {
+    minVersion: "0.7.0",
+    path: ".agents/skills/project-scope-impact-guard/SKILL.md",
+    label: "Impact confirmation boundary",
+    requiredSnippets: ["Confirmation Boundary", "影响范围 vN+1"]
+  },
+  {
+    minVersion: "0.7.0",
+    path: ".agents/skills/project-tech-solution/SKILL.md",
+    label: "Design and task confirmation gate",
+    requiredSnippets: ["设计方案 vN", "任务拆解 vN", "formal `standard` and `controlled`"]
+  },
+  {
+    minVersion: "0.7.0",
+    path: ".agents/skills/project-verification-loop/SKILL.md",
+    label: "Impact scope self-check",
+    requiredSnippets: ["impact-scope self-check", "影响范围自查"]
+  },
+  {
+    minVersion: "0.7.0",
+    path: ".agents/skills/project-test-and-report/SKILL.md",
+    label: "Delivery impact self-check",
+    requiredSnippets: ["impact-scope self-check", "awaiting_user_acceptance"]
+  },
+  {
+    minVersion: "0.7.0",
+    path: ".specify/templates/design-template.md",
+    label: "Versioned design proposal template",
+    requiredSnippets: ["设计方案版本", "验收与自测计划", "用户选择：确认执行 / 修改方案"]
+  },
+  {
+    minVersion: "0.7.0",
+    path: ".specify/templates/plan-template.md",
+    label: "Plan version alignment",
+    requiredSnippets: ["设计方案版本", "任务拆解版本", "standard / controlled 正式实现前必须确认"]
+  },
+  {
+    minVersion: "0.7.0",
+    path: ".specify/templates/workflow-state-template.yaml",
+    label: "Formal confirmation workflow state",
+    requiredSnippets: ["  design: null", "  task_breakdown: null", "  design_plan:"]
+  },
+  {
+    minVersion: "0.8.0",
+    path: "AGENTS.md",
+    label: "Workflow router governance boundary",
+    requiredSnippets: ["$project-workflow-router", "select at most one primary scenario", "Loop Policy"]
+  },
+  {
+    minVersion: "0.8.0",
+    path: ".agents/skills/project-workflow-router/SKILL.md",
+    label: "Workflow router selection contract",
+    requiredSnippets: ["Project Workflow Router", "workflow-validate", "Loop Engineering Boundary"]
+  },
+  {
+    minVersion: "0.8.0",
+    path: ".agents/skills/project-workflow-router/references/workflow-manifest-contract.md",
+    label: "Workflow manifest progressive reference",
+    requiredSnippets: ["Selection Order", "Legacy 1.0", "Scenario Loop Run"]
+  },
+  {
+    minVersion: "0.8.2",
+    path: "AGENTS.md",
+    label: "Conversation-owned Scenario Loop entry",
+    requiredSnippets: ["Conversation is the only execution entry", "desktop workbench may read and display"]
+  },
+  {
+    minVersion: "0.8.2",
+    path: ".agents/skills/project-workflow-router/SKILL.md",
+    label: "Conversation Scenario Loop routing",
+    requiredSnippets: ["Conversation Initiation", "initiation_source: conversation", "only execution entry"]
+  },
+  {
+    minVersion: "0.8.2",
+    path: ".agents/skills/project-verification-loop/SKILL.md",
+    label: "Conversation Scenario Loop evidence",
+    requiredSnippets: ["conversation-initiated Scenario Loop Run", "workflow-state.yaml", "cannot create or advance"]
+  },
+  {
+    minVersion: "0.8.2",
+    path: ".specify/templates/workflow-state-template.yaml",
+    label: "Conversation Scenario Loop state",
+    requiredSnippets: ["initiation_source: conversation", "session_ref:", "primary_workflow:"]
   }
 ];
 
@@ -495,6 +634,7 @@ const upgradeModePaths = {
     "docs/AI协作架构.md"
   ],
   capabilities: [
+    ...memoryStorePaths,
     ".agents/skills/project-memory-router/SKILL.md",
     ".agents/skills/project-evolution-router/SKILL.md",
     ".agents/skills/project-superpowers-router/SKILL.md",
@@ -503,6 +643,8 @@ const upgradeModePaths = {
     ...v050RoleUpgradeRoutingPaths,
     ...v060ProjectProfilePaths,
     ...v060ProjectProfileRoutingPaths,
+    ...v080WorkflowArchitecturePaths,
+    ...v081ScenarioLoopPaths,
     ".specify/memory/memory-policy.md",
     ".specify/memory/evolution-policy.md",
     ".specify/memory/evolution-prefill-policy.md",
@@ -523,6 +665,7 @@ const upgradeModePaths = {
     ".specify/scripts/bash/release-doctor.sh",
     ".specify/templates/workflow-state-template.yaml",
     ".specify/templates/spec-template.md",
+    ".specify/templates/design-template.md",
     ".specify/templates/plan-template.md",
     ".specify/templates/tasks-template.md",
     ".specify/templates/checklist-template.md",
@@ -535,7 +678,7 @@ const upgradeModePaths = {
 };
 
 const defaultUpgradeReportPath = "docs/workflow-upgrade-report.md";
-const booleanFlags = new Set(["dry-run", "overwrite-existing", "write-report", "json"]);
+const booleanFlags = new Set(["dry-run", "overwrite-existing", "write-report", "json", "allow-unresolved-templates"]);
 
 function usage() {
   console.log(`Usage:
@@ -560,6 +703,13 @@ function usage() {
   project-engineering-workflow memory-index --output-dir "/absolute/path/to/target-repo"
     [--json]
     [--json-out "docs/workflow-memory-index.json"]
+
+  project-engineering-workflow workflow-validate --output-dir "/absolute/path/to/target-repo"
+    [--workflow-root ".skill-os/workflows"]
+    [--skills-dir ".agents/skills"]
+    [--allow-unresolved-templates]
+    [--json]
+    [--json-out "docs/workflow-manifest-validation.json"]
 
   project-engineering-workflow upgrade \\
     --output-dir "/absolute/path/to/target-repo" \\
@@ -615,12 +765,15 @@ function parseArgs(argv) {
   return { command, options };
 }
 
-function copyRecursive(source, target) {
+function copyRecursive(source, target, sourceRelPath = "") {
   const sourceStat = statSync(source);
   if (sourceStat.isDirectory()) {
     mkdirSync(target, { recursive: true });
     for (const entry of readdirSync(source)) {
-      copyRecursive(join(source, entry), join(target, entry));
+      const entryRelPath = sourceRelPath ? `${sourceRelPath}/${entry}` : entry;
+      const renamedRelPath = templateTargetRenames.get(entryRelPath);
+      const targetName = renamedRelPath ? basename(renamedRelPath) : entry;
+      copyRecursive(join(source, entry), join(target, targetName), entryRelPath);
     }
     return;
   }
@@ -758,13 +911,19 @@ function evaluateWorkflowState(outputDir) {
   const contractIssues = declaredWorkflowVersion
     ? evaluateWorkflowContentContracts(outputDir, declaredWorkflowVersion)
     : [];
+  const workflowManifestValidation = declaredWorkflowVersion && isWorkflowVersionAtLeast(declaredWorkflowVersion, "0.8.0")
+    ? validateWorkflowDirectory(join(outputDir, ".skill-os", "workflows"), {
+      skillsDir: join(outputDir, ".agents", "skills")
+    })
+    : null;
 
   return {
     declaredWorkflowVersion,
     missingCore,
     currentMissing,
     upgradeAvailable,
-    contractIssues
+    contractIssues,
+    workflowManifestValidation
   };
 }
 
@@ -792,6 +951,13 @@ function evaluateWorkflowContentContracts(outputDir, declaredWorkflowVersion) {
           missing: snippet
         });
       }
+    }
+    if (contract.requiredAnyOf && !contract.requiredAnyOf.some((snippet) => text.includes(snippet))) {
+      issues.push({
+        path: contract.path,
+        label: contract.label,
+        missing: contract.requiredAnyOf.join(" or ")
+      });
     }
   }
 
@@ -854,6 +1020,22 @@ function init(options) {
     "__DATE__": today()
   });
 
+  const expectedPaths = [
+    ...new Set([...coreRequiredPaths, ...optionalPathsForWorkflowVersion(currentTemplateWorkflowVersion)])
+  ];
+  const missingPaths = expectedPaths.filter((relPath) => !existsSync(join(outputDir, relPath)));
+  if (missingPaths.length > 0) {
+    console.error(`Bootstrap incomplete. ${missingPaths.length} required path(s) were not created in ${outputDir}:`);
+    for (const relPath of missingPaths) {
+      console.error(`  ${relPath}`);
+    }
+    console.error("");
+    console.error("This usually means the installed package is incomplete.");
+    console.error("Reinstall the package, then rerun init into a clean output directory.");
+    process.exitCode = 1;
+    return;
+  }
+
   console.log(`Bootstrap complete.
 
 Target: ${outputDir}
@@ -868,6 +1050,45 @@ Next steps:
 7. Review ${join(outputDir, "docs/Codex团队开发说明.md")}
 8. Review ${join(outputDir, "docs/ClaudeCode团队开发说明.md")}
 9. Run: project-engineering-workflow doctor --output-dir "${outputDir}"`);
+}
+
+function workflowValidate(options) {
+  const outputDir = resolveRequiredOutputDir(options);
+  const workflowRoot = resolve(outputDir, options["workflow-root"] ?? ".skill-os/workflows");
+  const skillsDir = resolve(outputDir, options["skills-dir"] ?? ".agents/skills");
+  const validation = validateWorkflowDirectory(workflowRoot, {
+    skillsDir,
+    allowUnresolvedTemplates: options["allow-unresolved-templates"] === true
+  });
+  const result = {
+    command: "workflow-validate",
+    target: outputDir,
+    workflowRoot,
+    skillsDir,
+    status: validation.valid ? "passed" : "failed",
+    validation
+  };
+  const jsonOut = options["json-out"] ?? null;
+  if (jsonOut) {
+    result.jsonOutPath = writeJsonArtifact(outputDir, jsonOut, result);
+  }
+
+  if (options.json === true) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } else {
+    console.log(`Workflow Manifest validation ${validation.valid ? "passed" : "failed"}.`);
+    console.log(`Templates: ${validation.templateCount}; manifests: ${validation.manifestCount}.`);
+    for (const warning of validation.warnings) {
+      console.log(`Warning ${warning.code}: ${warning.source} ${warning.path} - ${warning.message}`);
+    }
+    for (const issue of validation.issues) {
+      console.error(`Error ${issue.code}: ${issue.source} ${issue.path} - ${issue.message}`);
+    }
+  }
+
+  if (!validation.valid) {
+    process.exitCode = 1;
+  }
 }
 
 function doctor(options) {
@@ -988,6 +1209,43 @@ function doctor(options) {
       }
     }
     throw new Error("Doctor failed. Restore the missing workflow contract snippets and rerun.");
+  }
+
+  if (workflowState.workflowManifestValidation && !workflowState.workflowManifestValidation.valid) {
+    const result = {
+      command: "doctor",
+      target: outputDir,
+      declaredWorkflowVersion: workflowState.declaredWorkflowVersion,
+      status: "failed",
+      decision: {
+        code: "workflow-manifest-invalid",
+        label: "工作流声明无效",
+        reason: "项目声明了 0.8.0 或更高 workflow 线，但 Workflow Manifest 未通过静态校验。"
+      },
+      summary: {
+        missingCore: 0,
+        missingCurrent: 0,
+        upgradeAvailable: 0,
+        contractIssues: 0,
+        workflowManifestIssues: workflowState.workflowManifestValidation.issues.length
+      },
+      missing: [],
+      currentMissing: [],
+      upgradeAvailable: [],
+      contractIssues: [],
+      workflowManifestIssues: workflowState.workflowManifestValidation.issues
+    };
+    if (jsonOut) {
+      result.jsonOutPath = writeJsonArtifact(outputDir, jsonOut, result);
+    }
+    if (jsonMode) {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      process.exit(1);
+    }
+    for (const issue of workflowState.workflowManifestValidation.issues) {
+      console.error(`Workflow manifest: ${issue.code} ${issue.source} ${issue.path} - ${issue.message}`);
+    }
+    throw new Error("Doctor failed. Repair the Workflow Manifest declarations and rerun.");
   }
 
   if (workflowState.upgradeAvailable.length > 0) {
@@ -1289,7 +1547,7 @@ function inferProjectContext(targetDir, overrides) {
 function requiredPlaceholdersForFiles(paths) {
   const placeholders = new Set();
   for (const relPath of paths) {
-    const sourceText = readText(join(templateRoot, relPath));
+    const sourceText = readText(templateSourcePath(relPath));
     for (const match of sourceText.matchAll(/__[A-Z_]+__/g)) {
       placeholders.add(match[0]);
     }
@@ -2049,7 +2307,7 @@ function upgrade(options) {
   const actions = [];
 
   for (const relPath of selectedPaths) {
-    const sourcePath = join(templateRoot, relPath);
+    const sourcePath = templateSourcePath(relPath);
     const targetPath = join(outputDir, relPath);
     const exists = existsSync(targetPath);
     if (!exists) {
@@ -2064,7 +2322,7 @@ function upgrade(options) {
       continue;
     }
 
-    if (overwriteExisting) {
+    if (overwriteExisting && !memoryStorePaths.includes(relPath)) {
       actions.push({ type: "update", relPath, sourcePath, targetPath });
     } else {
       actions.push({ type: "preserve", relPath, sourcePath, targetPath });
@@ -2227,6 +2485,8 @@ try {
     releaseDoctor(options);
   } else if (command === "memory-index" || command === "rebuild-memory-index") {
     memoryIndex(options);
+  } else if (command === "workflow-validate") {
+    workflowValidate(options);
   } else if (command === "upgrade") {
     upgrade(options);
   } else {

@@ -1,0 +1,42 @@
+schema_version: "1.1.0"
+template_id: "scenario.invalid-cycle"
+template_version: "1.0.0"
+name: "Invalid cycle"
+kind: "scenario"
+status: "draft"
+entrypoints:
+  task_types: [development]
+inputs: []
+outputs: []
+composition:
+  requires: []
+skills: []
+nodes:
+  - id: analyze
+    kind: checkpoint
+  - id: repair
+    kind: checkpoint
+edges:
+  - id: analyze-to-repair
+    from: analyze
+    to: repair
+  - id: repair-to-analyze
+    from: repair
+    to: analyze
+quality_gate:
+  score_policy_ref: "quality.example.v1"
+  pass_score: 90
+  dimension_floors:
+    coverage: 75
+  required_checks: [no_blocking_issue]
+loop_policy:
+  enabled: true
+  max_iterations: 0
+  max_same_root_cause_strategies: 2
+  on_scope_change: "continue"
+  on_budget_exhausted: "retry"
+permissions:
+  capabilities: [read_project, run_shell]
+compatibility:
+  core: ">=0.8.0 <1.0.0"
+  manifest_schema: ">=1.1.0 <2.0.0"

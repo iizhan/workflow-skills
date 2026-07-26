@@ -38,7 +38,7 @@ const expectedSkillFiles = [
   "project-engineering-workflow/assets/template-root/.agents/skills/project-profile-router/SKILL.md",
   "project-engineering-workflow/assets/template-root/.agents/skills/project-profile-router/references/profile-freshness.md",
   "project-engineering-workflow/assets/template-root/.agents/skills/project-profile-router/references/decision-memory.md",
-  "project-engineering-workflow/assets/template-root/.specify/project-profile/.gitignore",
+  "project-engineering-workflow/assets/template-root/.specify/project-profile/gitignore",
   "project-engineering-workflow/assets/template-root/.specify/project-profile/profile.yaml",
   "project-engineering-workflow/assets/template-root/.specify/project-profile/architecture.md",
   "project-engineering-workflow/assets/template-root/.specify/project-profile/decision-memory.yaml",
@@ -64,12 +64,25 @@ const expectedSkillFiles = [
   "project-engineering-workflow/assets/template-root/.agents/skills/project-verification-loop/SKILL.md",
   "project-engineering-workflow/assets/template-root/.agents/skills/project-session-summary/SKILL.md",
   "project-engineering-workflow/assets/template-root/.agents/skills/project-skill-upgrade-advisor/SKILL.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-workflow-router/SKILL.md",
+  "project-engineering-workflow/assets/template-root/.agents/skills/project-workflow-router/references/workflow-manifest-contract.md",
+  "project-engineering-workflow/assets/template-root/.skill-os/workflow-registry.yaml",
+  "project-engineering-workflow/assets/template-root/.skill-os/workflows/foundation-engineering-governance/workflow.yaml",
+  "project-engineering-workflow/assets/template-root/.skill-os/workflows/role-frontend-engineering/workflow.yaml",
+  "project-engineering-workflow/assets/template-root/.skill-os/workflows/role-backend-engineering/workflow.yaml",
+  "project-engineering-workflow/assets/template-root/.skill-os/workflows/scenario-design-to-frontend/workflow.yaml",
+  "project-engineering-workflow/assets/template-root/.skill-os/workflows/scenario-design-to-api/workflow.yaml",
+  "project-engineering-workflow/assets/template-root/.skill-os/workflows/integration-swagger-to-frontend/workflow.yaml",
+  "project-engineering-workflow/scripts/workflow-manifest-validator.mjs",
+  "project-engineering-workflow/tests/workflow-manifest-validator.mjs",
+  "project-engineering-workflow/assets/template-root/.specify/templates/design-template.md",
   "project-engineering-workflow/references/06-ecc-benchmark.md",
   "evaluations/skills-workflow/templates/quality-metrics.md",
   "evaluations/skills-workflow/templates/token-economics.md",
   "evaluations/skills-workflow/scripts/estimate-token-cost.mjs",
   "evaluations/skills-workflow/scripts/evaluate-task-requirements.mjs",
   "evaluations/skills-workflow/cases/adaptive-confirmation.md",
+  "evaluations/skills-workflow/cases/formal-confirmation.md",
   "evaluations/skills-workflow/cases/task-requirement-quality.json",
   "evaluations/skills-workflow/runs/2026-07-14-adaptive-confirmation-validation.md",
   "evaluations/skills-workflow/runs/2026-07-14-task-requirement-quality.md",
@@ -133,10 +146,19 @@ const security = read("project-engineering-workflow/assets/template-root/.agents
 const verification = read("project-engineering-workflow/assets/template-root/.agents/skills/project-verification-loop/SKILL.md");
 const summary = read("project-engineering-workflow/assets/template-root/.agents/skills/project-session-summary/SKILL.md");
 const advisor = read("project-engineering-workflow/assets/template-root/.agents/skills/project-skill-upgrade-advisor/SKILL.md");
+const workflowRouter = read("project-engineering-workflow/assets/template-root/.agents/skills/project-workflow-router/SKILL.md");
+const workflowRouterReference = read("project-engineering-workflow/assets/template-root/.agents/skills/project-workflow-router/references/workflow-manifest-contract.md");
+const workflowRegistry = read("project-engineering-workflow/assets/template-root/.skill-os/workflow-registry.yaml");
+const designToFrontendWorkflow = read("project-engineering-workflow/assets/template-root/.skill-os/workflows/scenario-design-to-frontend/workflow.yaml");
+const designToApiWorkflow = read("project-engineering-workflow/assets/template-root/.skill-os/workflows/scenario-design-to-api/workflow.yaml");
+const swaggerIntegrationWorkflow = read("project-engineering-workflow/assets/template-root/.skill-os/workflows/integration-swagger-to-frontend/workflow.yaml");
+const workflowValidator = read("project-engineering-workflow/scripts/workflow-manifest-validator.mjs");
 const testAndReport = read("project-engineering-workflow/assets/template-root/.agents/skills/project-test-and-report/SKILL.md");
+const designTemplate = read("project-engineering-workflow/assets/template-root/.specify/templates/design-template.md");
 const workflowStateTemplate = read("project-engineering-workflow/assets/template-root/.specify/templates/workflow-state-template.yaml");
 const deliverySummaryTemplate = read("project-engineering-workflow/assets/template-root/.specify/templates/delivery-summary-template.md");
 const adaptiveConfirmationCase = read("evaluations/skills-workflow/cases/adaptive-confirmation.md");
+const formalConfirmationCase = read("evaluations/skills-workflow/cases/formal-confirmation.md");
 const sessionHistory = read("project-engineering-workflow/assets/template-root/.specify/memory/session-history.md");
 const upgradeBacklog = read("project-engineering-workflow/assets/template-root/.specify/memory/skill-upgrade-backlog.md");
 const evaluationReadme = read("evaluations/skills-workflow/README.md");
@@ -205,6 +227,14 @@ for (const required of ["验证报告 vN", "awaiting_user_acceptance", "确认�
   assertIncludes("project-test-and-report", testAndReport, required, "Final verification should wait for explicit user acceptance");
 }
 
+for (const required of ["设计方案版本", "验收与自测计划", "用户选择：确认执行 / 修改方案"]) {
+  assertIncludes("design-template", designTemplate, required, "Formal implementation should have a versioned design proposal template");
+}
+
+for (const required of ["设计方案 vN", "任务拆解 vN", "影响范围 vN", "vN+1", "awaiting_user_acceptance"]) {
+  assertIncludes("formal-confirmation case", formalConfirmationCase, required, "Evaluation should cover the formal confirmation package and scope delta");
+}
+
 for (const required of ["task_lane:", "confirmation_gates:", "confirmation_history:", "child_tasks:", "impact_assessment:", "scope_deltas:", "dissatisfaction_categories:"]) {
   assertIncludes("workflow-state-template", workflowStateTemplate, required, "Workflow state should persist adaptive confirmation state");
 }
@@ -245,6 +275,7 @@ for (const required of [
   "const v050RoleUpgradeRoutingPaths",
   "const v060ProjectProfilePaths",
   "const v060ProjectProfileRoutingPaths",
+  "const v070FormalConfirmationPaths",
   '"0.6.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths]',
   '"0.5.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths]',
   "...v050RoleWorkflowPaths,",
@@ -256,6 +287,7 @@ for (const required of [
   "const v040ProgressiveReferencePaths",
   '"0.3.1": [...v020OptionalPaths, ...branchReleaseOptionalPaths]',
   '"0.4.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths]',
+  '"0.7.0": [...v020OptionalPaths, ...branchReleaseOptionalPaths, ...v040ProgressiveReferencePaths, ...v050RoleWorkflowPaths, ...v060ProjectProfilePaths, ...v070FormalConfirmationPaths]',
   'maxVersion: "0.3.1"',
   "...v040ProgressiveReferencePaths,",
   'context["__TEST_COMMAND__"] ??=',
@@ -385,6 +417,29 @@ assertIncludes("project-session-summary", summary, "Friction Signals", "Session 
 assertIncludes("project-skill-upgrade-advisor", advisor, "confidence", "Upgrade advisor should reason about confidence");
 assertIncludes("project-skill-upgrade-advisor", advisor, "project-local", "Upgrade advisor should prefer project-local updates");
 assertIncludes("project-skill-upgrade-advisor", advisor, "Reopen and correct the affected `ITEM-*` first", "Upgrade advisor should repair current work before framework evolution");
+for (const needle of ["one primary scenario", "workflow-validate", "Loop Engineering Boundary", "scope change"]) {
+  assertIncludes("project-workflow-router", workflowRouter, needle, "Workflow router should preserve primary selection and Loop safety boundaries");
+}
+for (const needle of ["Selection Order", "Scenario Loop Run", "read-only", "DAG"]) {
+  assertIncludes("project-workflow-router reference", workflowRouterReference, needle, "Workflow router reference should explain compatibility and bounded execution");
+}
+for (const needle of ["default_selection: \"recommend_only\"", "legacy_declarations: \"read_only\"", "max_iterations: 3"]) {
+  assertIncludes("workflow registry", workflowRegistry, needle, "Workflow registry should default to explicit selection and bounded Loops");
+}
+for (const [label, text, expected] of [
+  ["design-to-frontend", designToFrontendWorkflow, ["template_id: \"scenario.design-to-frontend\"", "pass_score: 90", "max_iterations: 3", "on_scope_change: \"require_reconfirmation\""]],
+  ["design-to-api", designToApiWorkflow, ["template_id: \"scenario.design-to-api\"", "api_contract_evidence", "max_same_root_cause_strategies: 2"]],
+  ["swagger integration", swaggerIntegrationWorkflow, ["template_id: \"integration.swagger-to-frontend\"", "key_path_integration_evidence", "on_budget_exhausted: \"needs_user_decision\""]]
+]) {
+  for (const needle of expected) {
+    assertIncludes(`${label} Workflow Template`, text, needle, "Scenario Workflow Templates should declare quality and bounded Loop policy");
+  }
+}
+for (const needle of ["validateWorkflowManifest", "WORKFLOW_CYCLE_UNSUPPORTED", "WORKFLOW_LEGACY_READ_ONLY", "WORKFLOW_LOOP_POLICY_INVALID", "validateWorkflowDirectory"]) {
+  assertIncludes("workflow-manifest-validator", workflowValidator, needle, "Manifest validator should enforce compatibility and bounded declaration rules");
+}
+assertIncludes("AGENTS.md", agents, "$project-workflow-router", "AGENTS should route matching standard and controlled work through the Workflow router");
+assertIncludes("workflow CLI", cli, "workflow-validate", "CLI should expose Workflow Manifest validation");
 assertIncludes("docs/Codex团队开发说明.md", codexDoc, "project-verification-loop", "Codex doc should include the current verification workflow");
 assertIncludes("docs/Codex团队开发说明.md", codexDoc, "project-skill-upgrade-advisor", "Codex doc should include skill upgrade routing");
 assertIncludes("docs/ClaudeCode团队开发说明.md", claudeDoc, "hooks", "Claude Code doc should explain hook boundaries");

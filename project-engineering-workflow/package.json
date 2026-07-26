@@ -1,6 +1,6 @@
 {
   "name": "@workflow-skills/project-engineering-workflow",
-  "version": "0.6.0",
+  "version": "0.8.2",
   "description": "Bootstrap a reusable AGENTS + skills + spec workflow for Codex projects.",
   "license": "MIT",
   "type": "module",
@@ -24,10 +24,18 @@
   "scripts": {
     "doctor": "node ./bin/project-engineering-workflow.mjs doctor --output-dir ./assets/template-root",
     "smoke": "node ./bin/project-engineering-workflow.mjs init --project-name Smoke --project-slug smoke --stack-name \"React + Node.js\" --app-path apps/web --test-command \"pnpm test\" --output-dir /private/tmp/project-engineering-workflow-smoke",
+    "sync:formal-confirmation": "node ./scripts/sync-formal-confirmation.mjs",
+    "validate:workflows": "node ./scripts/workflow-manifest-validator.mjs --workflow-root ./assets/template-root/.skill-os/workflows --skills-dir ./assets/template-root/.agents/skills",
+    "test:workflow-manifests": "node ./tests/workflow-manifest-validator.mjs",
+    "test:package-contents": "node ./tests/package-contents.mjs",
+    "test": "npm run test:workflow-manifests && npm run test:package-contents",
     "pack:dry-run": "npm pack --dry-run --package-lock=false --cache /private/tmp/npm-cache-workflow-skills",
     "publish:public": "npm publish --access public"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   }
 }
