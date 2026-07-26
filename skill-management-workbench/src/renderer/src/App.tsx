@@ -1,4 +1,5 @@
 import {
+  Fragment,
   createContext,
   startTransition,
   useContext,
@@ -31,12 +32,21 @@ import type {
   LocalToolTelemetryPreview,
   LocalToolTelemetrySource,
   ManagedProjectRecord,
+  ModelEvaluationCaseGenerationResult,
+  ModelEvaluationConfig,
   OptimizationProposal,
   OptimizationProposalRefreshResult,
   OptimizationProposalSeverity,
   OptimizationProposalStatus,
   ProjectProfileSummary,
+  ProjectAdapterReadiness,
+  ProjectControlledSessionVerification,
   ProjectRuntimeEvidenceRefreshResult,
+  ProjectRuntimeSummary,
+  ProjectWorkflowBindingApplyResult,
+  ProjectWorkflowBindingPreview,
+  ProjectWorkflowBindingSummary,
+  ProjectWorkflowDoctorResult,
   RemoteMarketplaceCatalog,
   RemoteMarketplaceSkill,
   RemoteSkillCheckStatus,
@@ -48,6 +58,8 @@ import type {
   RemoteSkillSourceAnalysis,
   RemoteSkillVerificationStatus,
   ScanResult,
+  SessionTraceDetail,
+  SessionTraceListItem,
   SkillApplyPreview,
   SkillApplyScope,
   SkillBundleDiffState,
@@ -64,15 +76,21 @@ import type {
   SkillRunSummary,
   SkillSummary,
   SkillWasteLeader,
+  ScenarioLoopRunSummary,
   TelemetryImportResult,
   TelemetryMode,
+  TraceSkillQuickDetail,
+  TraceSpanSummary,
   WeeklyMetricsSummary,
   WorkflowStarterApplyResult,
-  WorkflowStarterPreview
+  WorkflowStarterPreview,
+  WorkflowTemplateSummary
 } from "../../shared/types";
 
 type LanguageMode = "en" | "zh";
 type ProductMode = "guided" | "builder";
+type ProjectDetailView = "overview" | "skills" | "monitoring";
+type GraphPresentationMode = "flow" | "mindmap";
 
 type InteractionNoticeTone = "default" | "success" | "warning" | "info";
 
@@ -134,8 +152,10 @@ const projectHeartbeatStorageKey = "skill-os-project-heartbeats-v1";
 const projectOnboardingLogsStorageKey = "skill-os-project-onboarding-logs-v1";
 const maxProjectHeartbeatEntries = 48;
 const maxProjectOnboardingLogEntries = 120;
-const runtimeRunFetchLimit = 500;
+const runtimeRunFetchLimit = 300;
+const projectManagementRefreshIntervalMs = 15_000;
 const skillRunDetailLimit = 200;
+const inferredSkillEvidenceThreshold = 0.68;
 
 const healthScorePolicyPresets: SkillHealthScorePolicyPreset[] = [
   "balanced",
@@ -151,11 +171,13 @@ const productNavHrefs = [
   "#local-skills",
   "#evaluate",
   "#analysis",
+  "#session-trace",
   "#remote-market",
   "#graph",
   "#proposals",
   "#apply-center",
   "#bundles",
+  "#workflows",
   "#registry",
   "#audit",
   "#settings"
@@ -168,7 +190,7 @@ const uiCopy: Record<string, string> = {
   "Action Timeline": "操作时间线",
   "Added Items": "新增项目",
   "Added Top-level Entries": "新增顶层条目",
-  "Affected Skills": "受影响 Skill",
+  "Affected Skills": "受影响技能",
   "All visible edges in the current snapshot are rendered in this map.": "当前快照中所有可见边都已渲染到这张图中。",
   "Approved Roots": "已授权项目",
   "Avg Duration": "平均耗时",
@@ -259,8 +281,8 @@ const uiCopy: Record<string, string> = {
   "Lineage Key": "谱系 Key",
   "Lineage Members": "谱系成员",
   "Lines": "行数",
-  "Linked Skill Context": "关联 Skill 上下文",
-  "Linked Skills": "关联 Skill",
+  "Linked Skill Context": "关联技能上下文",
+  "Linked Skills": "关联技能",
   "Local Action Timeline": "本地操作时间线",
   "Local Graph Search": "本地图谱搜索",
   "Manifest": "清单",
@@ -327,16 +349,16 @@ const uiCopy: Record<string, string> = {
   "Selected Node": "已选节点",
   "Show Full Topology": "显示完整拓扑",
   "Show In Topology": "在拓扑中显示",
-  "Skill": "Skill",
-  "Skill Files": "Skill 文件",
+  "Skill": "技能",
+  "Skill Files": "技能文件",
   "Skill Index": "技能索引",
-  "Skills": "Skill",
-  "Skills Found": "发现 Skill",
-  "Skills On This Version": "此版本上的 Skill",
-  "Skills Under Root": "项目内 Skill",
-  "Skills Using This Model": "使用此模型的 Skill",
-  "Slowest Skills This Week": "本周最慢 Skill",
-  "Slowest Skills Today": "今日最慢 Skill",
+  "Skills": "技能",
+  "Skills Found": "发现技能",
+  "Skills On This Version": "此版本上的技能",
+  "Skills Under Root": "项目内技能",
+  "Skills Using This Model": "使用此模型的技能",
+  "Slowest Skills This Week": "本周最慢技能",
+  "Slowest Skills Today": "今日最慢技能",
   "Source": "来源",
   "Source Bundle": "来源 Bundle",
   "Source Path": "来源路径",
@@ -474,7 +496,7 @@ function createManagedProject(path: string, now = new Date().toISOString()): Man
     skillsChanged: null,
     workflowApplied: false,
     monitoringEnabled: false,
-    monitoringIntervalMs: 60000,
+    monitoringIntervalMs: 120000,
     lastMonitorAt: null,
     lastObservedWorkspaceRef: null,
     lastConnectionCheckAt: null
@@ -500,11 +522,14 @@ function parseManagedProjects(value: string | null) {
         path: normalizeProjectPath(project.path ?? ""),
         monitoringEnabled: Boolean(project.monitoringEnabled),
         monitoringIntervalMs:
-          project.monitoringIntervalMs === 30000 ||
           project.monitoringIntervalMs === 60000 ||
-          project.monitoringIntervalMs === 120000
+          project.monitoringIntervalMs === 120000 ||
+          project.monitoringIntervalMs === 300000 ||
+          project.monitoringIntervalMs === 900000
             ? project.monitoringIntervalMs
-            : 60000,
+            : project.monitoringIntervalMs === 30000
+              ? 60000
+              : 120000,
         lastMonitorAt: typeof project.lastMonitorAt === "string" ? project.lastMonitorAt : null,
         lastObservedWorkspaceRef:
           typeof project.lastObservedWorkspaceRef === "string"
@@ -524,6 +549,20 @@ function loadManagedProjects() {
     return [];
   }
   return parseManagedProjects(window.localStorage.getItem(managedProjectsStorageKey));
+}
+
+function mergeManagedProjectLists(primary: ManagedProject[], secondary: ManagedProject[]) {
+  const byPath = new Map<string, ManagedProject>();
+  for (const project of secondary) {
+    byPath.set(project.path, project);
+  }
+  for (const project of primary) {
+    byPath.set(project.path, project);
+  }
+  return [...byPath.values()].sort((left, right) => {
+    const nameOrder = left.name.localeCompare(right.name);
+    return nameOrder !== 0 ? nameOrder : left.path.localeCompare(right.path);
+  });
 }
 
 function parseProjectHeartbeatEntries(value: string | null): ProjectHeartbeatEntry[] {
@@ -664,7 +703,7 @@ function upsertManagedProject(
     skillsChanged: updates.skillsChanged ?? existing?.skillsChanged ?? null,
     workflowApplied: updates.workflowApplied ?? existing?.workflowApplied ?? false,
     monitoringEnabled: updates.monitoringEnabled ?? existing?.monitoringEnabled ?? false,
-    monitoringIntervalMs: updates.monitoringIntervalMs ?? existing?.monitoringIntervalMs ?? 60000,
+    monitoringIntervalMs: updates.monitoringIntervalMs ?? existing?.monitoringIntervalMs ?? 120000,
     lastMonitorAt: updates.lastMonitorAt ?? existing?.lastMonitorAt ?? null,
     lastObservedWorkspaceRef:
       updates.lastObservedWorkspaceRef ?? existing?.lastObservedWorkspaceRef ?? null,
@@ -901,6 +940,17 @@ function AnalysisIcon() {
   );
 }
 
+function RefreshIcon() {
+  return (
+    <svg className="button-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M19.25 11.5A7.3 7.3 0 0 0 6.9 6.2L4.75 8.35" />
+      <path d="M4.75 4.9v3.45H8.2" />
+      <path d="M4.75 12.5a7.3 7.3 0 0 0 12.35 5.3l2.15-2.15" />
+      <path d="M19.25 19.1v-3.45H15.8" />
+    </svg>
+  );
+}
+
 function TrashIcon() {
   return (
     <svg className="button-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
@@ -930,7 +980,13 @@ function BindProjectButton({
 }) {
   const { tx } = useLanguage();
   return (
-    <button type="button" className="project-action-button" disabled={busy} onClick={onClick}>
+    <button
+      type="button"
+      className="project-action-button"
+      data-testid="bind-project"
+      disabled={busy}
+      onClick={onClick}
+    >
       <FolderIcon />
       <span>{tx("Bind Project", "绑定项目")}</span>
     </button>
@@ -1980,6 +2036,66 @@ interface GraphTopologyScene {
   hiddenEdgeCount: number;
 }
 
+interface GraphMindMapNodeLayout {
+  node: GraphNodeSummary;
+  relationLabel: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  tone: {
+    fill: string;
+    stroke: string;
+    accent: string;
+  };
+}
+
+interface GraphMindMapBranch {
+  key: string;
+  nodeType: string;
+  label: string;
+  side: "left" | "right";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  nodes: GraphMindMapNodeLayout[];
+  omittedNodeCount: number;
+  tone: {
+    fill: string;
+    stroke: string;
+    accent: string;
+  };
+}
+
+interface GraphMindMapConnector {
+  id: string;
+  path: string;
+  color: string;
+  kind: "branch" | "node";
+}
+
+interface GraphMindMapScene {
+  width: number;
+  height: number;
+  center: {
+    node: GraphNodeSummary;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    tone: {
+      fill: string;
+      stroke: string;
+      accent: string;
+    };
+  };
+  branches: GraphMindMapBranch[];
+  connectors: GraphMindMapConnector[];
+  directNodeCount: number;
+  hiddenNodeCount: number;
+}
+
 interface GraphSelectionContext {
   node: GraphNodeSummary | null;
   connectedEdges: GraphEdgeSummary[];
@@ -2136,6 +2252,249 @@ function buildGraphTopologyScene(graph: GraphSelectionGraph | null): GraphTopolo
     nodes: positionedNodes,
     edges: visibleEdges,
     hiddenEdgeCount
+  };
+}
+
+function compareGraphNodeTypes(left: string, right: string) {
+  const leftIndex = graphNodeTypePriority.indexOf(left);
+  const rightIndex = graphNodeTypePriority.indexOf(right);
+  if (leftIndex === -1 && rightIndex === -1) {
+    return left.localeCompare(right);
+  }
+  if (leftIndex === -1) {
+    return 1;
+  }
+  if (rightIndex === -1) {
+    return -1;
+  }
+  return leftIndex - rightIndex;
+}
+
+function buildGraphMindMapScene(
+  graph: GraphSelectionGraph | null,
+  selectedNodeId: string | null
+): GraphMindMapScene | null {
+  if (!graph || graph.nodes.length === 0) {
+    return null;
+  }
+
+  const orderedNodes = [...graph.nodes].sort((left, right) => {
+    const typeComparison = compareGraphNodeTypes(left.nodeType, right.nodeType);
+    if (typeComparison !== 0) {
+      return typeComparison;
+    }
+    if (right.degree !== left.degree) {
+      return right.degree - left.degree;
+    }
+    return left.displayName.localeCompare(right.displayName);
+  });
+  const centerNode =
+    (selectedNodeId ? graph.nodes.find((node) => node.id === selectedNodeId) : null) ??
+    orderedNodes.find((node) => node.nodeType === "root") ??
+    orderedNodes[0];
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node] as const));
+  const directNeighbors = new Map<
+    string,
+    {
+      node: GraphNodeSummary;
+      edgeTypes: Set<string>;
+    }
+  >();
+
+  for (const edge of graph.edges) {
+    const neighborId =
+      edge.fromNodeId === centerNode.id
+        ? edge.toNodeId
+        : edge.toNodeId === centerNode.id
+          ? edge.fromNodeId
+          : null;
+    if (!neighborId || neighborId === centerNode.id) {
+      continue;
+    }
+
+    const neighbor = nodeById.get(neighborId);
+    if (!neighbor) {
+      continue;
+    }
+
+    const existing = directNeighbors.get(neighbor.id);
+    if (existing) {
+      existing.edgeTypes.add(edge.edgeType);
+      continue;
+    }
+    directNeighbors.set(neighbor.id, {
+      node: neighbor,
+      edgeTypes: new Set([edge.edgeType])
+    });
+  }
+
+  const grouped = new Map<
+    string,
+    Array<{
+      node: GraphNodeSummary;
+      edgeTypes: Set<string>;
+    }>
+  >();
+  for (const neighbor of directNeighbors.values()) {
+    const group = grouped.get(neighbor.node.nodeType) ?? [];
+    group.push(neighbor);
+    grouped.set(neighbor.node.nodeType, group);
+  }
+
+  const maxBranches = 6;
+  const maxNodesPerBranch = 6;
+  const sourceBranches = [...grouped.entries()]
+    .map(([nodeType, nodes]) => ({
+      nodeType,
+      nodes: [...nodes].sort((left, right) => {
+        if (right.node.degree !== left.node.degree) {
+          return right.node.degree - left.node.degree;
+        }
+        return left.node.displayName.localeCompare(right.node.displayName);
+      })
+    }))
+    .sort((left, right) => compareGraphNodeTypes(left.nodeType, right.nodeType));
+  const visibleBranchSources = sourceBranches.slice(0, maxBranches);
+  const hiddenNodeCount =
+    sourceBranches.slice(maxBranches).reduce((total, branch) => total + branch.nodes.length, 0) +
+    visibleBranchSources.reduce(
+      (total, branch) => total + Math.max(branch.nodes.length - maxNodesPerBranch, 0),
+      0
+    );
+
+  const nodeWidth = 164;
+  const nodeHeight = 46;
+  const nodeGap = 12;
+  const branchWidth = 122;
+  const branchHeight = 46;
+  const branchGap = 30;
+  const topPad = 42;
+  const bottomPad = 42;
+  const centerWidth = 206;
+  const centerHeight = 70;
+  const leafToBranchGap = 42;
+  const branchToCenterGap = 66;
+  const outerPad = 42;
+  const sideEntries: Record<"left" | "right", typeof visibleBranchSources> = {
+    left: [],
+    right: []
+  };
+  const sideHeights: Record<"left" | "right", number> = { left: 0, right: 0 };
+
+  for (const branch of visibleBranchSources) {
+    const visibleNodes = branch.nodes.slice(0, maxNodesPerBranch);
+    const stackHeight = Math.max(
+      branchHeight,
+      visibleNodes.length * nodeHeight + Math.max(visibleNodes.length - 1, 0) * nodeGap
+    );
+    const side = sideHeights.right <= sideHeights.left ? "right" : "left";
+    sideEntries[side].push(branch);
+    sideHeights[side] += stackHeight + branchGap;
+  }
+
+  const contentHeight = Math.max(
+    sideHeights.left > 0 ? sideHeights.left - branchGap : centerHeight,
+    sideHeights.right > 0 ? sideHeights.right - branchGap : centerHeight,
+    centerHeight
+  );
+  const height = topPad + contentHeight + bottomPad;
+  const centerX = outerPad + nodeWidth + leafToBranchGap + branchWidth + branchToCenterGap;
+  const centerY = Math.round((height - centerHeight) / 2);
+  const rightBranchX = centerX + centerWidth + branchToCenterGap;
+  const rightNodeX = rightBranchX + branchWidth + leafToBranchGap;
+  const leftBranchX = centerX - branchToCenterGap - branchWidth;
+  const leftNodeX = leftBranchX - leafToBranchGap - nodeWidth;
+  const width = rightNodeX + nodeWidth + outerPad;
+  const branches: GraphMindMapBranch[] = [];
+  const connectors: GraphMindMapConnector[] = [];
+
+  for (const side of ["left", "right"] as const) {
+    let cursorY = topPad;
+    for (const sourceBranch of sideEntries[side]) {
+      const visibleNodes = sourceBranch.nodes.slice(0, maxNodesPerBranch);
+      const itemStackHeight =
+        visibleNodes.length * nodeHeight + Math.max(visibleNodes.length - 1, 0) * nodeGap;
+      const stackHeight = Math.max(branchHeight, itemStackHeight);
+      const branchY = Math.round(cursorY + (stackHeight - branchHeight) / 2);
+      const itemStartY = Math.round(cursorY + (stackHeight - itemStackHeight) / 2);
+      const tone = getGraphNodeTone(sourceBranch.nodeType);
+      const branchX = side === "left" ? leftBranchX : rightBranchX;
+      const nodeX = side === "left" ? leftNodeX : rightNodeX;
+      const nodes = visibleNodes.map((entry, index) => ({
+        node: entry.node,
+        relationLabel: [...entry.edgeTypes].sort().map(formatGraphLabel).join(" · "),
+        x: nodeX,
+        y: itemStartY + index * (nodeHeight + nodeGap),
+        width: nodeWidth,
+        height: nodeHeight,
+        tone: getGraphNodeTone(entry.node.nodeType)
+      }));
+      const branch: GraphMindMapBranch = {
+        key: sourceBranch.nodeType,
+        nodeType: sourceBranch.nodeType,
+        label: formatGraphLabel(sourceBranch.nodeType),
+        side,
+        x: branchX,
+        y: branchY,
+        width: branchWidth,
+        height: branchHeight,
+        nodes,
+        omittedNodeCount: Math.max(sourceBranch.nodes.length - visibleNodes.length, 0),
+        tone
+      };
+      branches.push(branch);
+
+      const centerStartX = side === "left" ? centerX : centerX + centerWidth;
+      const branchEndX = side === "left" ? branchX + branchWidth : branchX;
+      const centerStartY = centerY + centerHeight / 2;
+      const branchEndY = branchY + branchHeight / 2;
+      const branchCurve = Math.max(36, Math.abs(centerStartX - branchEndX) * 0.44);
+      connectors.push({
+        id: `branch-${side}-${sourceBranch.nodeType}`,
+        path:
+          side === "left"
+            ? `M ${centerStartX} ${centerStartY} C ${centerStartX - branchCurve} ${centerStartY}, ${branchEndX + branchCurve} ${branchEndY}, ${branchEndX} ${branchEndY}`
+            : `M ${centerStartX} ${centerStartY} C ${centerStartX + branchCurve} ${centerStartY}, ${branchEndX - branchCurve} ${branchEndY}, ${branchEndX} ${branchEndY}`,
+        color: tone.accent,
+        kind: "branch"
+      });
+
+      for (const node of nodes) {
+        const nodeEndX = side === "left" ? node.x + node.width : node.x;
+        const branchStartX = side === "left" ? branchX : branchX + branchWidth;
+        const branchStartY = branchY + branchHeight / 2;
+        const nodeEndY = node.y + node.height / 2;
+        const nodeCurve = Math.max(28, Math.abs(branchStartX - nodeEndX) * 0.45);
+        connectors.push({
+          id: `node-${side}-${sourceBranch.nodeType}-${node.node.id}`,
+          path:
+            side === "left"
+              ? `M ${branchStartX} ${branchStartY} C ${branchStartX - nodeCurve} ${branchStartY}, ${nodeEndX + nodeCurve} ${nodeEndY}, ${nodeEndX} ${nodeEndY}`
+              : `M ${branchStartX} ${branchStartY} C ${branchStartX + nodeCurve} ${branchStartY}, ${nodeEndX - nodeCurve} ${nodeEndY}, ${nodeEndX} ${nodeEndY}`,
+          color: node.tone.accent,
+          kind: "node"
+        });
+      }
+
+      cursorY += stackHeight + branchGap;
+    }
+  }
+
+  return {
+    width,
+    height,
+    center: {
+      node: centerNode,
+      x: centerX,
+      y: centerY,
+      width: centerWidth,
+      height: centerHeight,
+      tone: getGraphNodeTone(centerNode.nodeType)
+    },
+    branches,
+    connectors,
+    directNodeCount: directNeighbors.size,
+    hiddenNodeCount
   };
 }
 
@@ -3221,6 +3580,10 @@ function RecentRunsTable({
 function ProjectLibraryPanel({
   projects,
   recentRuns,
+  runtimeSummaries,
+  runtimeRefreshRemainingSeconds,
+  runtimeRefreshedAt,
+  runtimeRefreshing,
   telemetryReady,
   repairFeedback,
   onboardingLogs,
@@ -3229,15 +3592,21 @@ function ProjectLibraryPanel({
   busy,
   onBindProject,
   onInspectProject,
+  onInspectProjectSkills,
   onAnalyzeProject,
   onScanProject,
   onRepairProject,
   onViewOnboardingLog,
+  onRefreshRuntimeSnapshot,
   onToggleMonitoring,
   onUnbindProject
 }: {
   projects: ManagedProject[];
   recentRuns: SkillRunSummary[];
+  runtimeSummaries: ProjectRuntimeSummary[];
+  runtimeRefreshRemainingSeconds: number;
+  runtimeRefreshedAt: string | null;
+  runtimeRefreshing: boolean;
   telemetryReady: boolean;
   repairFeedback: ProjectRepairFeedback | null;
   onboardingLogs: ProjectOnboardingLogEntry[];
@@ -3246,15 +3615,20 @@ function ProjectLibraryPanel({
   busy: boolean;
   onBindProject: () => void;
   onInspectProject: (project: ManagedProject) => void;
+  onInspectProjectSkills: (project: ManagedProject) => void;
   onAnalyzeProject: (project: ManagedProject) => void;
   onScanProject: (project: ManagedProject) => void;
   onRepairProject: (project: ManagedProject) => void;
   onViewOnboardingLog: (project: ManagedProject) => void;
+  onRefreshRuntimeSnapshot: () => void;
   onToggleMonitoring: (project: ManagedProject, enabled: boolean) => void;
   onUnbindProject: (project: ManagedProject) => void;
 }) {
   const { tx } = useLanguage();
   const currentPath = normalizeProjectPath(currentProjectRoot);
+  const runtimeSummaryByPath = new Map(
+    runtimeSummaries.map((summary) => [normalizeProjectPath(summary.projectPath), summary])
+  );
 
   return (
     <article className="project-library-panel entity-project">
@@ -3269,7 +3643,29 @@ function ProjectLibraryPanel({
             )}
           </p>
         </div>
-        <BindProjectButton busy={busy} onClick={onBindProject} />
+        <div className="project-library-head-actions">
+          {projects.length > 0 ? (
+            <div className="project-runtime-refresh-status" aria-live="polite">
+              <span className={runtimeRefreshing ? "is-refreshing" : undefined}>
+                {runtimeRefreshing
+                  ? tx("Refreshing runtime", "正在刷新运行数据")
+                  : tx(`Refresh in ${runtimeRefreshRemainingSeconds}s`, `${runtimeRefreshRemainingSeconds} 秒后刷新`)}
+              </span>
+              <small>{runtimeRefreshedAt ? formatDateTime(runtimeRefreshedAt) : tx("Waiting for first refresh", "等待首次刷新")}</small>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className={`project-runtime-refresh-button${runtimeRefreshing ? " is-loading" : ""}`}
+            aria-label={tx("Refresh project runtime data", "刷新项目运行数据")}
+            title={tx("Refresh project runtime data", "刷新项目运行数据")}
+            onClick={onRefreshRuntimeSnapshot}
+            disabled={runtimeRefreshing || projects.length === 0}
+          >
+            <RefreshIcon />
+          </button>
+          <BindProjectButton busy={busy} onClick={onBindProject} />
+        </div>
       </div>
 
       {projects.length === 0 ? (
@@ -3281,12 +3677,12 @@ function ProjectLibraryPanel({
         <div className="project-library-table-shell">
           <table className="project-library-table">
             <colgroup>
-              <col style={{ width: "28%" }} />
+              <col style={{ width: "29%" }} />
               <col style={{ width: "13%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "18%" }} />
-              <col style={{ width: "9%" }} />
-              <col style={{ width: "25%" }} />
+              <col style={{ width: "10%" }} />
+              <col style={{ width: "19%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "21%" }} />
             </colgroup>
             <thead>
               <tr>
@@ -3306,12 +3702,19 @@ function ProjectLibraryPanel({
                   repairFeedback?.projectPath === project.path ? repairFeedback : null;
                 const isRepairingProject = projectRepairFeedback?.status === "running";
                 const projectLogCount = onboardingLogs.filter((entry) => entry.projectPath === project.path).length;
+                const runtimeSummary = runtimeSummaryByPath.get(project.path);
                 const matchingWorkspaceRuns = recentRuns.filter(
                   (run) =>
                     run.workspaceRef &&
                     isPathInsideProject(run.workspaceRef, project.path)
                 );
-                const hasExplicitSkillRun = matchingWorkspaceRuns.some((run) => run.confidenceScore > 0.68);
+                const projectRuntimeLogCount = runtimeSummary?.totalRuns ?? matchingWorkspaceRuns.length;
+                const hasExplicitSkillRun = runtimeSummary
+                  ? runtimeSummary.explicitSkillRuns > 0
+                  : matchingWorkspaceRuns.some((run) => run.confidenceScore > inferredSkillEvidenceThreshold);
+                const hasInferredSkillRun = runtimeSummary
+                  ? runtimeSummary.qualifiedSkillRuns > 0
+                  : matchingWorkspaceRuns.some((run) => run.confidenceScore >= inferredSkillEvidenceThreshold);
                 const latestMatchingWorkspaceRef = matchingWorkspaceRuns
                   .slice()
                   .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0]?.workspaceRef;
@@ -3341,6 +3744,8 @@ function ProjectLibraryPanel({
                         ? "needs-authorization"
                       : hasExplicitSkillRun
                         ? "healthy"
+                        : hasInferredSkillRun
+                          ? "inferred-skill"
                         : workspaceMatchesProject
                           ? "connected-awaiting-skill"
                           : "needs-connection";
@@ -3365,6 +3770,8 @@ function ProjectLibraryPanel({
                           ? tx("Needs authorization", "需要授权")
                         : onboardingStatus === "connected-awaiting-skill"
                           ? tx("Connected, awaiting Skill", "已连接待触发")
+                        : onboardingStatus === "inferred-skill"
+                          ? tx("Inferred Skill run", "推断触发")
                         : onboardingStatus === "healthy"
                           ? tx("Running normally", "运行正常")
                           : tx("Ready, not connected", "已配置待连接");
@@ -3389,6 +3796,11 @@ function ProjectLibraryPanel({
                             `Codex directory matches ${project.path}, but no explicit Skill invocation has been detected yet.`,
                             `Codex 目录已匹配 ${project.path}，但尚未检测到明确的技能调用。`
                           )
+                      : onboardingStatus === "inferred-skill"
+                        ? tx(
+                            "A project Skill run was inferred from the matching workspace, Skill-file reads, and tool-call evidence.",
+                            "已根据匹配目录、技能文件读取和工具调用证据识别到项目技能运行。"
+                          )
                       : onboardingStatus === "healthy"
                         ? tx("A matching workspace and explicit Skill evidence were detected.", "已检测到匹配的工作目录和明确 Skill 证据。")
                         : tx("Run project detection to verify this binding.", "请运行项目检测以验证绑定。"))
@@ -3398,17 +3810,34 @@ function ProjectLibraryPanel({
                     <td data-label={tx("Project", "项目")}>
                       <div className="project-name-cell">
                         <strong>{project.name}</strong>
-                        <span>{project.path}</span>
+                        <span title={project.path}>{project.path}</span>
                       </div>
                     </td>
-                    <td data-label={tx("Scan Time", "扫描时间")}>{formatDateTime(project.lastScanAt)}</td>
+                    <td data-label={tx("Scan Time", "扫描时间")}>
+                      {project.lastScanAt ? (
+                        <time className="project-scan-time" dateTime={project.lastScanAt}>
+                          <span>{new Date(project.lastScanAt).toLocaleDateString()}</span>
+                          <small>{new Date(project.lastScanAt).toLocaleTimeString()}</small>
+                        </time>
+                      ) : (
+                        <span className="project-scan-time-empty">{tx("Not scanned", "未扫描")}</span>
+                      )}
+                    </td>
                     <td data-label={tx("Skills", "技能")}>
                       <button
                         type="button"
                         className="project-skill-count-button"
-                        onClick={() => onInspectProject(project)}
+                        aria-label={project.skillsFound == null
+                          ? tx("Project not scanned", "项目尚未扫描")
+                          : tx(`View ${project.skillsFound} project Skills`, `查看 ${project.skillsFound} 个项目技能`)}
+                        title={project.skillsFound == null
+                          ? tx("Scan this project to collect Skills", "扫描该项目后收集技能")
+                          : tx("View project Skills", "查看项目技能")}
+                        onClick={() => onInspectProjectSkills(project)}
                       >
-                        {project.skillsFound == null ? tx("Not scanned", "未扫描") : formatCount(project.skillsFound)}
+                        <span>{project.skillsFound == null ? tx("Not scanned", "未扫描") : formatCount(project.skillsFound)}</span>
+                        {project.skillsFound == null ? null : <small>{tx("items", "项")}</small>}
+                        <span className="project-skill-count-arrow" aria-hidden="true">›</span>
                       </button>
                     </td>
                     <td data-label={tx("Onboarding Status", "接入状态")}>
@@ -3435,6 +3864,11 @@ function ProjectLibraryPanel({
                             {tx("Codex directory matched; Skill not triggered", "Codex 目录已匹配，技能待触发")}
                           </small>
                         ) : null}
+                        {onboardingStatus === "inferred-skill" ? (
+                          <small className="project-connection-workspace is-inferred" title={statusDetail}>
+                            {tx("Inferred runtime evidence imported", "已导入推断级运行证据")}
+                          </small>
+                        ) : null}
                         {onboardingStatus === "healthy" ? (
                           <small className="project-connection-workspace is-matched">
                             {tx("Codex directory matched", "Codex 目录已匹配")}
@@ -3445,7 +3879,11 @@ function ProjectLibraryPanel({
                           className="project-onboarding-log-link"
                           onClick={() => onViewOnboardingLog(project)}
                         >
-                          {tx("View log", "查看日志")} {projectLogCount > 0 ? `(${projectLogCount})` : ""}
+                          {tx("View runtime log", "查看运行日志")} {projectRuntimeLogCount > 0
+                            ? `(${projectRuntimeLogCount})`
+                            : projectLogCount > 0
+                              ? `(${projectLogCount})`
+                              : ""}
                         </button>
                       </div>
                     </td>
@@ -3497,7 +3935,7 @@ function ProjectLibraryPanel({
                         >
                           <ScanIcon />
                         </button>
-                        {onboardingStatus !== "healthy" ? (
+                        {onboardingStatus !== "healthy" && onboardingStatus !== "inferred-skill" ? (
                           <button
                             type="button"
                             className={`project-table-icon-action repair${isRepairingProject ? " is-loading" : ""}`}
@@ -3820,6 +4258,609 @@ function SkillRunDetailModal({
   );
 }
 
+function ControlledVerificationModal({
+  project,
+  result,
+  running,
+  onConfirm,
+  onOpenTrace,
+  onClose
+}: {
+  project: ManagedProject;
+  result: ProjectControlledSessionVerification | null;
+  running: boolean;
+  onConfirm: () => void;
+  onOpenTrace: (traceId: string) => void;
+  onClose: () => void;
+}) {
+  const { mode, tx } = useLanguage();
+  const displayResult = result?.state && result.state !== "not_run" ? result : null;
+  return (
+    <div
+      className="controlled-verification-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (!running && event.target === event.currentTarget) onClose();
+      }}
+    >
+      <article
+        className="controlled-verification-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="controlled-verification-modal-title"
+      >
+        <header className="controlled-verification-modal-head">
+          <div>
+            <span className="os-module-kicker">{tx("Local verification", "本机受控验证")}</span>
+            <h2 id="controlled-verification-modal-title">{tx("Run a bounded Codex verification", "运行一次受控 Codex 验证")}</h2>
+            <p>{project.name}</p>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={tx("Close", "关闭")}
+            title={tx("Close", "关闭")}
+            disabled={running}
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="controlled-verification-path">
+          <span>{tx("Target project", "目标项目")}</span>
+          <code>{project.path}</code>
+        </div>
+
+        <ul className="controlled-verification-guards">
+          <li>{tx("Creates a separate ephemeral thread; it never takes over existing Codex tasks.", "创建独立临时线程，不会接管已有 Codex 任务。")}</li>
+          <li>{tx("Uses read-only sandbox, network disabled, and approval policy set to never.", "使用只读沙箱、禁用网络，并设为永不请求授权。")}</li>
+          <li>{tx("Fixed scope: reply with the verification marker only; no file reads, writes, commands, or tools.", "固定范围：仅返回验证标识；不读取或修改文件，不执行命令或工具。")}</li>
+          <li>{tx("Stops at 90 seconds, on a command/file/tool item, or after the reactive Token watchdog reports 32,000 Tokens.", "90 秒超时、出现命令/文件/工具项，或 Token 事后预警达到 32,000 时立即中止。")}</li>
+          <li>{tx("Stores only lifecycle counts, item types, token total, and result state. No prompt or output is stored.", "仅保存生命周期计数、项类型、Token 总数和结果状态；不会保存提示词或回复。")}</li>
+        </ul>
+
+        {displayResult ? (
+          <section className={`controlled-verification-result state-${displayResult.state}`} aria-live="polite">
+            <div>
+              <span>{tx("Result", "结果")}</span>
+              <strong>{controlledVerificationStateLabel(displayResult.state, mode)}</strong>
+            </div>
+            <div>
+              <span>{tx("Lifecycle", "生命周期")}</span>
+              <strong>{displayResult.lifecycleEventCount}</strong>
+            </div>
+            <div>
+              <span>{tx("Tokens", "Token")}</span>
+              <strong>{displayResult.totalTokens ?? "n/a"}</strong>
+            </div>
+            <div>
+              <span>{tx("Items", "项类型")}</span>
+              <strong>{displayResult.itemTypes.join(" · ") || "n/a"}</strong>
+            </div>
+            <div>
+              <span>{tx("Thread", "线程")}</span>
+              <strong>{displayResult.threadArchived ? tx("Archived", "已归档") : tx("Archive not confirmed", "归档未确认")}</strong>
+            </div>
+            <div>
+              <span>{tx("Finished", "结束时间")}</span>
+              <strong>{formatDateTime(displayResult.finishedAt)}</strong>
+            </div>
+            {displayResult.stopReason ? (
+              <small>{tx("Stop reason", "结束原因")}: {displayResult.stopReason}</small>
+            ) : null}
+            {displayResult.errorCode ? (
+              <small>{tx("Error code", "错误代码")}: {displayResult.errorCode}</small>
+            ) : null}
+            {displayResult.traceId ? (
+              <small className="controlled-verification-trace-ready">
+                {tx("The precise Turn trace is ready to inspect.", "对应的精确 Turn 链路已就绪，可打开查看。")}
+              </small>
+            ) : displayResult.state !== "running" ? (
+              <small className="controlled-verification-trace-unavailable">
+                {tx(
+                  "No Turn trace was created, so there is no session record to open.",
+                  "尚未创建 Turn 链路，因此没有可打开的会话记录。"
+                )}
+              </small>
+            ) : null}
+          </section>
+        ) : null}
+
+        <footer className="controlled-verification-actions">
+          <button type="button" className="secondary" disabled={running} onClick={onClose}>
+            {tx("Close", "关闭")}
+          </button>
+          {displayResult?.traceId ? (
+            <button type="button" className="secondary" disabled={running} onClick={() => onOpenTrace(displayResult.traceId as string)}>
+              {tx("Open session trace", "打开会话链路")}
+            </button>
+          ) : null}
+          <button type="button" className="primary" disabled={running} onClick={onConfirm}>
+            {running ? tx("Verification running...", "验证运行中...") : tx("Confirm and run", "确认并运行")}
+          </button>
+        </footer>
+      </article>
+    </div>
+  );
+}
+
+function ProjectRuntimeLogModal({
+  project,
+  runs,
+  totalRunCount,
+  onboardingEntries,
+  skills,
+  onOpenSkillRun,
+  onClose
+}: {
+  project: ManagedProject;
+  runs: SkillRunSummary[];
+  totalRunCount: number;
+  onboardingEntries: ProjectOnboardingLogEntry[];
+  skills: SkillSummary[];
+  onOpenSkillRun: (skill: SkillSummary, fallbackRuns: SkillRunSummary[]) => void;
+  onClose: () => void;
+}) {
+  const { tx } = useLanguage();
+  const skillById = new Map(skills.map((skill) => [skill.id, skill]));
+  const totalTokens = runs.reduce((sum, run) => sum + run.totalTokens, 0);
+  const totalToolCalls = runs.reduce((sum, run) => sum + run.toolCallCount, 0);
+  const latestRunAt = runs[0]?.startedAt ?? null;
+
+  return (
+    <div className="project-log-modal-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) {
+        onClose();
+      }
+    }}>
+      <section
+        className="project-log-modal project-runtime-log-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-runtime-log-modal-title"
+      >
+        <div className="project-log-modal-head">
+          <div>
+            <span className="os-module-kicker">{tx("Runtime Log", "运行日志")}</span>
+            <h2 id="project-runtime-log-modal-title">{project.name}</h2>
+            <p>{project.path}</p>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={tx("Close runtime log", "关闭运行日志")}
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="project-runtime-log-metrics">
+          <div>
+            <span>{tx("Runs", "运行")}</span>
+            <strong>{formatCount(totalRunCount)}</strong>
+          </div>
+          <div>
+            <span>{tx("Skills", "技能")}</span>
+            <strong>{formatCount(new Set(runs.map((run) => run.skillId)).size)}</strong>
+          </div>
+          <div>
+            <span>{tx("Tool Calls", "工具调用")}</span>
+            <strong>{formatCount(totalToolCalls)}</strong>
+          </div>
+          <div>
+            <span>{tx("Tokens", "Token")}</span>
+            <strong>{formatCount(totalTokens)}</strong>
+          </div>
+          <div>
+            <span>{tx("Latest", "最近")}</span>
+            <strong>{formatDateTime(latestRunAt)}</strong>
+          </div>
+        </div>
+
+        {runs.length > 0 ? (
+          <section className="project-runtime-log-section">
+            <div className="project-runtime-log-section-head">
+              <div>
+                <strong>{tx("Skill runtime events", "Skill 运行事件")}</strong>
+                <span>
+                  {totalRunCount > runs.length
+                    ? tx(
+                        `Showing the latest ${formatCount(runs.length)} of ${formatCount(totalRunCount)} runs.`,
+                        `当前展示最近 ${formatCount(runs.length)} / ${formatCount(totalRunCount)} 条运行。`
+                      )
+                    : tx("Imported from local Codex session evidence.", "来自本地 Codex 会话证据导入。")}
+                </span>
+              </div>
+              <small>{tx("Click a Skill to open its full call history.", "点击 Skill 可打开完整调用历史。")}</small>
+            </div>
+            <div className="project-runtime-log-table-shell">
+              <table className="project-runtime-log-table">
+                <thead>
+                  <tr>
+                    <th>{tx("Time", "时间")}</th>
+                    <th>{tx("Skill", "技能")}</th>
+                    <th>{tx("Status", "状态")}</th>
+                    <th>{tx("Evidence", "证据")}</th>
+                    <th>{tx("Tools", "工具")}</th>
+                    <th>{tx("Tokens", "Token")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.slice(0, runtimeRunFetchLimit).map((run) => {
+                    const skill = skillById.get(run.skillId);
+                    return (
+                      <tr key={run.runId}>
+                        <td>
+                          <strong>{formatDateTime(run.startedAt)}</strong>
+                          <span>{run.finishedAt ? formatDateTime(run.finishedAt) : tx("Running", "运行中")}</span>
+                        </td>
+                        <td>
+                          {skill ? (
+                            <button
+                              type="button"
+                              className="project-runtime-skill-link"
+                              title={tx("Open Skill run details", "打开 Skill 调用详情")}
+                              onClick={() => onOpenSkillRun(skill, [run])}
+                            >
+                              {skill.displayName}
+                            </button>
+                          ) : (
+                            <strong>{run.skillName}</strong>
+                          )}
+                        </td>
+                        <td><StatusPill status={run.status} /></td>
+                        <td>
+                          <strong>{run.captureMode}</strong>
+                          <span>{Math.round(run.confidenceScore * 100)}%</span>
+                        </td>
+                        <td>{formatCount(run.toolCallCount)}</td>
+                        <td>{formatCount(run.totalTokens)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+
+        {onboardingEntries.length > 0 ? (
+          <section className="project-runtime-log-section">
+            <div className="project-runtime-log-section-head">
+              <div>
+                <strong>{tx("Onboarding events", "接入过程")}</strong>
+                <span>{tx("Folder scan, workflow, and permission history.", "目录扫描、工作流和授权记录。")}</span>
+              </div>
+            </div>
+            <div className="project-log-list">
+              {onboardingEntries.map((entry) => (
+                <div className={`project-log-entry tone-${entry.tone}`} key={entry.id}>
+                  <i aria-hidden="true" />
+                  <div>
+                    <span>
+                      {entry.stage === "scan"
+                        ? tx("Folder Scan", "目录扫描")
+                        : entry.stage === "skills"
+                          ? tx("Skill Index", "技能索引")
+                          : entry.stage === "workflow"
+                            ? tx("Workflow", "工作流")
+                            : entry.stage === "telemetry"
+                              ? tx("Permission", "监控授权")
+                              : entry.stage === "connection"
+                                ? tx("Codex Connection", "Codex 连接")
+                                : tx("Complete", "完成")}
+                    </span>
+                    <p>{entry.message}</p>
+                  </div>
+                  <time>{formatDateTime(entry.occurredAt)}</time>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {runs.length === 0 && onboardingEntries.length === 0 ? (
+          <div className="project-log-empty">
+            <strong>{tx("No runtime evidence yet", "还没有运行证据")}</strong>
+            <p>{tx("Refresh runtime evidence after using Codex in this project.", "在该项目中使用 Codex 后刷新运行证据。")}</p>
+          </div>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+type SkillsWorkflowVisualStageState = "done" | "active" | "next" | "pending";
+
+function SkillsWorkflowVisual({
+  projectName,
+  projectPath,
+  projectReady,
+  workflowReady,
+  traceCount,
+  runtimeCount,
+  reportsReady,
+  proposalCount,
+  onNavigate
+}: {
+  projectName: string;
+  projectPath: string;
+  projectReady: boolean;
+  workflowReady: boolean;
+  traceCount: number;
+  runtimeCount: number;
+  reportsReady: boolean;
+  proposalCount: number;
+  onNavigate: (href: "#discovery" | "#session-trace" | "#analysis" | "#evaluate" | "#proposals") => void;
+}) {
+  const { tx } = useLanguage();
+  const requestObserved = traceCount > 0;
+  const executionObserved = runtimeCount > 0;
+  const stages = [
+    {
+      id: "context",
+      label: tx("Project context", "项目上下文"),
+      compact: tx("Bind + scan", "绑定 + 扫描"),
+      detail: tx("The selected project directory is the boundary. Skills Workflow reads this project context before acting.", "先确定项目目录边界。工作流会先读取项目上下文，再开始工作。"),
+      evidence: projectPath || tx("No project selected", "尚未选择项目"),
+      href: "#discovery" as const,
+      ready: projectReady
+    },
+    {
+      id: "understand",
+      label: tx("Understand request", "理解需求"),
+      compact: tx("Route", "需求路由"),
+      detail: tx("The outer router identifies the request type, complexity, and the project context that should receive it.", "最外层路由会识别需求类型、复杂度，以及这条需求应该进入哪个项目上下文。"),
+      evidence: requestObserved ? `${traceCount} ${tx("trace records", "条链路记录")}` : tx("Waiting for the first request", "等待第一条需求"),
+      href: "#session-trace" as const,
+      ready: requestObserved
+    },
+    {
+      id: "impact",
+      label: tx("Map impact", "分析影响范围"),
+      compact: tx("Impact", "影响范围"),
+      detail: tx("The workflow makes affected modules, files, and project boundaries visible before implementation begins.", "执行前先把受影响模块、文件和项目边界显式列出来。"),
+      evidence: requestObserved ? tx("Impact gate is available in the trace", "链路中已有影响范围门禁") : tx("Appears after request routing", "需求路由后出现"),
+      href: "#session-trace" as const,
+      ready: requestObserved
+    },
+    {
+      id: "plan",
+      label: tx("Break into tasks", "拆解事项"),
+      compact: tx("Plan", "计划"),
+      detail: tx("A complex request becomes an item list and smaller executable subtasks. The list is the shared checkpoint.", "复杂需求会拆成事项清单和可执行子任务，清单是用户和系统共同确认的检查点。"),
+      evidence: workflowReady ? tx("Project workflow is ready", "项目工作流已就绪") : tx("Uses the recommended workflow", "使用推荐工作流"),
+      href: "#session-trace" as const,
+      ready: workflowReady && requestObserved
+    },
+    {
+      id: "confirm",
+      label: tx("User confirmation", "用户确认"),
+      compact: tx("Gate", "确认门禁"),
+      detail: tx("The system pauses before meaningful writes or execution when the request, task list, or impact is not confirmed.", "需求、任务清单或影响范围没有确认时，系统会在真正写入或执行前暂停。"),
+      evidence: executionObserved ? tx("Confirmation gate passed for observed runs", "已观测运行已通过确认门禁") : tx("No execution is hidden behind this gate", "执行不会绕过这个门禁"),
+      href: "#session-trace" as const,
+      ready: executionObserved
+    },
+    {
+      id: "execute",
+      label: tx("Run Skill chain", "执行技能链"),
+      compact: tx("Execute", "执行"),
+      detail: tx("The selected Skills run in sequence, with each hit, tool call, and token signal captured locally.", "选中的技能按链路执行，每次命中、工具调用和 Token 信号都会在本地记录。"),
+      evidence: executionObserved ? `${runtimeCount} ${tx("runtime events", "条运行事件")}` : tx("No runtime evidence yet", "还没有运行证据"),
+      href: "#analysis" as const,
+      ready: executionObserved
+    },
+    {
+      id: "verify",
+      label: tx("Self-check", "自我审查"),
+      compact: tx("Verify", "验证"),
+      detail: tx("The workflow checks implementation results, tests, quality signals, and the evidence behind the result.", "工作流会检查实现结果、测试、质量指标，以及结果背后的证据。"),
+      evidence: reportsReady ? tx("Evaluation evidence is available", "评测证据已生成") : tx("Waiting for an evaluation report", "等待评测报告"),
+      href: "#evaluate" as const,
+      ready: reportsReady
+    },
+    {
+      id: "learn",
+      label: tx("Confirm and learn", "确认并沉淀"),
+      compact: tx("Improve", "沉淀"),
+      detail: tx("Confirmed feedback becomes local memory, proposals, and reusable workflow improvements instead of disappearing after one chat.", "确认后的反馈会沉淀为本地记忆、建议和可复用的工作流改进，不会在一次会话后消失。"),
+      evidence: proposalCount > 0 ? `${proposalCount} ${tx("open proposals", "条待处理建议")}` : tx("No open improvement proposal", "暂无待处理改进建议"),
+      href: "#proposals" as const,
+      ready: reportsReady && proposalCount === 0
+    }
+  ];
+  const firstIncompleteIndex = stages.findIndex((stage) => !stage.ready);
+  const activeStageIndex = firstIncompleteIndex >= 0 ? firstIncompleteIndex : stages.length - 1;
+  const [selectedStageIndex, setSelectedStageIndex] = useState(activeStageIndex);
+  const [presentationMode, setPresentationMode] = useState<GraphPresentationMode>("flow");
+
+  useEffect(() => {
+    setSelectedStageIndex(activeStageIndex);
+  }, [activeStageIndex]);
+
+  const getStageState = (index: number): SkillsWorkflowVisualStageState => {
+    if (stages[index].ready) return "done";
+    if (index === activeStageIndex) return "active";
+    if (index === activeStageIndex + 1) return "next";
+    return "pending";
+  };
+  const selectedStage = stages[selectedStageIndex] ?? stages[activeStageIndex];
+  const selectedStageState = getStageState(selectedStageIndex);
+  const statusLabel = (state: SkillsWorkflowVisualStageState) =>
+    state === "done"
+      ? tx("Observed", "已观测")
+      : state === "active"
+        ? tx("Current", "当前")
+        : state === "next"
+          ? tx("Next", "下一步")
+          : tx("Later", "后续");
+  const mindMapBranches = [
+    {
+      id: "understand",
+      label: tx("Understand and scope", "理解与边界"),
+      indexes: [0, 1, 2],
+      side: "left" as const
+    },
+    {
+      id: "plan",
+      label: tx("Design and plan", "方案与计划"),
+      indexes: [3, 4],
+      side: "left" as const
+    },
+    {
+      id: "delivery",
+      label: tx("Implement and verify", "执行与验证"),
+      indexes: [5, 6],
+      side: "right" as const
+    },
+    {
+      id: "learn",
+      label: tx("Accept and improve", "验收与沉淀"),
+      indexes: [7],
+      side: "right" as const
+    }
+  ];
+
+  return (
+    <section className="skills-workflow-visual" aria-label={tx("Skills Workflow visual guide", "技能工作流可视化引导") }>
+      <div className="skills-workflow-visual-head">
+        <div>
+          <span className="os-module-kicker">{tx("SKILLS WORKFLOW", "工作流")}</span>
+          <h2>{tx("From request to verified result", "从一条需求到可验证结果")}</h2>
+          <p>{tx("Every request moves through the same visible checkpoints. Nothing important is hidden behind a black box.", "每条需求都会经过同一套可见检查点，重要步骤不会藏在黑盒里。")}</p>
+        </div>
+        <div className="skills-workflow-visual-head-actions">
+          <div className="skills-workflow-presentation-switcher" role="tablist" aria-label={tx("Workflow presentation", "工作流呈现方式")}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={presentationMode === "flow"}
+              className={presentationMode === "flow" ? "active" : ""}
+              onClick={() => setPresentationMode("flow")}
+            >
+              {tx("Flowchart", "流程图")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={presentationMode === "mindmap"}
+              className={presentationMode === "mindmap" ? "active" : ""}
+              onClick={() => setPresentationMode("mindmap")}
+            >
+              {tx("Mind Map", "思维导图")}
+            </button>
+          </div>
+          <div className="skills-workflow-context">
+            <span>{tx("Current project", "当前项目")}</span>
+            <strong>{projectName || tx("No project selected", "尚未选择项目")}</strong>
+            <small title={projectPath}>{projectPath || tx("Bind one folder to begin", "绑定一个目录后开始")}</small>
+          </div>
+        </div>
+      </div>
+
+      <div className={`skills-workflow-visual-board presentation-${presentationMode}`}>
+        {presentationMode === "flow" ? (
+          <div className="skills-workflow-stage-rail" role="list">
+            {stages.map((stage, index) => {
+              const state = getStageState(index);
+              return (
+                <Fragment key={stage.id}>
+                  <button
+                    type="button"
+                    role="listitem"
+                    className={`skills-workflow-stage skills-workflow-stage-${state}${selectedStageIndex === index ? " is-selected" : ""}`}
+                    onClick={() => setSelectedStageIndex(index)}
+                    title={stage.detail}
+                    aria-current={state === "active" ? "step" : undefined}
+                  >
+                    <span className="skills-workflow-stage-index">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="skills-workflow-stage-copy">
+                      <strong>{stage.label}</strong>
+                      <small>{stage.compact}</small>
+                    </span>
+                    <span className="skills-workflow-stage-state">{statusLabel(state)}</span>
+                  </button>
+                  {index < stages.length - 1 ? <span className="skills-workflow-connector" aria-hidden="true">→</span> : null}
+                </Fragment>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="skills-workflow-mindmap" role="list" aria-label={tx("Skills Workflow mind map", "技能工作流思维导图")}>
+            <div className="skills-workflow-mindmap-center">
+              <span>{tx("SKILLS", "技能工作流")}</span>
+              <strong>{tx("Workflow", "工作流")}</strong>
+              <small>{tx("request -> result", "需求 -> 结果")}</small>
+            </div>
+            {mindMapBranches.map((branch) => (
+              <section
+                className={`skills-workflow-mindmap-branch side-${branch.side}`}
+                key={branch.id}
+                role="listitem"
+              >
+                <div className="skills-workflow-mindmap-branch-head">
+                  <span>{branch.label}</span>
+                  <small>{branch.indexes.length} {tx("stages", "阶段")}</small>
+                </div>
+                <div className="skills-workflow-mindmap-stage-list">
+                  {branch.indexes.map((index) => {
+                    const stage = stages[index];
+                    const state = getStageState(index);
+                    return (
+                      <button
+                        type="button"
+                        key={stage.id}
+                        className={`skills-workflow-mindmap-stage state-${state}${selectedStageIndex === index ? " is-selected" : ""}`}
+                        onClick={() => setSelectedStageIndex(index)}
+                        title={stage.detail}
+                        aria-current={state === "active" ? "step" : undefined}
+                      >
+                        <span>{String(index + 1).padStart(2, "0")}</span>
+                        <strong>{stage.label}</strong>
+                        <small>{statusLabel(state)}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+
+        <aside className={`skills-workflow-stage-detail state-${selectedStageState}`}>
+          <div className="skills-workflow-stage-detail-head">
+            <div>
+              <span className="os-module-kicker">{tx("Current checkpoint", "当前检查点")}</span>
+              <strong>{selectedStage.label}</strong>
+            </div>
+            <span>{statusLabel(selectedStageState)}</span>
+          </div>
+          <p>{selectedStage.detail}</p>
+          <div className="skills-workflow-evidence">
+            <span>{tx("Local evidence", "本地证据")}</span>
+            <strong title={selectedStage.evidence}>{selectedStage.evidence}</strong>
+          </div>
+          <button type="button" className="skills-workflow-detail-action" onClick={() => onNavigate(selectedStage.href)}>
+            {selectedStageState === "active" ? tx("Open current checkpoint", "打开当前检查点") : tx("Inspect this stage", "查看这个阶段")} →
+          </button>
+        </aside>
+      </div>
+
+      <div className="skills-workflow-visual-foot">
+        <span><i className="workflow-dot workflow-dot-done" />{tx("Observed evidence", "已观测证据")}</span>
+        <span><i className="workflow-dot workflow-dot-active" />{tx("Current gate", "当前门禁")}</span>
+        <span><i className="workflow-dot workflow-dot-pending" />{tx("Future stage", "后续阶段")}</span>
+        <button type="button" onClick={() => onNavigate("#session-trace")}>
+          {tx("Open message-level trace", "打开消息级会话链路")} ↗
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function ProjectProfileSummaryPanel({ profile }: { profile: ProjectProfileSummary | null }) {
   const { tx } = useLanguage();
 
@@ -3942,53 +4983,264 @@ function ProjectProfileSummaryPanel({ profile }: { profile: ProjectProfileSummar
   );
 }
 
+function AdapterReadinessPanel({
+  readiness,
+  loading,
+  onRefresh,
+  onStartAppServerObservation,
+  onStopAppServerObservation,
+  onOpenControlledVerification,
+  onOpenControlledVerificationTrace,
+  onOpenTelemetryIntake
+}: {
+  readiness: ProjectAdapterReadiness | null;
+  loading: boolean;
+  onRefresh: () => void;
+  onStartAppServerObservation: () => void;
+  onStopAppServerObservation: () => void;
+  onOpenControlledVerification: () => void;
+  onOpenControlledVerificationTrace: (traceId: string) => void;
+  onOpenTelemetryIntake: () => void;
+}) {
+  const { mode, tx } = useLanguage();
+  if (!readiness) {
+    return (
+      <section className="adapter-readiness-panel adapter-readiness-loading">
+        <strong>{loading ? tx("Checking adapter readiness...", "正在检查接入器就绪状态...") : tx("Adapter readiness is not checked yet.", "尚未检查接入器就绪状态。")}</strong>
+        {!loading ? <button type="button" onClick={onRefresh}>{tx("Check readiness", "检查就绪状态")}</button> : null}
+      </section>
+    );
+  }
+
+  const precisionReady = readiness.exactTraceCount > 0;
+  const appServer = readiness.appServerObservation;
+  const appServerCapability = appServer.capability;
+  const canStartAppServer = readiness.precisionPreview.mode === "local_app_server_opt_in";
+  const canStopAppServer = appServer.enabled && (appServer.state === "ready" || appServer.state === "observing");
+  const verification = appServer.lastControlledVerification;
+  return (
+    <section className="adapter-readiness-panel">
+      <div className="adapter-readiness-head">
+        <div>
+          <span className="os-module-kicker">{tx("Adapter readiness", "接入器就绪诊断")}</span>
+          <strong>{precisionReady ? tx("Precise evidence is available", "精确事件已可用") : tx("Separate connection from observation", "连接状态与观测状态已分离")}</strong>
+          <small>{tx("Read-only diagnostic. It does not change Codex or project configuration.", "只读诊断，不会修改 Codex 或项目配置。")}</small>
+        </div>
+        <button type="button" disabled={loading} onClick={onRefresh}>
+          {loading ? tx("Checking...", "检查中...") : tx("Check again", "重新检查")}
+        </button>
+      </div>
+
+      <div className="adapter-readiness-status-grid">
+        <div>
+          <span>{tx("Installation", "安装状态")}</span>
+          <strong>{adapterInstallationLabel(readiness.installationStatus, mode)}</strong>
+        </div>
+        <div>
+          <span>{tx("Connection", "连接状态")}</span>
+          <strong>{adapterConnectionLabel(readiness.connectionStatus, mode)}</strong>
+        </div>
+        <div>
+          <span>{tx("Skill observation", "技能观测")}</span>
+          <strong>{adapterObservationLabel(readiness.observationStatus, mode)}</strong>
+        </div>
+      </div>
+
+      <div className="adapter-readiness-checks">
+        {readiness.checks.map((entry) => (
+          <span key={entry.id} className={`adapter-readiness-check status-${entry.status}`}>
+            <i aria-hidden="true" />
+            {adapterCheckCopy(entry.id, mode)}
+          </span>
+        ))}
+      </div>
+
+      <div className="adapter-readiness-evidence">
+        <span>{tx("Evidence", "观测证据")}</span>
+        <strong>{tx(`${readiness.exactTraceCount} precise`, `${readiness.exactTraceCount} 条精确`)}</strong>
+        <strong>{tx(`${readiness.inferredTraceCount} inferred`, `${readiness.inferredTraceCount} 条推断`)}</strong>
+        <small>{tx("Latest", "最近")}: {formatDateTime(readiness.latestEvidenceAt)}</small>
+      </div>
+
+      <div className="adapter-app-server-poc" data-app-server-observation={appServer.state}>
+        <div className="adapter-app-server-poc-head">
+          <div>
+            <span>{tx("Codex local precise observation (POC)", "Codex 本机精确观测（POC）")}</span>
+            <strong>{appServerObservationStateLabel(appServer.state, mode)}</strong>
+            <small>
+              {tx(
+                "Enabling this local stdio observer does not take over existing Codex sessions or start a Turn.",
+                "启用仅针对当前绑定项目的本机 stdio 观测器时，不会接管已有 Codex 会话，也不会启动 Turn。"
+              )}
+            </small>
+          </div>
+          {canStopAppServer ? (
+            <div className="adapter-app-server-actions">
+              <button type="button" className="secondary" disabled={loading} onClick={onOpenControlledVerification}>
+                {tx("Run controlled verification", "运行受控验证")}
+              </button>
+              <button type="button" className="secondary" disabled={loading} onClick={onStopAppServerObservation}>
+                {loading ? tx("Updating...", "处理中...") : tx("Stop observation", "停止观测")}
+              </button>
+            </div>
+          ) : canStartAppServer ? (
+            <button type="button" className="primary" disabled={loading} onClick={onStartAppServerObservation}>
+              {loading ? tx("Starting...", "启动中...") : tx("Enable local observation", "确认启用本机观测")}
+            </button>
+          ) : null}
+        </div>
+        {appServerCapability ? (
+          <div className="adapter-app-server-capabilities">
+            <span><b>{tx("CLI", "CLI")}</b>{appServerCapability.cliVersion ?? tx("Not detected", "未检测")}</span>
+            <span><b>{tx("Schema", "Schema")}</b>{appServerCapability.schemaFingerprint?.slice(0, 12) ?? tx("Not generated", "未生成")}</span>
+            <span><b>{tx("Lifecycle", "生命周期")}</b>{tx(`${appServerCapability.lifecycleMethods.length} events`, `${appServerCapability.lifecycleMethods.length} 个事件`)}</span>
+            <span><b>{tx("Exact Skill", "精确技能")}</b>{appServerCapability.supportsExactSkillEvents ? tx("Available", "可用") : tx("Unavailable", "不可用")}</span>
+          </div>
+        ) : (
+          <small className="adapter-app-server-pending">{tx("Capability is inspected only after you explicitly enable this POC.", "仅在你明确启用该 POC 后检查本机能力。")}</small>
+        )}
+        {!appServerCapability?.supportsExactSkillEvents ? (
+          <small className="adapter-app-server-limit">
+            {tx(
+              "This Codex schema exposes precise Thread, Turn, Item, and Token lifecycle evidence, but no official explicit Skill invocation events. Skill evidence remains inferred.",
+              "当前 Codex Schema 可提供精确的 Thread、Turn、Item、Token 生命周期证据，但没有官方的显式 Skill 调用事件；技能证据仍保持为推断。"
+            )}
+          </small>
+        ) : null}
+        {appServer.lastError ? <small className="adapter-app-server-error">{appServer.lastError}</small> : null}
+        {verification.state !== "not_run" ? (
+          <div className={`adapter-controlled-verification state-${verification.state}`}>
+            <span>{tx("Latest controlled verification", "最近一次受控验证")}</span>
+            <strong>{controlledVerificationStateLabel(verification.state, mode)}</strong>
+            <small>
+              {tx("Lifecycle", "生命周期")} {verification.lifecycleEventCount} · {tx("Tokens", "Token")} {verification.totalTokens ?? "n/a"} · {verification.threadArchived ? tx("Archived", "已归档") : tx("Archive pending", "归档未确认")}
+            </small>
+            {verification.traceId ? (
+              <button type="button" onClick={() => onOpenControlledVerificationTrace(verification.traceId as string)}>
+                {tx("Open session trace", "打开会话链路")}
+              </button>
+            ) : verification.state !== "running" ? (
+              <small>{tx("No matching Turn trace is available for this verification.", "本次验证没有可关联的 Turn 链路。")}</small>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      <details className="adapter-precision-preview">
+        <summary>{tx("Precision observation preview", "精确观测接入预览")}</summary>
+        <p>
+          {appServer.enabled
+            ? tx("The local stdio observer is enabled. No Codex or project configuration was changed.", "本机 stdio 观测器已启用，未修改 Codex 或项目配置。")
+            : tx("This preview makes no writes. Local observation starts only after your explicit confirmation.", "这是只读预览，不会写入；本机观测仅会在你明确确认后启动。")}
+        </p>
+        <div className="adapter-precision-paths">
+          {readiness.precisionPreview.affectedPaths.map((entry) => (
+            <div key={entry.path}>
+              <code>{adapterPreviewPathLabel(entry.path, mode)}</code>
+              <span>{entry.access === "read" ? tx("Read only", "仅读取") : entry.access === "not_applicable" ? tx("Not planned", "不计划写入") : tx("Write after confirmation", "确认后写入")}</span>
+            </div>
+          ))}
+        </div>
+        <ul>
+          {readiness.precisionPreview.requiredSteps.map((step, index) => (
+            <li key={`${step}-${index}`}>
+              {adapterPreviewStepLabel(readiness.precisionPreview.mode, step, index, mode)}
+            </li>
+          ))}
+        </ul>
+        <div className="adapter-precision-actions">
+          {canStartAppServer ? (
+            <button type="button" className="primary" disabled={loading} onClick={onStartAppServerObservation}>
+              {loading ? tx("Starting...", "启动中...") : tx("Confirm and enable local observation", "确认并启用本机观测")}
+            </button>
+          ) : canStopAppServer ? (
+            <small>{tx("Observation controls are available above.", "观测控制按钮已在上方显示。")}</small>
+          ) : (
+            <button type="button" onClick={onOpenTelemetryIntake}>
+              {tx("Go to telemetry import", "前往导入遥测")}
+            </button>
+          )}
+        </div>
+        {readiness.precisionPreview.blockedReasons.length > 0 ? (
+          <small>{mode === "zh" ? adapterPreviewBlockedReason(readiness.precisionPreview.mode) : readiness.precisionPreview.blockedReasons[0]}</small>
+        ) : null}
+      </details>
+    </section>
+  );
+}
+
 function ProjectAssetDetailPanel({
   project,
+  initialView,
   profile,
-  currentProjectRoot,
   localSkills,
   recentRuns,
+  traceCount,
+  openProposalCount,
+  hasEvaluationEvidence,
   heartbeatEntries,
   telemetryMode,
   backgroundWatchAllowed,
   runtimeRefreshResult,
+  adapterReadiness,
+  adapterReadinessLoading,
   busyAction,
   busy,
   onScanProject,
   onRefreshRuntimeEvidence,
+  onDiagnoseAdapterReadiness,
+  onStartAppServerObservation,
+  onStopAppServerObservation,
+  onOpenControlledVerification,
+  onOpenControlledVerificationTrace,
   onEnableTelemetry,
   onToggleMonitoring,
   onUpdateMonitoringInterval,
   onRenameProject,
+  onNavigate,
+  onOpenTelemetryIntake,
   onClose
 }: {
   project: ManagedProject | null;
+  initialView: ProjectDetailView;
   profile: ProjectProfileSummary | null;
-  currentProjectRoot: string;
   localSkills: SkillSummary[];
   recentRuns: SkillRunSummary[];
+  traceCount: number;
+  openProposalCount: number;
+  hasEvaluationEvidence: boolean;
   heartbeatEntries: ProjectHeartbeatEntry[];
   telemetryMode: TelemetryMode | "missing";
   backgroundWatchAllowed: boolean;
   runtimeRefreshResult: ProjectRuntimeEvidenceRefreshResult | null;
+  adapterReadiness: ProjectAdapterReadiness | null;
+  adapterReadinessLoading: boolean;
   busyAction: string | null;
   busy: boolean;
   onScanProject: (project: ManagedProject) => void;
   onRefreshRuntimeEvidence: (project: ManagedProject) => void;
+  onDiagnoseAdapterReadiness: (project: ManagedProject) => void;
+  onStartAppServerObservation: (project: ManagedProject) => void;
+  onStopAppServerObservation: (project: ManagedProject) => void;
+  onOpenControlledVerification: (project: ManagedProject) => void;
+  onOpenControlledVerificationTrace: (traceId: string) => void;
   onEnableTelemetry: (project: ManagedProject) => void;
   onToggleMonitoring: (project: ManagedProject, enabled: boolean) => void;
   onUpdateMonitoringInterval: (project: ManagedProject, intervalMs: number) => void;
   onRenameProject: (project: ManagedProject, name: string) => void;
+  onNavigate: (href: "#discovery" | "#session-trace" | "#analysis" | "#evaluate" | "#proposals") => void;
+  onOpenTelemetryIntake: () => void;
   onClose?: () => void;
 }) {
   const { tx } = useLanguage();
+  const [activeView, setActiveView] = useState<ProjectDetailView>(initialView);
   const [projectNameDraft, setProjectNameDraft] = useState(project?.name ?? "");
   const [lastHeartbeatAt, setLastHeartbeatAt] = useState<string | null>(project?.lastScanAt ?? null);
   const projectPath = normalizeProjectPath(project?.path ?? "");
   const visibleSkills = projectPath
     ? localSkills.filter((skill) => isPathInsideProject(skill.sourcePath, projectPath))
     : [];
-  const isLoadedProject = visibleSkills.length > 0 || Boolean(project && project.path === normalizeProjectPath(currentProjectRoot));
+  const isLoadedProject = visibleSkills.length > 0;
   const projectSkillIds = new Set(visibleSkills.map((skill) => skill.id));
   const projectRuns = visibleSkills.length > 0
     ? recentRuns.filter((run) => projectSkillIds.has(run.skillId))
@@ -4011,9 +5263,7 @@ function ProjectAssetDetailPanel({
   const telemetryReady = telemetryMode !== "missing" && telemetryMode !== "disabled";
   const runtimeRefreshBusy = busyAction === "runtime-refresh";
   const projectScanBusy = busyAction === "project-scan";
-  const skillCount = isLoadedProject
-    ? visibleSkills.length
-    : project?.skillsFound ?? 0;
+  const skillCount = visibleSkills.length > 0 ? visibleSkills.length : project?.skillsFound ?? 0;
   const projectRunTimes = projectRuns
     .map((run) => run.finishedAt ?? run.startedAt)
     .filter(Boolean)
@@ -4030,11 +5280,13 @@ function ProjectAssetDetailPanel({
   );
   const heartbeatObservedAt = latestProjectRunAt ?? project?.lastScanAt ?? lastHeartbeatAt;
   const heartbeatIntervalLabel =
-    project?.monitoringIntervalMs === 30000
-      ? tx("30 seconds", "30 秒")
-      : project?.monitoringIntervalMs === 120000
-        ? tx("2 minutes", "2 分钟")
-      : tx("1 minute", "1 分钟");
+    project?.monitoringIntervalMs === 900000
+      ? tx("15 minutes", "15 分钟")
+      : project?.monitoringIntervalMs === 300000
+        ? tx("5 minutes", "5 分钟")
+        : project?.monitoringIntervalMs === 120000
+          ? tx("2 minutes", "2 分钟")
+          : tx("1 minute", "1 分钟");
   const runtimeDiagnostics = (() => {
     if (!project) {
       return [];
@@ -4145,6 +5397,10 @@ function ProjectAssetDetailPanel({
   })();
 
   useEffect(() => {
+    setActiveView(initialView);
+  }, [initialView, project?.id]);
+
+  useEffect(() => {
     setProjectNameDraft(project?.name ?? "");
     setLastHeartbeatAt(project?.lastScanAt ?? null);
   }, [project?.id, project?.name]);
@@ -4166,10 +5422,14 @@ function ProjectAssetDetailPanel({
       <div className="project-asset-detail-head">
         <div>
           <span className="os-module-kicker">{tx("Project Detail", "项目详情")}</span>
-          <h3>{project ? project.name : tx("Select a project", "选择一个项目")}</h3>
+          <h3 id="project-detail-modal-title">{project ? project.name : tx("Select a project", "选择一个项目")}</h3>
           <p>
             {project
-              ? tx("Review this project's collected Skills, workflow state, and heartbeat summary.", "查看这个项目已收集的技能、工作流状态和心跳摘要。")
+              ? activeView === "skills"
+                ? tx("Review collected Skills and the project workflow state.", "查看已收集技能和项目工作流状态。")
+                : activeView === "monitoring"
+                  ? tx("Review runtime evidence, connection state, and heartbeat history.", "查看运行证据、连接状态和心跳历史。")
+                  : tx("Review the project Profile and display settings.", "查看项目 Profile 和显示设置。")
               : tx("Click the Skills column or View action in the bound project table.", "点击已绑定项目表里的技能列或查看按钮。")}
           </p>
         </div>
@@ -4189,26 +5449,74 @@ function ProjectAssetDetailPanel({
 
       {project ? (
         <>
-          <ProjectProfileSummaryPanel profile={profile} />
-          <form
-            className="project-detail-rename-panel"
-            onSubmit={(event) => {
-              event.preventDefault();
-              onRenameProject(project, projectNameDraft);
-            }}
-          >
-            <label>
-              <span>{tx("Display Name", "显示名称")}</span>
-              <input
-                value={projectNameDraft}
-                onChange={(event) => setProjectNameDraft(event.currentTarget.value)}
-                placeholder={tx("Project display name", "项目显示名称")}
-              />
-            </label>
-            <button type="submit" disabled={busy || !projectNameDraft.trim()}>
-              {tx("Save Name", "保存名称")}
+          <div className="project-detail-tabs" role="tablist" aria-label={tx("Project detail views", "项目详情视图") }>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === "overview"}
+              className={activeView === "overview" ? "active" : undefined}
+              onClick={() => setActiveView("overview")}
+            >
+              {tx("Overview", "项目概览")}
             </button>
-          </form>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === "skills"}
+              className={activeView === "skills" ? "active" : undefined}
+              onClick={() => setActiveView("skills")}
+            >
+              {tx("Skills & Workflow", "技能与工作流")}
+              <span>{formatCount(skillCount)}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === "monitoring"}
+              className={activeView === "monitoring" ? "active" : undefined}
+              onClick={() => setActiveView("monitoring")}
+            >
+              {tx("Runtime Monitoring", "运行监控")}
+            </button>
+          </div>
+
+          {activeView === "overview" ? (
+            <>
+              <ProjectProfileSummaryPanel profile={profile} />
+              <form
+                className="project-detail-rename-panel"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onRenameProject(project, projectNameDraft);
+                }}
+              >
+                <label>
+                  <span>{tx("Display Name", "显示名称")}</span>
+                  <input
+                    value={projectNameDraft}
+                    onChange={(event) => setProjectNameDraft(event.currentTarget.value)}
+                    placeholder={tx("Project display name", "项目显示名称")}
+                  />
+                </label>
+                <button type="submit" disabled={busy || !projectNameDraft.trim()}>
+                  {tx("Save Name", "保存名称")}
+                </button>
+              </form>
+            </>
+          ) : null}
+
+          {activeView === "monitoring" ? (
+            <>
+          <AdapterReadinessPanel
+            readiness={adapterReadiness}
+            loading={adapterReadinessLoading}
+            onRefresh={() => project && onDiagnoseAdapterReadiness(project)}
+            onStartAppServerObservation={() => project && onStartAppServerObservation(project)}
+            onStopAppServerObservation={() => project && onStopAppServerObservation(project)}
+            onOpenControlledVerification={() => project && onOpenControlledVerification(project)}
+            onOpenControlledVerificationTrace={onOpenControlledVerificationTrace}
+            onOpenTelemetryIntake={onOpenTelemetryIntake}
+          />
           <div className="project-heartbeat-panel">
             <div className="project-heartbeat-status">
               <span className={`heartbeat-dot${project.monitoringEnabled ? " live" : ""}`} aria-hidden="true" />
@@ -4216,8 +5524,8 @@ function ProjectAssetDetailPanel({
                 <strong>{tx("Heartbeat Monitor", "心跳监控")}</strong>
                 <small>
                   {tx(
-                    "Imports local Codex or Claude session evidence for this project.",
-                    "导入该项目对应的本地 Codex 或 Claude 会话证据。"
+                    "Incrementally reads local Codex or Claude evidence; raw messages are not stored.",
+                    "增量读取本地 Codex 或 Claude 证据；原始消息不落库。"
                   )}
                 </small>
               </div>
@@ -4266,9 +5574,10 @@ function ProjectAssetDetailPanel({
                   onChange={(event) => onUpdateMonitoringInterval(project, Number(event.currentTarget.value))}
                   disabled={busy}
                 >
-                  <option value={30000}>{tx("30 seconds", "30 秒")}</option>
                   <option value={60000}>{tx("1 minute", "1 分钟")}</option>
                   <option value={120000}>{tx("2 minutes", "2 分钟")}</option>
+                  <option value={300000}>{tx("5 minutes", "5 分钟")}</option>
+                  <option value={900000}>{tx("15 minutes", "15 分钟")}</option>
                 </select>
               </label>
               <button type="button" className="primary" disabled={busy} onClick={refreshProjectHeartbeat}>
@@ -4326,6 +5635,23 @@ function ProjectAssetDetailPanel({
               </div>
             ))}
           </div>
+            </>
+          ) : null}
+
+          {activeView === "skills" ? (
+            <>
+          <SkillsWorkflowVisual
+            projectName={project.name}
+            projectPath={project.path}
+            projectReady={Boolean(project.lastScanAt)}
+            workflowReady={Boolean(project.workflowApplied && skillCount > 0)}
+            traceCount={traceCount}
+            runtimeCount={projectRuns.length}
+            reportsReady={hasEvaluationEvidence}
+            proposalCount={openProposalCount}
+            onNavigate={onNavigate}
+          />
+
           <div className="project-asset-detail-metrics">
             <div>
               <span>{tx("Skills", "技能")}</span>
@@ -4395,6 +5721,8 @@ function ProjectAssetDetailPanel({
               </div>
             </section>
           </div>
+            </>
+          ) : null}
         </>
       ) : null}
     </article>
@@ -4424,6 +5752,7 @@ function WorkflowStarterCard({
 }) {
   const { tx } = useLanguage();
   const visibleConflicts = preview?.fileConflicts.slice(0, 4) ?? [];
+  const visiblePreserved = preview?.preservedFiles.slice(0, 4) ?? [];
   const visibleFiles = preview?.filesToCreate.slice(0, 6) ?? [];
   const isApplied = result !== null;
 
@@ -4483,8 +5812,8 @@ function WorkflowStarterCard({
           <p>
             {preview.canApply
               ? tx(
-                  `${preview.filesToCreate.length} file(s) will be created without overwriting existing files.`,
-                  `将创建 ${preview.filesToCreate.length} 个文件，不会覆盖已有文件。`
+                  `${preview.filesToCreate.length} file(s) will be created; ${preview.preservedFiles.length} existing entry file(s) will be preserved.`,
+                  `将创建 ${preview.filesToCreate.length} 个文件，并保留 ${preview.preservedFiles.length} 个已有入口文件。`
                 )
               : tx(
                   "Existing files must be resolved before this starter can write anything.",
@@ -4492,7 +5821,12 @@ function WorkflowStarterCard({
                 )}
           </p>
           <div className="workflow-starter-file-list">
-            {(visibleConflicts.length > 0 ? visibleConflicts : visibleFiles).map((file) => (
+            {(visibleConflicts.length > 0
+              ? visibleConflicts
+              : visiblePreserved.length > 0
+                ? visiblePreserved.map((file) => `${file} · ${tx("preserve", "保留")}`)
+                : visibleFiles
+            ).map((file) => (
               <span key={file}>{file}</span>
             ))}
           </div>
@@ -4504,8 +5838,8 @@ function WorkflowStarterCard({
           <strong>{tx("Workflow applied", "工作流已应用")}</strong>
           <p>
             {tx(
-              `${result.copiedFileCount} file(s) copied into the selected project.`,
-              `已复制 ${result.copiedFileCount} 个文件到所选项目。`
+              `${result.copiedFileCount} file(s) copied and ${result.mergedFileCount} entry file(s) safely extended.`,
+              `已复制 ${result.copiedFileCount} 个文件，并安全扩展 ${result.mergedFileCount} 个入口文件。`
             )}
           </p>
           <div className="workflow-starter-next">
@@ -5861,6 +7195,328 @@ function GraphTopologyView({
             </div>
           )}
         </article>
+      </div>
+    </div>
+  );
+}
+
+function GraphMindMapView({
+  snapshot,
+  visibleGraph,
+  interactiveNodeIds,
+  pinnedNeighborhood,
+  selectedNodeId,
+  selectedTracePath,
+  searchScopeSummary,
+  neighborhoodStatus,
+  onResetTopology,
+  onClearSearchScope,
+  onClearTraceSelection,
+  onSelectedNodeChange
+}: {
+  snapshot: GraphSnapshot | null;
+  visibleGraph: GraphSelectionGraph | null;
+  interactiveNodeIds: ReadonlySet<string>;
+  pinnedNeighborhood: GraphNeighborhood | null;
+  selectedNodeId: string | null;
+  selectedTracePath: GraphTracePath | null;
+  searchScopeSummary: { query: string; matchCount: number } | null;
+  neighborhoodStatus: "idle" | "loading" | "ready" | "error";
+  onResetTopology: () => void;
+  onClearSearchScope: () => void;
+  onClearTraceSelection: () => void;
+  onSelectedNodeChange: (nodeId: string | null) => void;
+}) {
+  const { mode } = useLanguage();
+  const tx = (en: string, zh: string) => formatLocalizedText(mode, en, zh);
+  const [mindMapZoom, setMindMapZoom] = useState(0.86);
+  const scene = buildGraphMindMapScene(visibleGraph, selectedNodeId);
+
+  if (!snapshot || !visibleGraph || !scene) {
+    return (
+      <div className="empty-state">
+        <h3>{tx("No mind map yet", "还没有思维导图")}</h3>
+        <p>{tx("Refresh the graph after scanning skills to organize the local workflow knowledge into a mind map.", "扫描 Skill 后刷新图谱，即可把本地工作流知识组织为思维导图。")}</p>
+      </div>
+    );
+  }
+
+  const hasPinnedNeighborhood = Boolean(
+    pinnedNeighborhood &&
+      pinnedNeighborhood.generatedAt === snapshot.generatedAt &&
+      pinnedNeighborhood.centerNode
+  );
+  const traceNodeIds = new Set(selectedTracePath?.nodes.map((node) => node.id) ?? []);
+  const traceTargetNodeId = selectedTracePath?.targetNode.id ?? null;
+  const mindMapZoomPercent = Math.round(mindMapZoom * 100);
+  const setBoundedMindMapZoom = (nextZoom: number) => {
+    setMindMapZoom(Math.min(1.35, Math.max(0.58, Number(nextZoom.toFixed(2)))));
+  };
+  const centerIsSelected = selectedNodeId === scene.center.node.id;
+
+  return (
+    <div className="graph-mindmap-shell">
+      <div className="graph-topology-head">
+        <div>
+          <h3>{tx("Mind Map View", "思维导图")}</h3>
+          <p className="muted">
+            {tx(
+              "Starts from the current focus and expands direct relationships by entity type. Select any visible node to recenter the map.",
+              "从当前焦点出发，按实体类型展开直接关系。选择任一可见节点即可重新居中查看。"
+            )}
+          </p>
+        </div>
+        <div className="proposal-pills">
+          <span className="mini-pill mini-pill-strong">
+            {scene.directNodeCount} {tx("direct links", "直接关联")}
+          </span>
+          <span className="mini-pill">
+            {scene.branches.length} {tx("branches", "分支")}
+          </span>
+          {hasPinnedNeighborhood ? (
+            <span className="mini-pill">
+              {tx("pinned", "已固定")} {pinnedNeighborhood?.centerNode?.displayName ?? tx("neighborhood", "邻域")}
+            </span>
+          ) : null}
+          {searchScopeSummary ? (
+            <span className="mini-pill">
+              {tx("search focus", "搜索焦点")} {searchScopeSummary.matchCount} {tx("matches", "匹配")}
+            </span>
+          ) : null}
+          {selectedTracePath ? (
+            <span className="mini-pill">
+              {tx("trace to", "链路到")} {truncateGraphLabel(selectedTracePath.targetNode.displayName, 18)}
+            </span>
+          ) : null}
+          {neighborhoodStatus === "loading" ? (
+            <span className="mini-pill mini-pill-muted">{tx("loading neighborhood", "邻域加载中")}</span>
+          ) : null}
+          {hasPinnedNeighborhood ? (
+            <button type="button" onClick={onResetTopology}>
+              {tx("Reset Topology", "重置拓扑")}
+            </button>
+          ) : null}
+          {searchScopeSummary ? (
+            <button type="button" onClick={onClearSearchScope}>
+              {tx("Show Full Topology", "显示完整拓扑")}
+            </button>
+          ) : null}
+          {selectedTracePath ? (
+            <button type="button" onClick={onClearTraceSelection}>
+              {tx("Clear Trace Focus", "清除链路焦点")}
+            </button>
+          ) : null}
+          {selectedNodeId ? (
+            <button type="button" onClick={() => onSelectedNodeChange(null)}>
+              {tx("Clear Selection", "清除选择")}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="graph-topology-toolbar" aria-label={tx("Mind map view controls", "思维导图控制") }>
+        <div className="graph-topology-zoom-control">
+          <button
+            type="button"
+            aria-label={tx("Zoom out", "缩小")}
+            title={tx("Zoom out", "缩小")}
+            onClick={() => setBoundedMindMapZoom(mindMapZoom - 0.1)}
+          >
+            −
+          </button>
+          <input
+            aria-label={tx("Mind map zoom", "思维导图缩放")}
+            type="range"
+            min="0.58"
+            max="1.35"
+            step="0.05"
+            value={mindMapZoom}
+            onChange={(event) => setBoundedMindMapZoom(Number(event.target.value))}
+          />
+          <button
+            type="button"
+            aria-label={tx("Zoom in", "放大")}
+            title={tx("Zoom in", "放大")}
+            onClick={() => setBoundedMindMapZoom(mindMapZoom + 0.1)}
+          >
+            +
+          </button>
+          <strong>{mindMapZoomPercent}%</strong>
+        </div>
+        <div className="graph-topology-view-actions">
+          <button type="button" onClick={() => setBoundedMindMapZoom(0.86)}>
+            {tx("Fit", "适配")}
+          </button>
+          <button type="button" onClick={() => setBoundedMindMapZoom(1)}>
+            1:1
+          </button>
+        </div>
+      </div>
+
+      <div className="graph-mindmap-scroll">
+        <svg
+          className="graph-mindmap-svg"
+          width={Math.round(scene.width * mindMapZoom)}
+          height={Math.round(scene.height * mindMapZoom)}
+          viewBox={`0 0 ${scene.width} ${scene.height}`}
+          role="img"
+          aria-label={tx("Skill workflow mind map", "Skill 工作流思维导图")}
+        >
+          {scene.connectors.map((connector) => (
+            <path
+              key={connector.id}
+              className={`graph-mindmap-connector ${connector.kind}`}
+              d={connector.path}
+              stroke={connector.color}
+            />
+          ))}
+
+          {scene.branches.map((branch) => (
+            <g key={`branch-${branch.key}`} className="graph-mindmap-branch">
+              <rect
+                x={branch.x}
+                y={branch.y}
+                width={branch.width}
+                height={branch.height}
+                rx={14}
+                fill={branch.tone.fill}
+                stroke={branch.tone.stroke}
+              />
+              <rect
+                x={branch.side === "left" ? branch.x + branch.width - 6 : branch.x}
+                y={branch.y}
+                width={6}
+                height={branch.height}
+                rx={5}
+                fill={branch.tone.accent}
+              />
+              <text
+                className="graph-mindmap-branch-title"
+                x={branch.x + (branch.side === "left" ? 12 : 16)}
+                y={branch.y + 20}
+              >
+                {truncateGraphLabel(branch.label, 15)}
+              </text>
+              <text
+                className="graph-mindmap-branch-meta"
+                x={branch.x + (branch.side === "left" ? 12 : 16)}
+                y={branch.y + 36}
+              >
+                {branch.nodes.length}
+                {branch.omittedNodeCount > 0 ? ` +${branch.omittedNodeCount}` : ""} {tx("nodes", "节点")}
+              </text>
+
+              {branch.nodes.map((nodeLayout) => {
+                const isInteractive = interactiveNodeIds.has(nodeLayout.node.id);
+                const isSelected = selectedNodeId === nodeLayout.node.id;
+                const isTraceNode = traceNodeIds.has(nodeLayout.node.id);
+                const isTraceTarget = traceTargetNodeId === nodeLayout.node.id;
+
+                return (
+                  <g
+                    key={nodeLayout.node.id}
+                    className={[
+                      "graph-mindmap-node",
+                      isSelected ? "selected" : "",
+                      isTraceNode ? "trace-related" : "",
+                      isTraceTarget ? "trace-target" : "",
+                      !isInteractive ? "projected" : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    transform={`translate(${nodeLayout.x}, ${nodeLayout.y})`}
+                    role={isInteractive ? "button" : undefined}
+                    tabIndex={isInteractive ? 0 : -1}
+                    onClick={() => {
+                      if (isInteractive) {
+                        onSelectedNodeChange(isSelected ? null : nodeLayout.node.id);
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (!isInteractive || (event.key !== "Enter" && event.key !== " ")) {
+                        return;
+                      }
+                      event.preventDefault();
+                      onSelectedNodeChange(isSelected ? null : nodeLayout.node.id);
+                    }}
+                  >
+                    <title>
+                      {nodeLayout.node.displayName} · {nodeLayout.relationLabel} · {tx("degree", "度")} {nodeLayout.node.degree}
+                    </title>
+                    <rect
+                      width={nodeLayout.width}
+                      height={nodeLayout.height}
+                      rx={14}
+                      fill={nodeLayout.tone.fill}
+                      stroke={nodeLayout.tone.stroke}
+                    />
+                    <circle cx={16} cy={nodeLayout.height / 2} r={5} fill={nodeLayout.tone.accent} />
+                    <text className="graph-mindmap-node-title" x={29} y={19}>
+                      {truncateGraphLabel(nodeLayout.node.displayName, 20)}
+                    </text>
+                    <text className="graph-mindmap-node-meta" x={29} y={35}>
+                      {truncateGraphLabel(nodeLayout.relationLabel, 22)}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          ))}
+
+          <g
+            className={`graph-mindmap-center ${centerIsSelected ? "selected" : ""}`}
+            transform={`translate(${scene.center.x}, ${scene.center.y})`}
+            role="button"
+            tabIndex={0}
+            onClick={() => onSelectedNodeChange(centerIsSelected ? null : scene.center.node.id)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelectedNodeChange(centerIsSelected ? null : scene.center.node.id);
+              }
+            }}
+          >
+            <title>
+              {scene.center.node.displayName} · {formatGraphLabel(scene.center.node.nodeType)} · {tx("degree", "度")} {scene.center.node.degree}
+            </title>
+            <rect
+              width={scene.center.width}
+              height={scene.center.height}
+              rx={20}
+              fill={scene.center.tone.fill}
+              stroke={scene.center.tone.stroke}
+            />
+            <rect width={scene.center.width} height={7} rx={7} fill={scene.center.tone.accent} />
+            <text className="graph-mindmap-center-title" x={18} y={34}>
+              {truncateGraphLabel(scene.center.node.displayName, 24)}
+            </text>
+            <text className="graph-mindmap-center-meta" x={18} y={55}>
+              {formatGraphLabel(scene.center.node.nodeType)} · {tx("degree", "度")} {scene.center.node.degree}
+            </text>
+          </g>
+        </svg>
+      </div>
+
+      <div className="graph-mindmap-footer">
+        <div className="graph-mindmap-summary">
+          <span className="mini-pill mini-pill-strong">{truncateGraphLabel(scene.center.node.displayName, 28)}</span>
+          <span className="mini-pill">{formatGraphLabel(scene.center.node.nodeType)}</span>
+          <span className="mini-pill">{scene.directNodeCount} {tx("direct links", "直接关联")}</span>
+          {scene.hiddenNodeCount > 0 ? (
+            <span className="mini-pill">+{scene.hiddenNodeCount} {tx("not rendered", "未渲染")}</span>
+          ) : null}
+        </div>
+        <p className="muted graph-mindmap-note">
+          {scene.directNodeCount === 0
+            ? tx(
+                "The current focus has no visible direct relationship inside this graph scope. Change the focus, expand its neighborhood, or return to the full snapshot.",
+                "当前焦点在此图谱范围内没有可见的直接关系。可更换焦点、扩展其邻域，或返回完整快照。"
+              )
+            : tx(
+                `The mind map stays inside the current local graph scope. It shows ${scene.directNodeCount} direct relationship(s) from ${scene.center.node.displayName}; select a node to continue exploring without rebuilding stored data.`,
+                `思维导图保持在当前本地图谱范围内，展示 ${scene.center.node.displayName} 的 ${scene.directNodeCount} 个直接关系；选择节点可继续探索，不会重建已存数据。`
+              )}
+        </p>
       </div>
     </div>
   );
@@ -8604,6 +10260,985 @@ function BundleValidationPanel({
   );
 }
 
+function traceStatusLabel(status: SessionTraceListItem["status"], mode: LanguageMode) {
+  if (status === "completed") {
+    return formatLocalizedText(mode, "Completed", "已完成");
+  }
+  if (status === "failed") {
+    return formatLocalizedText(mode, "Failed", "失败");
+  }
+  return formatLocalizedText(mode, "Running", "运行中");
+}
+
+function traceCaptureLabel(captureMode: string, mode: LanguageMode) {
+  return captureMode === "precise"
+    ? formatLocalizedText(mode, "Precise", "精确")
+    : formatLocalizedText(mode, "Inferred", "推断");
+}
+
+function adapterInstallationLabel(status: ProjectAdapterReadiness["installationStatus"], mode: LanguageMode) {
+  const labels: Record<ProjectAdapterReadiness["installationStatus"], [string, string]> = {
+    not_installed: ["Not installed", "未安装"],
+    installed: ["Installed", "已安装"],
+    invalid: ["Invalid", "配置无效"],
+    upgrade_required: ["Upgrade required", "需要升级"],
+    read_only: ["Read-only", "仅可读取"]
+  };
+  return formatLocalizedText(mode, ...labels[status]);
+}
+
+function adapterConnectionLabel(status: ProjectAdapterReadiness["connectionStatus"], mode: LanguageMode) {
+  const labels: Record<ProjectAdapterReadiness["connectionStatus"], [string, string]> = {
+    source_unavailable: ["Session source unavailable", "会话来源不可用"],
+    source_ready: ["Session source ready", "会话来源就绪"],
+    workspace_unmatched: ["Workspace mismatch", "项目目录不匹配"],
+    workspace_matched: ["Workspace matched", "项目目录已匹配"],
+    recent_session_observed: ["Recent session observed", "已观测到最近会话"],
+    stale: ["Evidence is stale", "证据已过期"],
+    error: ["Needs authorization", "需要遥测授权"]
+  };
+  return formatLocalizedText(mode, ...labels[status]);
+}
+
+function adapterObservationLabel(status: ProjectAdapterReadiness["observationStatus"], mode: LanguageMode) {
+  const labels: Record<ProjectAdapterReadiness["observationStatus"], [string, string]> = {
+    no_skill_evidence: ["No Skill evidence", "暂无技能证据"],
+    skill_available: ["Skills available", "技能已就绪，等待触发"],
+    skill_routed_inferred: ["Routed from inferred evidence", "推断已路由"],
+    skill_invoked_inferred: ["Invoked from inferred evidence", "推断已调用"],
+    skill_invoked_precise: ["Precisely invoked", "精确已调用"],
+    skill_completed: ["Precisely completed", "精确已完成"],
+    skill_failed: ["Skill failed", "技能执行失败"]
+  };
+  return formatLocalizedText(mode, ...labels[status]);
+}
+
+function adapterCheckCopy(checkId: string, mode: LanguageMode) {
+  const labels: Record<string, [string, string]> = {
+    "workflow-installation": ["Workflow installation", "工作流安装"],
+    "codex-source": ["Codex session source", "Codex 会话来源"],
+    "workspace-connection": ["Project directory match", "项目目录匹配"],
+    "skill-observation": ["Skill observation", "技能观测"],
+    "app-server-observation": ["Local App Server observation", "本机 App Server 观测"]
+  };
+  return formatLocalizedText(mode, ...(labels[checkId] ?? [checkId, checkId]));
+}
+
+function appServerObservationStateLabel(
+  state: ProjectAdapterReadiness["appServerObservation"]["state"],
+  mode: LanguageMode
+) {
+  const labels: Record<ProjectAdapterReadiness["appServerObservation"]["state"], [string, string]> = {
+    not_enabled: ["Not enabled", "未启用"],
+    checking: ["Checking capability", "正在检查能力"],
+    ready: ["Ready for a future controlled session", "已就绪，等待未来受控会话"],
+    observing: ["Observing lifecycle events", "正在观测生命周期事件"],
+    stopped: ["Stopped", "已停止"],
+    unsupported: ["Unsupported by local Codex", "本机 Codex 不支持"],
+    error: ["Needs attention", "需要处理"]
+  };
+  return formatLocalizedText(mode, ...labels[state]);
+}
+
+function controlledVerificationStateLabel(
+  state: ProjectControlledSessionVerification["state"],
+  mode: LanguageMode
+) {
+  const labels: Record<ProjectControlledSessionVerification["state"], [string, string]> = {
+    not_run: ["Not run", "未运行"],
+    running: ["Running", "运行中"],
+    completed: ["Completed", "已完成"],
+    interrupted: ["Interrupted by guard", "已被安全保护中止"],
+    failed: ["Failed", "失败"]
+  };
+  return formatLocalizedText(mode, ...labels[state]);
+}
+
+function adapterPreviewStepLabel(
+  previewMode: ProjectAdapterReadiness["precisionPreview"]["mode"],
+  fallback: string,
+  index: number,
+  mode: LanguageMode
+) {
+  if (mode !== "zh") {
+    return fallback;
+  }
+  const steps: Partial<Record<ProjectAdapterReadiness["precisionPreview"]["mode"], string[]>> = {
+    local_app_server_opt_in: [
+      "确认当前已绑定项目，并启动仅限本机 stdio 的 Codex App Server 进程。",
+      "检查生成的 Schema 后，才接受生命周期事件。",
+      "如需产生事件，仍需单独确认启动未来受控会话。"
+    ],
+    local_app_server_ready: ["仅在未来受控会话启动后接收 App Server 生命周期事件。"],
+    manual_structured_import: [
+      "使用受信任的 Adapter 输出已脱敏的协议 1.0 JSONL 事件。",
+      "在分析 / 遥测中，通过原生文件选择器确认要导入的 JSONL 文件。",
+      "在精确遥测授权下导入，并在会话链路中查看结果。"
+    ],
+    already_precise: ["继续仅导入已脱敏的协议 1.0 Adapter 事件。"]
+  };
+  return steps[previewMode]?.[index] ?? "接入前需要单独确认安全与权限边界。";
+}
+
+function adapterPreviewBlockedReason(
+  previewMode: ProjectAdapterReadiness["precisionPreview"]["mode"]
+) {
+  if (previewMode === "local_app_server_opt_in" || previewMode === "local_app_server_ready") {
+    return "当前 Codex Schema 没有官方的显式 Skill 调用事件；技能证据仍保持为推断。";
+  }
+  return "自动化 Hook 或 App Server 接入需要单独的安全与全局配置确认，当前版本不会执行。";
+}
+
+function adapterPreviewPathLabel(path: string, mode: LanguageMode) {
+  if (mode !== "zh") {
+    return path;
+  }
+  if (path === "A user-selected JSONL file") {
+    return "用户选择的 JSONL 文件";
+  }
+  if (path === "Codex global configuration") {
+    return "Codex 全局配置";
+  }
+  if (path === "No configuration change") {
+    return "无需配置变更";
+  }
+  if (path === "Skill OS local application storage") {
+    return "Skill OS 本机应用存储";
+  }
+  if (path === "Local stdio Codex App Server process") {
+    return "本机 stdio Codex App Server 进程";
+  }
+  return path;
+}
+
+function traceHitStateLabel(state: TraceSkillQuickDetail["hit"]["hitState"], mode: LanguageMode) {
+  const labels: Record<TraceSkillQuickDetail["hit"]["hitState"], [string, string]> = {
+    candidate: ["Candidate", "候选"],
+    matched: ["Matched", "已匹配"],
+    selected: ["Selected", "已选择"],
+    loaded: ["Loaded", "已加载"],
+    invoked: ["Invoked", "已调用"],
+    completed: ["Completed", "已完成"],
+    failed: ["Failed", "失败"],
+    inferred: ["Inferred", "推断命中"],
+    rejected: ["Rejected", "未采用"],
+    unknown: ["Unknown", "未知"]
+  };
+  const label = labels[state];
+  return formatLocalizedText(mode, label[0], label[1]);
+}
+
+function traceSpanTypeLabel(spanType: TraceSpanSummary["spanType"], mode: LanguageMode) {
+  const labels: Record<TraceSpanSummary["spanType"], [string, string]> = {
+    turn: ["Message", "用户消息"],
+    system_route: ["Route", "系统路由"],
+    context_load: ["Context", "上下文"],
+    workflow: ["Workflow", "工作流"],
+    workflow_node: ["Workflow Node", "工作流节点"],
+    skill_candidate: ["Candidate", "候选 Skill"],
+    skill: ["Skill", "Skill"],
+    tool: ["Tool", "工具"],
+    approval_gate: ["Approval", "确认闸门"],
+    verification: ["Verification", "验证"],
+    memory: ["Memory", "记忆"],
+    response: ["Response", "响应"]
+  };
+  const label = labels[spanType] ?? [spanType, spanType];
+  return formatLocalizedText(mode, label[0], label[1]);
+}
+
+function traceSpanDepth(span: TraceSpanSummary, spans: TraceSpanSummary[]) {
+  const byId = new Map(spans.map((entry) => [entry.id, entry]));
+  let depth = 0;
+  let parentId = span.parentSpanId;
+  while (parentId && depth < 5) {
+    depth += 1;
+    parentId = byId.get(parentId)?.parentSpanId ?? null;
+  }
+  return depth;
+}
+
+function SessionTraceExplorer({
+  traces,
+  selectedTraceId,
+  detail,
+  loading,
+  error,
+  onRefresh,
+  onSelectTrace,
+  onOpenSkill,
+  onOpenMonitoring
+}: {
+  traces: SessionTraceListItem[];
+  selectedTraceId: string | null;
+  detail: SessionTraceDetail | null;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+  onSelectTrace: (traceId: string) => void;
+  onOpenSkill: (traceId: string, skillId: string, trigger: HTMLButtonElement) => void;
+  onOpenMonitoring: () => void;
+}) {
+  const { mode, tx } = useLanguage();
+  const [query, setQuery] = useState("");
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [harnessFilter, setHarnessFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [captureFilter, setCaptureFilter] = useState("all");
+  const [viewMode, setViewMode] = useState<"timeline" | "tree">("timeline");
+  const projectOptions = Array.from(
+    new Map(
+      traces
+        .filter((trace) => trace.projectId)
+        .map((trace) => [trace.projectId as string, trace.projectName ?? trace.workspaceRef ?? trace.projectId as string])
+    )
+  );
+  const harnessOptions = Array.from(new Set(traces.map((trace) => trace.harnessId)));
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredTraces = traces.filter((trace) => {
+    if (projectFilter !== "all" && trace.projectId !== projectFilter) {
+      return false;
+    }
+    if (harnessFilter !== "all" && trace.harnessId !== harnessFilter) {
+      return false;
+    }
+    if (statusFilter !== "all" && trace.status !== statusFilter) {
+      return false;
+    }
+    if (captureFilter !== "all") {
+      const exactCapture = trace.captureMode === "precise" ? "precise" : "inferred";
+      if (exactCapture !== captureFilter) {
+        return false;
+      }
+    }
+    if (!normalizedQuery) {
+      return true;
+    }
+    return [
+      trace.projectName,
+      trace.workspaceRef,
+      trace.sessionRef,
+      trace.sessionId,
+      trace.sourceRef,
+      trace.messageSummary,
+      trace.harnessId,
+      ...trace.skillHits.map((hit) => hit.skillName)
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedQuery);
+  });
+  const preciseCount = traces.filter((trace) => trace.captureMode === "precise").length;
+  const inferredCount = traces.length - preciseCount;
+
+  return (
+    <section className="panel trace-explorer-module" data-product-section="session-trace" id="session-trace">
+      <div className="section-headline trace-explorer-head">
+        <div>
+          <span className="os-module-kicker">{tx("Session evidence", "会话证据")}</span>
+          <h2>{tx("Session Trace", "会话链路")}</h2>
+          <p className="section-copy">
+            {tx(
+              "Inspect each message from routing evidence through Workflow, Skill, Tool, verification, and response.",
+              "按每条消息查看路由证据、Workflow、Skill、工具、验证与响应。"
+            )}
+          </p>
+        </div>
+        <div className="trace-head-actions">
+          <span className="trace-privacy-note">{tx("Raw messages off", "不保存消息原文")}</span>
+          <button type="button" className="trace-icon-button" onClick={onRefresh} title={tx("Refresh traces", "刷新链路")} aria-label={tx("Refresh traces", "刷新链路")}>
+            ↻
+          </button>
+        </div>
+      </div>
+
+      <div className="trace-summary-strip" aria-label={tx("Trace summary", "链路摘要")}>
+        <div><span>{tx("Records", "记录")}</span><strong>{formatCount(traces.length)}</strong></div>
+        <div><span>{tx("Precise", "精确")}</span><strong>{formatCount(preciseCount)}</strong></div>
+        <div><span>{tx("Inferred", "推断")}</span><strong>{formatCount(inferredCount)}</strong></div>
+        <div><span>{tx("Skill hits", "Skill 命中")}</span><strong>{formatCount(traces.reduce((sum, trace) => sum + trace.skillHits.length, 0))}</strong></div>
+        <div><span>Token</span><strong>{formatCount(traces.reduce((sum, trace) => sum + trace.totalTokens, 0))}</strong></div>
+      </div>
+
+      <div className="trace-filter-bar">
+        <label className="trace-search-field">
+          <span>{tx("Search", "搜索")}</span>
+          <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder={tx("Project, session ID, record, Skill", "项目、会话 ID、记录、Skill")} />
+        </label>
+        <label>
+          <span>{tx("Project", "项目")}</span>
+          <select value={projectFilter} onChange={(event) => setProjectFilter(event.currentTarget.value)}>
+            <option value="all">{tx("All projects", "全部项目")}</option>
+            {projectOptions.map(([id, label]) => <option value={id} key={id}>{label}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>{tx("Harness", "运行端")}</span>
+          <select value={harnessFilter} onChange={(event) => setHarnessFilter(event.currentTarget.value)}>
+            <option value="all">{tx("All harnesses", "全部运行端")}</option>
+            {harnessOptions.map((harness) => <option value={harness} key={harness}>{harness}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>{tx("Status", "状态")}</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.currentTarget.value)}>
+            <option value="all">{tx("All statuses", "全部状态")}</option>
+            <option value="completed">{tx("Completed", "已完成")}</option>
+            <option value="running">{tx("Running", "运行中")}</option>
+            <option value="failed">{tx("Failed", "失败")}</option>
+          </select>
+        </label>
+        <label>
+          <span>{tx("Evidence", "证据")}</span>
+          <select value={captureFilter} onChange={(event) => setCaptureFilter(event.currentTarget.value)}>
+            <option value="all">{tx("All evidence", "全部证据")}</option>
+            <option value="precise">{tx("Precise", "精确")}</option>
+            <option value="inferred">{tx("Inferred", "推断")}</option>
+          </select>
+        </label>
+      </div>
+
+      {error ? <div className="trace-inline-error" role="alert">{error}</div> : null}
+      <div className="trace-workspace" data-trace-ready={traces.length > 0 ? "true" : "false"}>
+        <aside className="trace-turn-list" aria-label={tx("Session records", "会话记录")}>
+          <div className="trace-turn-list-head">
+            <strong>{tx("Session records", "会话记录")}</strong>
+            <span>{formatCount(filteredTraces.length)}</span>
+          </div>
+          <div className="trace-turn-scroll">
+            {filteredTraces.map((trace) => (
+              <button
+                type="button"
+                className={`trace-turn-row${selectedTraceId === trace.traceId ? " selected" : ""}`}
+                key={trace.traceId}
+                aria-label={tx(
+                  `Open ${trace.projectName ?? "session"} trace record`,
+                  `${trace.projectName ?? "会话"}：打开链路记录`
+                )}
+                title={tx("Open this session trace", "打开这条会话链路")}
+                onClick={() => onSelectTrace(trace.traceId)}
+              >
+                <div className="trace-turn-row-head">
+                  <span className={`trace-status-dot status-${trace.status}`} aria-hidden="true" />
+                  <strong>{trace.projectName ?? tx("Unbound project", "未绑定项目")}</strong>
+                  <time>{new Date(trace.receivedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+                </div>
+                <p>{trace.messageSummary}</p>
+                <div className="trace-turn-row-meta">
+                  <span>{trace.harnessId}</span>
+                  <span title={trace.sessionRef || trace.sessionId}>
+                    {tx("Session", "会话")} {(trace.sessionRef || trace.sessionId).slice(-8)}
+                  </span>
+                  {trace.evidenceKind === "legacy_aggregate" ? <span>{tx("Legacy aggregate", "历史聚合")}</span> : null}
+                  <span>{traceCaptureLabel(trace.captureMode, mode)}</span>
+                  <span>{formatCount(trace.totalTokens)} Token</span>
+                  <span>{formatDuration(trace.durationMs)}</span>
+                </div>
+                <div className="trace-turn-hit-row">
+                  {trace.skillHits.slice(0, 3).map((hit) => (
+                    <span key={hit.id}>{hit.skillName} <b>{hit.hitIndex}</b></span>
+                  ))}
+                  {trace.skillHits.length > 3 ? <span>+{trace.skillHits.length - 3}</span> : null}
+                </div>
+              </button>
+            ))}
+            {!loading && filteredTraces.length === 0 ? (
+              <div className="trace-empty-list">
+                <strong>{tx("No matching messages", "没有匹配的消息")}</strong>
+                <button type="button" onClick={onOpenMonitoring}>{tx("Import runtime evidence", "导入运行证据")}</button>
+              </div>
+            ) : null}
+          </div>
+        </aside>
+
+        <div className="trace-detail-pane">
+          {loading ? (
+            <div className="trace-detail-empty"><span className="trace-loading-ring" /><strong>{tx("Loading trace...", "正在加载链路...")}</strong></div>
+          ) : detail ? (
+            <>
+              <div className="trace-detail-head">
+                <div>
+                  <span className="os-module-kicker">{detail.turn.harnessId} · {detail.turn.adapterId} · {formatDateTime(detail.turn.receivedAt)}</span>
+                  <h3>{detail.turn.messageSummary}</h3>
+                  <p>{detail.turn.workspaceRef ?? tx("No workspace path", "无工作区路径")}</p>
+                  <span className="trace-session-reference" title={detail.turn.sourceRef ?? detail.turn.sessionRef ?? detail.turn.sessionId}>
+                    {tx("Session ID", "会话 ID")} <code>{detail.turn.sessionRef || detail.turn.sessionId}</code>
+                  </span>
+                  {detail.turn.evidenceKind === "legacy_aggregate" ? (
+                    <span className="trace-legacy-notice">
+                      {tx(
+                        "Historical Skill runs grouped by session and time; not a reconstructed user message.",
+                        "按会话与时间归组的历史 Skill 运行，不代表已还原用户消息。"
+                      )}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="trace-view-switch" role="tablist" aria-label={tx("Trace view", "链路视图")}>
+                  <button type="button" className={viewMode === "timeline" ? "active" : ""} onClick={() => setViewMode("timeline")} role="tab" aria-selected={viewMode === "timeline"}>{tx("Timeline", "时间线")}</button>
+                  <button type="button" className={viewMode === "tree" ? "active" : ""} onClick={() => setViewMode("tree")} role="tab" aria-selected={viewMode === "tree"}>{tx("Tree", "链路树")}</button>
+                </div>
+              </div>
+              <div className="trace-detail-metrics">
+                <span><b>{traceStatusLabel(detail.turn.status, mode)}</b>{tx("Status", "状态")}</span>
+                <span><b>{formatDuration(detail.turn.durationMs)}</b>{tx("Duration", "耗时")}</span>
+                <span><b>{formatCount(detail.turn.totalTokens)}</b>Token</span>
+                <span><b>{detail.skillHits.length}</b>{tx("Skill hits", "Skill 命中")}</span>
+                <span><b>{detail.events.length}</b>{tx("Evidence events", "证据事件")}</span>
+              </div>
+              <div className={`trace-span-list mode-${viewMode}`} data-trace-view={viewMode}>
+                {detail.spans.map((span) => {
+                  const hit = span.skillId ? detail.skillHits.find((entry) => entry.skillId === span.skillId) : null;
+                  const depth = viewMode === "tree" ? traceSpanDepth(span, detail.spans) : 0;
+                  return (
+                    <div
+                      className={`trace-span-row span-${span.spanType} status-${span.status}`}
+                      key={span.id}
+                      style={{ "--trace-depth": depth } as CSSProperties}
+                    >
+                      <div className="trace-span-rail"><i /></div>
+                      <div className="trace-span-main">
+                        <div className="trace-span-title">
+                          <span className={`trace-entity-badge type-${span.spanType}`}>{traceSpanTypeLabel(span.spanType, mode)}</span>
+                          {span.skillId ? (
+                            <button
+                              type="button"
+                              className="trace-skill-link"
+                              onClick={(event) => onOpenSkill(
+                                detail.turn.traceId,
+                                span.skillId as string,
+                                event.currentTarget
+                              )}
+                              title={tx("Open Skill quick view", "打开 Skill 快捷查看")}
+                            >
+                              {span.name}
+                            </button>
+                          ) : <strong>{span.name}</strong>}
+                          {hit ? <span className="trace-hit-index">{tx("Hit", "命中")} {hit.hitIndex}</span> : null}
+                        </div>
+                        <div className="trace-span-meta">
+                          <span>{new Date(span.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                          <span>{formatDuration(span.durationMs)}</span>
+                          <span className={`trace-capture-pill capture-${span.captureMode}`}>{traceCaptureLabel(span.captureMode, mode)}</span>
+                          {span.workflowId ? <span title={span.workflowId}>{tx("Workflow", "工作流")}: {span.workflowId}</span> : null}
+                          {span.workflowNodeId ? <span title={span.workflowNodeId}>{tx("Node", "节点")}: {span.workflowNodeId}</span> : null}
+                          {span.tokenCount > 0 ? <span>{formatCount(span.tokenCount)} Token</span> : null}
+                          {span.toolCallCount > 0 ? <span>{span.toolCallCount} {tx("tools", "工具")}</span> : null}
+                        </div>
+                        {typeof span.metadata.evidenceBoundary === "string" ? <small>{span.metadata.evidenceBoundary}</small> : null}
+                      </div>
+                      <span className={`trace-span-status status-${span.status}`}>{traceStatusLabel(span.status, mode)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="trace-detail-empty">
+              <strong>{tx("Select a message", "选择一条消息")}</strong>
+              <p>{tx("Its execution chain will stay here while Skill details open in a side drawer.", "执行链会保持在这里，Skill 详情从右侧打开。")}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TraceSkillDrawer({
+  detail,
+  loading,
+  onClose,
+  onOpenLibrary,
+  onOpenGraph,
+  onRevealSource
+}: {
+  detail: TraceSkillQuickDetail | null;
+  loading: boolean;
+  onClose: () => void;
+  onOpenLibrary: (skillId: string) => void;
+  onOpenGraph: (skillId: string) => void;
+  onRevealSource: (skillId: string) => void;
+}) {
+  const { mode, tx } = useLanguage();
+  const [tab, setTab] = useState<"overview" | "content" | "evidence" | "version">("overview");
+
+  useEffect(() => {
+    setTab("overview");
+  }, [detail?.traceId, detail?.skillId]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <aside className="trace-skill-drawer" aria-label={tx("Skill quick view", "Skill 快捷查看")} data-trace-skill-drawer="true">
+      <div className="trace-drawer-head">
+        <div>
+          <span className="os-module-kicker">{tx("Read-only quick view", "只读快捷查看")}</span>
+          <h2>{detail?.displayName ?? tx("Loading Skill", "正在加载 Skill")}</h2>
+          <p>{detail?.canonicalName ?? tx("Resolving trace evidence...", "正在解析链路证据...")}</p>
+        </div>
+        <button type="button" className="trace-drawer-close" onClick={onClose} title={tx("Close", "关闭")} aria-label={tx("Close", "关闭")}>×</button>
+      </div>
+      {loading || !detail ? (
+        <div className="trace-drawer-loading"><span className="trace-loading-ring" /><strong>{tx("Loading Skill evidence...", "正在加载 Skill 证据...")}</strong></div>
+      ) : (
+        <>
+          <div className="trace-drawer-score">
+            <div className="trace-score-ring" style={{ "--trace-score": `${detail.hit.hitIndex}%` } as CSSProperties}>
+              <strong>{detail.hit.hitIndex}</strong><span>{tx("Hit", "命中")}</span>
+            </div>
+            <div>
+              <span className={`trace-capture-pill capture-${detail.hit.captureMode}`}>{traceCaptureLabel(detail.hit.captureMode, mode)}</span>
+              <strong>
+                {detail.hit.hitState === "inferred"
+                  ? tx("Evidence-based inference", "证据推断命中")
+                  : detail.hit.hitState === "invoked" || detail.hit.hitState === "completed" || detail.hit.hitState === "failed"
+                    ? tx("Explicit invocation", "明确调用")
+                    : tx("Explicit observed state", "精确观测状态")}
+              </strong>
+              <small>{detail.hit.evidenceSummary}</small>
+            </div>
+          </div>
+          <div className="trace-drawer-tabs" role="tablist">
+            {([
+              ["overview", tx("Overview", "概览")],
+              ["content", tx("Content", "内容")],
+              ["evidence", tx("Evidence", "命中证据")],
+              ["version", tx("Version", "版本")]
+            ] as const).map(([value, label]) => (
+              <button type="button" key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)} role="tab" aria-selected={tab === value}>{label}</button>
+            ))}
+          </div>
+          <div className="trace-drawer-body">
+            {tab === "overview" ? (
+              <div className="trace-drawer-overview">
+                <p>{detail.description ?? tx("No description is available.", "暂无说明。")}</p>
+                <dl>
+                  <div><dt>{tx("Role", "角色")}</dt><dd>{formatSkillRole(detail.governanceRole, mode)}</dd></div>
+                  <div><dt>{tx("State", "状态")}</dt><dd>{traceHitStateLabel(detail.hit.hitState, mode)}</dd></div>
+                  <div><dt>{tx("Confidence", "证据置信度")}</dt><dd>{Math.round(detail.hit.confidence * 100)}%</dd></div>
+                  <div><dt>{tx("Triggered", "触发时间")}</dt><dd>{formatDateTime(detail.hit.occurredAt)}</dd></div>
+                  <div><dt>{tx("Related steps", "关联步骤")}</dt><dd>{detail.relatedSpans.length}</dd></div>
+                </dl>
+                <div className="trace-related-span-list">
+                  {detail.relatedSpans.map((span) => <span key={span.id}>{traceSpanTypeLabel(span.spanType, mode)} · {span.name}</span>)}
+                </div>
+              </div>
+            ) : null}
+            {tab === "content" ? (
+              <div className="trace-skill-content">
+                <div>
+                  <span>{detail.sourcePath}</span>
+                  {detail.contentTruncated ? <b>{tx("Truncated", "已截断")}</b> : null}
+                  {detail.versionDrift ? <b>{tx("Version changed", "版本已变化")}</b> : null}
+                </div>
+                <pre>
+                  {detail.contentMode === "unavailable"
+                    ? tx(
+                        "The runtime version differs from the current file and no historical content snapshot is available. Current content is not shown as runtime evidence.",
+                        "运行版本与当前文件不同，且没有历史内容快照。为避免误导，此处不会把当前内容显示成运行时证据。"
+                      )
+                    : detail.content || tx("SKILL.md content is unavailable.", "无法读取 SKILL.md 内容。")}
+                </pre>
+              </div>
+            ) : null}
+            {tab === "evidence" ? (
+              <div className="trace-evidence-list">
+                {detail.hit.evidence.map((item) => (
+                  <div key={`${item.key}-${item.label}`}>
+                    <div><strong>{item.label}</strong><b>+{item.score}</b></div>
+                    <span><i style={{ width: `${Math.min(100, item.score / 30 * 100)}%` }} /></span>
+                    <p>{item.detail}</p>
+                  </div>
+                ))}
+                <small>{tx("The index explains evidence strength; it is not a probability.", "命中指数用于解释证据强度，不是概率。")}</small>
+              </div>
+            ) : null}
+            {tab === "version" ? (
+              <dl className="trace-version-list">
+                <div><dt>{tx("Runtime version", "运行版本")}</dt><dd>{detail.versionFingerprint ?? "n/a"}</dd></div>
+                <div><dt>{tx("Current version", "当前版本")}</dt><dd>{detail.currentVersionFingerprint ?? "n/a"}</dd></div>
+                <div><dt>{tx("Version state", "版本状态")}</dt><dd>{detail.versionDrift ? tx("Changed", "已变化") : tx("Current", "一致")}</dd></div>
+                <div><dt>{tx("Version ID", "版本 ID")}</dt><dd>{detail.versionId ?? "n/a"}</dd></div>
+                <div><dt>{tx("Detected", "检测时间")}</dt><dd>{formatDateTime(detail.versionDetectedAt)}</dd></div>
+                <div><dt>{tx("Scoring policy", "评分策略")}</dt><dd>{detail.hit.scoringVersion}</dd></div>
+                <div><dt>{tx("Source", "来源")}</dt><dd>{detail.sourcePath}</dd></div>
+              </dl>
+            ) : null}
+          </div>
+          <div className="trace-drawer-actions">
+            <button type="button" onClick={() => onRevealSource(detail.skillId)} title={tx("Reveal source file", "在文件夹中显示源文件")}>⌖ <span>{tx("Source", "源文件")}</span></button>
+            <button type="button" onClick={() => onOpenGraph(detail.skillId)}>⌘ <span>{tx("Graph", "图谱")}</span></button>
+            <button type="button" className="primary" onClick={() => onOpenLibrary(detail.skillId)}>▥ <span>{tx("Full detail", "完整详情")}</span></button>
+          </div>
+        </>
+      )}
+    </aside>
+  );
+}
+
+function workflowKindLabel(kind: string, tx: (en: string, zh: string) => string) {
+  const labels: Record<string, [string, string]> = {
+    foundation: ["Foundation", "基础"],
+    role: ["Role", "角色"],
+    scenario: ["Scenario", "场景"],
+    integration: ["Integration", "集成"],
+    project_legacy: ["Legacy", "旧声明"]
+  };
+  const label = labels[kind] ?? [kind, kind];
+  return tx(label[0], label[1]);
+}
+
+const workflowTemplateNameLabels: Record<string, [string, string]> = {
+  "foundation.engineering-governance": ["Engineering governance", "工程治理基座"],
+  "role.frontend-engineering": ["Frontend engineering", "前端研发"],
+  "role.backend-engineering": ["Backend engineering", "后端研发"],
+  "scenario.design-to-frontend": ["Design to frontend", "设计稿到前端开发"],
+  "scenario.design-to-api": ["Design to API", "设计稿到接口开发"],
+  "integration.swagger-to-frontend": ["Swagger to frontend integration", "Swagger 到前端联调"],
+  "scenario.feature-delivery": ["Feature delivery", "工程功能交付"]
+};
+
+function workflowTemplateLabel(
+  templateId: string,
+  fallbackName: string,
+  tx: (en: string, zh: string) => string
+) {
+  const label = workflowTemplateNameLabels[templateId];
+  return label ? tx(label[0], label[1]) : fallbackName;
+}
+
+function workflowStatusLabel(status: string, tx: (en: string, zh: string) => string) {
+  const labels: Record<string, [string, string]> = {
+    active: ["Active", "已激活"],
+    needs_upgrade: ["Upgrade available", "可升级"],
+    create: ["Create binding", "新建绑定"],
+    upgrade: ["Upgrade binding", "升级绑定"],
+    rebind: ["Rebind", "重新绑定"],
+    migration: ["Shadow migration", "影子迁移"],
+    rollback: ["Rollback", "回退"],
+    incompatible: ["Incompatible", "不兼容"],
+    legacy_read_only: ["Read-only legacy", "只读旧声明"],
+    pending: ["Pending", "待开始"],
+    running: ["Running", "进行中"],
+    verified: ["Verified", "已验证"],
+    verified_with_risk: ["Verified with risk", "带风险验证通过"],
+    needs_user_decision: ["Needs decision", "需要决策"],
+    blocked: ["Blocked", "已阻塞"],
+    budget_exhausted: ["Budget exhausted", "预算耗尽"],
+    cancelled: ["Cancelled", "已取消"],
+    evolution_candidate: ["Evolution candidate", "待演进候选"],
+    needs_repair: ["Needs repair", "需要修复"],
+    available: ["Available", "可用"],
+    warning: ["Warning", "预警"],
+    critical: ["Critical", "临界"],
+    exhausted: ["Exhausted", "已耗尽"],
+    unknown: ["Unknown", "未知"],
+    quality_gate_passed: ["Quality gate passed", "质量门禁通过"],
+    scope_change: ["Scope changed", "范围变更"],
+    contract_change: ["Contract changed", "契约变更"],
+    permission_change: ["Permission changed", "权限变更"],
+    migration_required: ["Migration required", "需要迁移"],
+    external_effect: ["External effect", "外部影响"],
+    release_action: ["Release action", "发布动作"],
+    budget_critical: ["Budget critical", "预算临界"],
+    duplicate_strategy: ["Duplicate strategy", "重复策略"],
+    root_cause_strategy_limit: ["Strategy limit", "根因策略上限"],
+    max_iterations_reached: ["Iteration limit", "迭代上限"],
+    missing_repair_diagnosis: ["Diagnosis missing", "缺少修复诊断"],
+    blocking_defect: ["Blocking defect", "阻塞缺陷"],
+    user_cancelled: ["User cancelled", "用户取消"]
+  };
+  const label = labels[status] ?? [status, status];
+  return tx(label[0], label[1]);
+}
+
+function WorkflowLibraryModule({
+  templates,
+  selectedTemplateId,
+  projectRoot,
+  bindings,
+  loopRuns,
+  doctor,
+  preview,
+  applyResult,
+  loading,
+  onSelectTemplate,
+  onPreviewBinding,
+  onPreviewMigration,
+  onPreviewRollback,
+  onApplyPreview,
+  onRefreshProject
+}: {
+  templates: WorkflowTemplateSummary[];
+  selectedTemplateId: string | null;
+  projectRoot: string;
+  bindings: ProjectWorkflowBindingSummary[];
+  loopRuns: ScenarioLoopRunSummary[];
+  doctor: ProjectWorkflowDoctorResult | null;
+  preview: ProjectWorkflowBindingPreview | null;
+  applyResult: ProjectWorkflowBindingApplyResult | null;
+  loading: boolean;
+  onSelectTemplate: (templateId: string) => void;
+  onPreviewBinding: (template: WorkflowTemplateSummary) => void;
+  onPreviewMigration: (binding: ProjectWorkflowBindingSummary) => void;
+  onPreviewRollback: (binding: ProjectWorkflowBindingSummary) => void;
+  onApplyPreview: () => void;
+  onRefreshProject: () => void;
+}) {
+  const { tx } = useLanguage();
+  const [presentation, setPresentation] = useState<"flow" | "mindmap">("flow");
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedEvidenceRef, setSelectedEvidenceRef] = useState<string | null>(null);
+  const selectedTemplate =
+    templates.find((template) => `${template.templateId}@${template.templateVersion}` === selectedTemplateId) ??
+    templates[0] ??
+    null;
+  const selectedRun = loopRuns.find((run) => run.id === selectedRunId) ?? loopRuns[0] ?? null;
+  const templateKey = (template: WorkflowTemplateSummary) => `${template.templateId}@${template.templateVersion}`;
+  const templateLabel = (template: WorkflowTemplateSummary) =>
+    workflowTemplateLabel(template.templateId, template.name, tx);
+  const bindingLabel = (binding: ProjectWorkflowBindingSummary) =>
+    workflowTemplateLabel(binding.templateId, binding.templateName, tx);
+  const selectedTemplateBindings = selectedTemplate
+    ? bindings.filter(
+        (binding) =>
+          binding.templateId === selectedTemplate.templateId &&
+          binding.templateVersion === selectedTemplate.templateVersion
+      )
+    : [];
+  const workflowEvidence = selectedRun
+    ? Array.from(
+        new Set([
+          ...(selectedRun.latestQuality?.evidenceRefs ?? []),
+          ...(selectedRun.latestBudget?.evidenceRefs ?? []),
+          ...selectedRun.iterations.flatMap((iteration) => [
+            ...iteration.quality.evidenceRefs,
+            ...iteration.budget.evidenceRefs,
+            ...iteration.quality.checks.flatMap((check) => check.evidenceRefs)
+          ])
+        ])
+      )
+    : [];
+
+  return (
+    <section className="panel os-module-panel workflow-library-module" data-product-section="workflows" id="workflows">
+      <div className="section-headline workflow-library-headline">
+        <div>
+          <span className="os-module-kicker">{tx("Workflow Registry", "工作流库")}</span>
+          <h2>{tx("Workflow Library", "工作流库")}</h2>
+          <p className="section-copy">
+            {tx(
+              "Templates, versions, project bindings, and conversation-observed bounded Loop evidence stay separate from the Skill Library.",
+              "模板、版本、项目绑定和由会话产生的有界 Loop 证据独立管理，不混入技能库。"
+            )}
+          </p>
+        </div>
+        <div className="workflow-library-actions">
+          <span className="mini-pill">{templates.length} {tx("templates", "个模板")}</span>
+          <span className="mini-pill">{bindings.length} {tx("bindings", "个绑定")}</span>
+          <button
+            type="button"
+            className="icon-button"
+            title={tx("Refresh project Workflow evidence", "刷新项目工作流证据")}
+            aria-label={tx("Refresh project Workflow evidence", "刷新项目工作流证据")}
+            disabled={!projectRoot || loading}
+            onClick={onRefreshProject}
+          >
+            ↻
+          </button>
+        </div>
+      </div>
+
+      <div className="workflow-template-table-wrap">
+        <table className="workflow-template-table">
+          <thead>
+            <tr>
+              <th>{tx("Workflow", "工作流")}</th>
+              <th>{tx("Type", "类型")}</th>
+              <th>{tx("Version", "版本")}</th>
+              <th>{tx("Dependencies", "依赖")}</th>
+              <th>{tx("Skills", "技能")}</th>
+              <th>{tx("State", "状态")}</th>
+              <th aria-label={tx("Actions", "操作")} />
+            </tr>
+          </thead>
+          <tbody>
+            {templates.map((template) => {
+              const selected = selectedTemplate && templateKey(template) === templateKey(selectedTemplate);
+              return (
+                <tr className={selected ? "is-selected" : ""} key={templateKey(template)}>
+                  <td>
+                    <button
+                      type="button"
+                      className="workflow-name-button"
+                      onClick={() => onSelectTemplate(templateKey(template))}
+                    >
+                      <strong>{templateLabel(template)}</strong>
+                      <span>{template.templateId}</span>
+                    </button>
+                  </td>
+                  <td><span className={`workflow-kind-pill kind-${template.kind}`}>{workflowKindLabel(template.kind, tx)}</span></td>
+                  <td className="inline-code">{template.templateVersion}</td>
+                  <td>{template.dependencyTemplateIds.length}</td>
+                  <td>{template.skillRefs.length}</td>
+                  <td>
+                    <span className={`workflow-status-pill status-${template.validation.valid ? "ready" : "blocked"}`}>
+                      {template.validation.valid ? tx("Verified", "已校验") : tx("Invalid", "无效")}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      title={tx("Preview project binding", "预览项目绑定")}
+                      aria-label={tx("Preview project binding", "预览项目绑定")}
+                      disabled={!projectRoot || loading || !template.validation.valid}
+                      onClick={() => onPreviewBinding(template)}
+                    >
+                      ⇥
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {templates.length === 0 ? (
+              <tr><td colSpan={7} className="table-empty">{tx("No local Workflow templates were indexed.", "尚未索引到本地工作流模板。")}</td></tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+
+      {selectedTemplate ? (
+        <article className="workflow-template-inspector">
+          <div className="workflow-template-inspector-head">
+            <div>
+              <span className="os-module-kicker">{workflowKindLabel(selectedTemplate.kind, tx)}</span>
+              <h3>{templateLabel(selectedTemplate)}</h3>
+              <p className="inline-code">{selectedTemplate.templateId}@{selectedTemplate.templateVersion}</p>
+            </div>
+            <div className="segmented-control workflow-presentation-switch" aria-label={tx("Workflow presentation", "工作流呈现方式")}>
+              <button type="button" className={presentation === "flow" ? "active" : ""} onClick={() => setPresentation("flow")}>{tx("Flow", "流程图")}</button>
+              <button type="button" className={presentation === "mindmap" ? "active" : ""} onClick={() => setPresentation("mindmap")}>{tx("Mind map", "脑图")}</button>
+            </div>
+          </div>
+          {presentation === "flow" ? (
+            <div className="workflow-manifest-flow" aria-label={tx("Manifest composition flow", "Manifest 组合流程图")}>
+              <div className="workflow-flow-node primary"><span>{tx("Template", "模板")}</span><strong>{templateLabel(selectedTemplate)}</strong></div>
+              <span className="workflow-flow-arrow">→</span>
+              <div className="workflow-flow-node"><span>{tx("Dependencies", "依赖")}</span><strong>{selectedTemplate.dependencyTemplateIds.length}</strong></div>
+              <span className="workflow-flow-arrow">→</span>
+              <div className="workflow-flow-node"><span>{tx("Skill refs", "技能引用")}</span><strong>{selectedTemplate.skillRefs.length}</strong></div>
+              <span className="workflow-flow-arrow">→</span>
+              <div className="workflow-flow-node quality"><span>{tx("Quality / Loop", "质量 / Loop")}</span><strong>{selectedTemplate.kind === "scenario" || selectedTemplate.kind === "integration" ? tx("Guarded", "受控") : tx("Declarative", "声明式")}</strong></div>
+            </div>
+          ) : (
+            <div className="workflow-manifest-mindmap" aria-label={tx("Manifest composition mind map", "Manifest 组合脑图")}>
+              <div className="workflow-mindmap-branch left"><span>{tx("Dependencies", "依赖")}</span>{selectedTemplate.dependencyTemplateIds.length ? selectedTemplate.dependencyTemplateIds.map((item) => <strong key={item}>{item}</strong>) : <small>{tx("None", "无")}</small>}</div>
+              <div className="workflow-mindmap-center"><span>{tx("Workflow", "工作流")}</span><strong>{templateLabel(selectedTemplate)}</strong><small>{selectedTemplate.templateVersion}</small></div>
+              <div className="workflow-mindmap-branch right"><span>{tx("Skills", "技能")}</span>{selectedTemplate.skillRefs.length ? selectedTemplate.skillRefs.map((item) => <strong key={item}>{item}</strong>) : <small>{tx("None", "无")}</small>}</div>
+            </div>
+          )}
+          <div className="workflow-template-detail-grid">
+            <div><span>{tx("Source", "来源")}</span><code>{selectedTemplate.sourcePath}</code></div>
+            <div><span>{tx("Bound projects", "已绑定项目")}</span><strong>{selectedTemplateBindings.length}</strong></div>
+            <div><span>{tx("Manifest", "Manifest")}</span><code>{selectedTemplate.manifestFingerprint}</code></div>
+          </div>
+        </article>
+      ) : null}
+
+      <div className="workflow-project-observability">
+        <div className="workflow-project-observability-head">
+          <div>
+            <span className="os-module-kicker">{tx("Project observability", "项目可观测性")}</span>
+            <h3>{projectRoot ? tx("Bindings, Loop, and evidence", "绑定、Loop 与证据") : tx("Select a project first", "请先选择项目")}</h3>
+            <p>{projectRoot ? <code>{projectRoot}</code> : tx("Choose one bound project to read its local Workflow state.", "选择一个已绑定项目后，可读取其本地工作流状态。")}</p>
+          </div>
+          {doctor ? <span className={`workflow-status-pill doctor-${doctor.summary}`}>{doctor.summary === "healthy" ? tx("Healthy", "健康") : doctor.summary === "attention" ? tx("Attention", "需关注") : tx("Blocked", "已阻塞")}</span> : null}
+        </div>
+
+        {doctor ? (
+          <div className="workflow-doctor-grid">
+            {doctor.checks.map((check) => (
+              <article className={`workflow-doctor-check doctor-${check.status}`} key={check.id}>
+                <span>{check.status === "pass" ? tx("Pass", "通过") : check.status === "warning" ? tx("Attention", "需关注") : tx("Blocked", "已阻塞")}</span>
+                <strong>{check.title}</strong>
+                <p>{check.detail}</p>
+              </article>
+            ))}
+          </div>
+        ) : projectRoot ? <div className="workflow-empty-state">{tx("Refresh to run the local Workflow Doctor.", "点击刷新以运行本地工作流体检。")}</div> : null}
+
+        <div className="workflow-binding-table-wrap">
+          <table className="workflow-binding-table">
+            <thead><tr><th>{tx("Workflow", "工作流")}</th><th>{tx("Version", "版本")}</th><th>{tx("Source", "来源")}</th><th>{tx("Compatibility", "兼容性")}</th><th>{tx("Updated", "更新时间")}</th><th aria-label={tx("Actions", "操作")} /></tr></thead>
+            <tbody>
+              {bindings.map((binding) => (
+                <tr key={binding.bindingId}>
+                  <td><strong>{bindingLabel(binding)}</strong><span className="table-secondary">{binding.templateId}</span></td>
+                  <td><code>{binding.templateVersion}</code></td>
+                  <td><span className="workflow-status-pill status-muted">{binding.readOnly ? tx("Legacy", "旧声明") : tx("Binding", "绑定")}</span></td>
+                  <td><span className={`workflow-status-pill status-${binding.compatibility.readyForBinding ? "ready" : "blocked"}`}>{workflowStatusLabel(binding.status, tx)}</span></td>
+                  <td>{formatDateTime(binding.updatedAt)}</td>
+                  <td><div className="workflow-row-actions">
+                    {binding.readOnly ? <button type="button" className="icon-button" title={tx("Preview shadow migration", "预览影子迁移")} aria-label={tx("Preview shadow migration", "预览影子迁移")} disabled={loading} onClick={() => onPreviewMigration(binding)}>⇥</button> : null}
+                    {!binding.readOnly && binding.status === "needs_upgrade" ? <button type="button" className="icon-button" title={tx("Preview upgrade", "预览升级")} aria-label={tx("Preview upgrade", "预览升级")} disabled={loading} onClick={() => {
+                      const template = templates.find((item) => item.templateId === binding.templateId);
+                      if (template) onPreviewBinding(template);
+                    }}>↑</button> : null}
+                    {!binding.readOnly && binding.rollback ? <button type="button" className="icon-button" title={tx("Preview rollback", "预览回退")} aria-label={tx("Preview rollback", "预览回退")} disabled={loading} onClick={() => onPreviewRollback(binding)}>↶</button> : null}
+                  </div></td>
+                </tr>
+              ))}
+              {projectRoot && bindings.length === 0 ? <tr><td colSpan={6} className="table-empty">{tx("No Workflow binding or readable project declaration was found.", "没有发现工作流绑定或可读取的项目声明。")}</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+
+        {preview ? (
+          <article className="workflow-binding-preview" aria-live="polite">
+            <div><span className="os-module-kicker">{tx("Preview before write", "写入前预览")}</span><h4>{workflowStatusLabel(preview.changeType, tx)}</h4></div>
+            <p>{preview.existingBinding ? <><code>{preview.existingBinding.templateVersion}</code> → <code>{preview.template.templateVersion}</code></> : <><code>{preview.template.templateId}@{preview.template.templateVersion}</code></>}</p>
+            <p className="inline-code">{preview.bindingFilePath}</p>
+            {preview.warnings.length ? <ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
+            <div className="workflow-preview-actions">
+              <span>{preview.readyForConfirmation ? tx("Ready for confirmation", "已就绪，等待确认") : tx("Blocked by compatibility", "兼容性阻塞")}</span>
+              <button type="button" className="primary" disabled={!preview.readyForConfirmation || loading} onClick={onApplyPreview}>{tx("Confirm and apply", "确认并应用")}</button>
+            </div>
+          </article>
+        ) : null}
+        {applyResult ? <div className="workflow-apply-result" aria-live="polite">{applyResult.verified ? tx("Binding write was verified by reading the local file back.", "绑定写入已通过本地回读验证。") : tx("Binding write requires review.", "绑定写入需要复核。")}</div> : null}
+
+        <div className="workflow-loop-section">
+          <div className="workflow-loop-section-head"><div><span className="os-module-kicker">{tx("Scenario Loop", "场景 Loop")}</span><h4>{tx("Conversation-observed quality convergence", "会话发起的质量收敛记录")}</h4></div><span className="mini-pill">{loopRuns.length} {tx("runs", "次运行")}</span></div>
+          <div className="workflow-loop-run-list">
+            {loopRuns.map((run) => (
+              <button type="button" className={selectedRun?.id === run.id ? "is-selected" : ""} key={run.id} onClick={() => setSelectedRunId(run.id)}>
+                <span>{workflowStatusLabel(run.status, tx)}</span><strong>{workflowTemplateLabel(run.template.templateId, run.template.templateName, tx)}</strong><small>{tx("Iteration", "第")} {run.currentIteration} · {run.latestQuality?.score ?? "n/a"}</small>
+              </button>
+            ))}
+            {projectRoot && loopRuns.length === 0 ? <div className="workflow-empty-state">{tx("No conversation-observed Scenario Loop evidence has been imported for this project.", "该项目尚未导入由会话产生的场景 Loop 证据。")}</div> : null}
+          </div>
+          {selectedRun ? <div className="workflow-loop-detail">
+            <div className="workflow-loop-quality"><div><span>{tx("Quality score", "质量分")}</span><strong>{selectedRun.latestQuality?.score ?? "n/a"}</strong></div><div><span>{tx("Budget", "预算")}</span><strong>{selectedRun.latestBudget?.state ? workflowStatusLabel(selectedRun.latestBudget.state, tx) : "n/a"}</strong></div><div><span>{tx("Stop reason", "停止原因")}</span><strong>{selectedRun.stopReason ? workflowStatusLabel(selectedRun.stopReason, tx) : tx("Open", "未结束")}</strong></div></div>
+            <div className="workflow-iteration-timeline">{selectedRun.iterations.map((iteration) => <article key={iteration.id}><span>{tx("Round", "第")} {iteration.iteration}</span><strong>{workflowStatusLabel(iteration.status, tx)}</strong><p>{iteration.rootCauseKey ?? tx("No root cause recorded", "未记录根因")}</p><small>{iteration.quality.score ?? "n/a"} · {formatDateTime(iteration.completedAt)}</small></article>)}</div>
+            <div className="workflow-evidence-list"><span>{tx("Evidence references", "证据引用")}</span><div>{workflowEvidence.map((ref) => <button type="button" key={ref} onClick={() => setSelectedEvidenceRef(ref)}>{ref}</button>)}{workflowEvidence.length === 0 ? <small>{tx("No evidence reference recorded.", "尚未记录证据引用。")}</small> : null}</div></div>
+            {selectedEvidenceRef ? <article className="workflow-evidence-detail"><span>{tx("Evidence reference", "证据引用")}</span><code>{selectedEvidenceRef}</code><p>{tx("This is a local reference captured by the Loop record. Open Session Trace or the linked report when the reference is available there.", "这是 Loop 记录捕获的本地引用；若会话链路或报告中存在该引用，可在对应模块继续下探。")}</p></article> : null}
+          </div> : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function App() {
   const skillGraphSectionRef = useRef<HTMLElement | null>(null);
   const productWorkspaceRef = useRef<HTMLDivElement | null>(null);
@@ -8642,6 +11277,9 @@ export default function App() {
     | "marketplace-import"
     | "marketplace-activation-preview"
     | "health-policy"
+    | "model-config"
+    | "model-test"
+    | "model-case-generation"
     | null
   >(null);
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
@@ -8659,11 +11297,25 @@ export default function App() {
   const [projectHeartbeatEntries, setProjectHeartbeatEntries] =
     useState<ProjectHeartbeatEntry[]>(() => loadProjectHeartbeats());
   const [inspectedProjectPath, setInspectedProjectPath] = useState("");
+  const [projectDetailView, setProjectDetailView] = useState<ProjectDetailView>("overview");
   const [workflowStarterPreview, setWorkflowStarterPreview] =
     useState<WorkflowStarterPreview | null>(null);
   const [workflowStarterResult, setWorkflowStarterResult] =
     useState<WorkflowStarterApplyResult | null>(null);
   const [workflowStarterHighlighted, setWorkflowStarterHighlighted] = useState(false);
+  const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplateSummary[]>([]);
+  const [projectWorkflowBindings, setProjectWorkflowBindings] = useState<
+    ProjectWorkflowBindingSummary[]
+  >([]);
+  const [projectScenarioLoopRuns, setProjectScenarioLoopRuns] = useState<ScenarioLoopRunSummary[]>([]);
+  const [projectWorkflowDoctor, setProjectWorkflowDoctor] =
+    useState<ProjectWorkflowDoctorResult | null>(null);
+  const [workflowBindingPreview, setWorkflowBindingPreview] =
+    useState<ProjectWorkflowBindingPreview | null>(null);
+  const [workflowBindingApplyResult, setWorkflowBindingApplyResult] =
+    useState<ProjectWorkflowBindingApplyResult | null>(null);
+  const [selectedWorkflowTemplateId, setSelectedWorkflowTemplateId] = useState<string | null>(null);
+  const [workflowLibraryLoading, setWorkflowLibraryLoading] = useState(false);
   const [telemetryResult, setTelemetryResult] = useState<TelemetryImportResult | null>(null);
   const [localToolSources, setLocalToolSources] = useState<LocalToolTelemetrySource[]>([]);
   const [selectedLocalToolSourceId, setSelectedLocalToolSourceId] = useState("");
@@ -8672,6 +11324,13 @@ export default function App() {
     useState<LocalToolTelemetryImportResult | null>(null);
   const [projectRuntimeRefreshResult, setProjectRuntimeRefreshResult] =
     useState<ProjectRuntimeEvidenceRefreshResult | null>(null);
+  const [projectAdapterReadiness, setProjectAdapterReadiness] =
+    useState<ProjectAdapterReadiness | null>(null);
+  const [projectAdapterReadinessLoading, setProjectAdapterReadinessLoading] = useState(false);
+  const [controlledVerificationProjectPath, setControlledVerificationProjectPath] = useState("");
+  const [controlledVerificationResult, setControlledVerificationResult] =
+    useState<ProjectControlledSessionVerification | null>(null);
+  const [controlledVerificationRunning, setControlledVerificationRunning] = useState(false);
   const [projectProfile, setProjectProfile] = useState<ProjectProfileSummary | null>(null);
   const [proposalRefreshResult, setProposalRefreshResult] =
     useState<OptimizationProposalRefreshResult | null>(null);
@@ -8689,6 +11348,8 @@ export default function App() {
   const [dailySummary, setDailySummary] = useState<DailyMetricsSummary | null>(null);
   const [weeklySummary, setWeeklySummary] = useState<WeeklyMetricsSummary | null>(null);
   const [graphSnapshot, setGraphSnapshot] = useState<GraphSnapshot | null>(null);
+  const [graphPresentationMode, setGraphPresentationMode] =
+    useState<GraphPresentationMode>("flow");
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
   const [graphNavigationState, setGraphNavigationState] = useState<GraphNavigationState>({
     entries: [],
@@ -8714,6 +11375,22 @@ export default function App() {
     useState<"idle" | "loading" | "ready" | "error">("idle");
   const [graphPathTraceError, setGraphPathTraceError] = useState<string | null>(null);
   const [recentRuns, setRecentRuns] = useState<SkillRunSummary[]>([]);
+  const [projectRuntimeSummaries, setProjectRuntimeSummaries] = useState<ProjectRuntimeSummary[]>([]);
+  const [projectRuntimeRefreshRemainingSeconds, setProjectRuntimeRefreshRemainingSeconds] = useState(
+    Math.ceil(projectManagementRefreshIntervalMs / 1000)
+  );
+  const [projectRuntimeRefreshedAt, setProjectRuntimeRefreshedAt] = useState<string | null>(null);
+  const [projectRuntimeRefreshing, setProjectRuntimeRefreshing] = useState(false);
+  const [sessionTraces, setSessionTraces] = useState<SessionTraceListItem[]>([]);
+  const [selectedSessionTraceId, setSelectedSessionTraceId] = useState<string | null>(null);
+  const [sessionTraceDetail, setSessionTraceDetail] = useState<SessionTraceDetail | null>(null);
+  const [sessionTraceLoading, setSessionTraceLoading] = useState(false);
+  const [sessionTraceError, setSessionTraceError] = useState<string | null>(null);
+  const [traceSkillDetail, setTraceSkillDetail] = useState<TraceSkillQuickDetail | null>(null);
+  const [traceSkillLoading, setTraceSkillLoading] = useState(false);
+  const [traceSkillDrawerOpen, setTraceSkillDrawerOpen] = useState(false);
+  const [traceReturnAvailable, setTraceReturnAvailable] = useState(false);
+  const traceSkillTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [skillRunDetail, setSkillRunDetail] = useState<{
     skill: SkillSummary;
     runs: SkillRunSummary[];
@@ -8725,6 +11402,16 @@ export default function App() {
   const [skillAnalysisStatus, setSkillAnalysisStatus] =
     useState<"idle" | "loading" | "ready" | "error">("idle");
   const [skillAnalysisError, setSkillAnalysisError] = useState<string | null>(null);
+  const [modelEvaluationConfig, setModelEvaluationConfig] = useState<ModelEvaluationConfig | null>(null);
+  const [modelProviderLabel, setModelProviderLabel] = useState("OpenAI compatible");
+  const [modelEndpointUrl, setModelEndpointUrl] = useState("https://api.openai.com/v1");
+  const [modelName, setModelName] = useState("");
+  const [modelApiKeyDraft, setModelApiKeyDraft] = useState("");
+  const [modelEvaluationEnabled, setModelEvaluationEnabled] = useState(false);
+  const [modelSourceUploadAllowed, setModelSourceUploadAllowed] = useState(false);
+  const [modelEvaluationFocus, setModelEvaluationFocus] = useState("");
+  const [generatedModelEvaluationCases, setGeneratedModelEvaluationCases] =
+    useState<ModelEvaluationCaseGenerationResult | null>(null);
   const [proposalFilter, setProposalFilter] =
     useState<OptimizationProposalStatus | "all">("all");
 
@@ -8816,8 +11503,11 @@ export default function App() {
   const [interactionNotice, setInteractionNotice] = useState<InteractionNotice | null>(null);
   const interactionNoticeRef = useRef<InteractionNotice | null>(null);
   const monitoringRefreshInFlightRef = useRef<Set<string>>(new Set());
+  const monitoringBatchInFlightRef = useRef(false);
   const monitoringSessionStartedAtRef = useRef(Date.now());
+  const projectRuntimeSnapshotInFlightRef = useRef(false);
   const projectDatabaseHydratedRef = useRef(false);
+  const modelEvaluationConfigHydratedRef = useRef(false);
 
   const busy = busyAction !== null;
   const tx = (en: string, zh: string) => formatLocalizedText(languageMode, en, zh);
@@ -9458,6 +12148,28 @@ export default function App() {
   const inspectedProject = inspectedProjectPath
     ? managedProjects.find((project) => project.path === normalizeProjectPath(inspectedProjectPath)) ?? null
     : null;
+  const controlledVerificationProject = controlledVerificationProjectPath
+    ? managedProjects.find((project) => project.path === normalizeProjectPath(controlledVerificationProjectPath)) ?? null
+    : null;
+  const inspectedProjectSkills = inspectedProject
+    ? (boot?.skills ?? []).filter((skill) => isPathInsideProject(skill.sourcePath, inspectedProject.path))
+    : [];
+  const inspectedProjectSkillIds = new Set(inspectedProjectSkills.map((skill) => skill.id));
+  const inspectedProjectTraceCount = inspectedProject
+    ? sessionTraces.filter(
+        (trace) =>
+          trace.projectId === inspectedProject.id ||
+          Boolean(trace.workspaceRef && isPathInsideProject(trace.workspaceRef, inspectedProject.path))
+      ).length
+    : 0;
+  const inspectedProjectOpenProposalCount = inspectedProject
+    ? proposals.filter(
+        (proposal) => proposal.status === "open" && inspectedProjectSkillIds.has(proposal.skillId)
+      ).length
+    : 0;
+  const inspectedProjectHasEvaluationEvidence = Boolean(
+    skillAnalysis && inspectedProjectSkillIds.has(skillAnalysis.skillId)
+  );
   const selectedProjectLog = selectedProjectLogPath
     ? managedProjects.find((project) => project.path === normalizeProjectPath(selectedProjectLogPath)) ?? null
     : null;
@@ -9466,6 +12178,21 @@ export default function App() {
         .filter((entry) => entry.projectPath === selectedProjectLog.path)
         .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
     : [];
+  const selectedProjectRuntimeRuns = selectedProjectLog
+    ? recentRuns
+        .filter(
+          (run) =>
+            run.workspaceRef &&
+            isPathInsideProject(run.workspaceRef, selectedProjectLog.path)
+        )
+        .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+    : [];
+  const projectRuntimeSummaryByPath = new Map(
+    projectRuntimeSummaries.map((summary) => [normalizeProjectPath(summary.projectPath), summary])
+  );
+  const selectedProjectRuntimeSummary = selectedProjectLog
+    ? projectRuntimeSummaryByPath.get(selectedProjectLog.path) ?? null
+    : null;
   const currentProjectSkills = hasSelectedProject
     ? (boot?.skills ?? []).filter((skill) =>
         isPathInsideProject(skill.sourcePath, normalizedTargetProjectRoot)
@@ -9499,10 +12226,31 @@ export default function App() {
     : "";
   const scanResultDialogProject =
     managedProjects.find((project) => project.path === scanResultDialogProjectRoot) ?? null;
+  const scanDialogMatchingWorkspaceRuns = scanResultDialogProject
+    ? recentRuns
+        .filter(
+          (run) =>
+            run.workspaceRef &&
+            isPathInsideProject(run.workspaceRef, scanResultDialogProject.path)
+        )
+        .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+    : [];
+  const scanDialogDetectedWorkspaceRef =
+    scanDialogMatchingWorkspaceRuns[0]?.workspaceRef ?? scanResultDialogProject?.lastObservedWorkspaceRef ?? "";
+  const scanDialogWorkspaceMatchesProject = Boolean(
+    scanResultDialogProject &&
+      scanDialogDetectedWorkspaceRef &&
+      isPathInsideProject(scanDialogDetectedWorkspaceRef, scanResultDialogProject.path)
+  );
+
+  useEffect(() => {
+    void refreshWorkflowLibraryState(normalizedTargetProjectRoot);
+  }, [normalizedTargetProjectRoot]);
 
   useEffect(() => {
     if (!inspectedProject) {
       setProjectProfile(null);
+      setProjectAdapterReadiness(null);
       return undefined;
     }
 
@@ -9527,12 +12275,104 @@ export default function App() {
   }, [inspectedProject?.path]);
 
   useEffect(() => {
+    if (!inspectedProject) {
+      return undefined;
+    }
+    let cancelled = false;
+    setProjectAdapterReadinessLoading(true);
+    void window.workbench
+      .diagnoseProjectAdapterReadiness(inspectedProject.path)
+      .then((readiness) => {
+        if (!cancelled) {
+          setProjectAdapterReadiness(readiness);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProjectAdapterReadiness(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setProjectAdapterReadinessLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inspectedProject?.path]);
+
+  useEffect(() => {
     interactionNoticeRef.current = interactionNotice;
   }, [interactionNotice]);
 
   useEffect(() => {
+    if (!selectedSessionTraceId) {
+      setSessionTraceDetail(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setSessionTraceLoading(true);
+    setSessionTraceError(null);
+    void window.workbench
+      .getSessionTrace(selectedSessionTraceId)
+      .then((nextTrace) => {
+        if (!cancelled) {
+          setSessionTraceDetail(nextTrace);
+          if (!nextTrace) {
+            setSessionTraceError(tx("The selected trace is no longer available.", "所选链路已不存在。"));
+          }
+        }
+      })
+      .catch((nextError) => {
+        if (!cancelled) {
+          setSessionTraceDetail(null);
+          setSessionTraceError(nextError instanceof Error ? nextError.message : tx("Trace failed to load.", "链路加载失败。"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSessionTraceLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSessionTraceId]);
+
+  useEffect(() => {
     window.localStorage.setItem(managedProjectsStorageKey, JSON.stringify(managedProjects));
   }, [managedProjects]);
+
+  useEffect(() => {
+    if (boot?.status !== "ready") {
+      return undefined;
+    }
+
+    const projectPaths = managedProjects.map((project) => project.path);
+    if (projectPaths.length === 0) {
+      setProjectRuntimeSummaries([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    void window.workbench
+      .listProjectRuntimeSummaries(projectPaths)
+      .then((summaries) => {
+        if (!cancelled) {
+          setProjectRuntimeSummaries(summaries);
+        }
+      })
+      .catch(() => {
+        // Keep the last successful local snapshot when the aggregate read is unavailable.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boot?.status, managedProjects]);
 
   useEffect(() => {
     let cancelled = false;
@@ -9547,12 +12387,11 @@ export default function App() {
         if (cancelled) {
           return;
         }
+        const mergedProjects = mergeManagedProjectLists(storedProjects, localProjects);
         const projects =
-          storedProjects.length > 0
-            ? storedProjects
-            : localProjects.length > 0
-              ? await window.workbench.saveManagedProjects(localProjects)
-              : [];
+          storedProjects.length === 0 && localProjects.length > 0
+            ? await window.workbench.saveManagedProjects(mergedProjects)
+            : mergedProjects;
         if (cancelled) {
           return;
         }
@@ -9648,6 +12487,66 @@ export default function App() {
     return () => window.removeEventListener("keydown", closeBindDialogOnEscape);
   }, [pendingBindProjectRoot, busyAction]);
 
+  async function refreshProjectManagementRuntimeSnapshot() {
+    const projectPaths = managedProjects.map((project) => project.path);
+    if (projectPaths.length === 0 || projectRuntimeSnapshotInFlightRef.current) {
+      return;
+    }
+
+    projectRuntimeSnapshotInFlightRef.current = true;
+    setProjectRuntimeRefreshing(true);
+    try {
+      const [summaries, runs] = await Promise.all([
+        window.workbench.listProjectRuntimeSummaries(projectPaths),
+        window.workbench.listRecentRuns(runtimeRunFetchLimit)
+      ]);
+      startTransition(() => {
+        setProjectRuntimeSummaries(summaries);
+        setRecentRuns(runs);
+        setProjectRuntimeRefreshedAt(new Date().toISOString());
+      });
+    } finally {
+      projectRuntimeSnapshotInFlightRef.current = false;
+      setProjectRuntimeRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    if (currentProductSection !== "discovery" || managedProjects.length === 0) {
+      setProjectRuntimeRefreshRemainingSeconds(
+        Math.ceil(projectManagementRefreshIntervalMs / 1000)
+      );
+      return undefined;
+    }
+
+    let disposed = false;
+    let nextRefreshAt = Date.now() + projectManagementRefreshIntervalMs;
+    const refresh = () => {
+      void refreshProjectManagementRuntimeSnapshot().finally(() => {
+        if (!disposed) {
+          nextRefreshAt = Date.now() + projectManagementRefreshIntervalMs;
+          setProjectRuntimeRefreshRemainingSeconds(
+            Math.ceil(projectManagementRefreshIntervalMs / 1000)
+          );
+        }
+      });
+    };
+
+    refresh();
+    const timer = window.setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((nextRefreshAt - Date.now()) / 1000));
+      setProjectRuntimeRefreshRemainingSeconds(remaining);
+      if (remaining === 0 && !projectRuntimeSnapshotInFlightRef.current) {
+        refresh();
+      }
+    }, 1000);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [currentProductSection, managedProjects]);
+
   useEffect(() => {
     const monitoredProjects = managedProjects.filter((project) => project.monitoringEnabled);
     if (
@@ -9659,24 +12558,39 @@ export default function App() {
     }
 
     const timer = window.setInterval(() => {
+      if (monitoringBatchInFlightRef.current) {
+        return;
+      }
       const now = Date.now();
-      monitoredProjects.forEach((project) => {
-        if (now - monitoringSessionStartedAtRef.current < project.monitoringIntervalMs) {
-          return;
-        }
-        const lastMonitorAt = project.lastMonitorAt ?? project.lastScanAt ?? project.boundAt;
-        const elapsedMs = lastMonitorAt ? now - new Date(lastMonitorAt).getTime() : Number.POSITIVE_INFINITY;
-        if (
-          elapsedMs < project.monitoringIntervalMs ||
-          monitoringRefreshInFlightRef.current.has(project.path)
-        ) {
-          return;
-        }
+      const nextProject = monitoredProjects
+        .filter((project) => {
+          if (now - monitoringSessionStartedAtRef.current < project.monitoringIntervalMs) {
+            return false;
+          }
+          const lastMonitorAt = project.lastMonitorAt ?? project.lastScanAt ?? project.boundAt;
+          const elapsedMs = lastMonitorAt
+            ? now - new Date(lastMonitorAt).getTime()
+            : Number.POSITIVE_INFINITY;
+          return (
+            elapsedMs >= project.monitoringIntervalMs &&
+            !monitoringRefreshInFlightRef.current.has(project.path)
+          );
+        })
+        .sort((left, right) => {
+          const leftAt = left.lastMonitorAt ?? left.lastScanAt ?? left.boundAt;
+          const rightAt = right.lastMonitorAt ?? right.lastScanAt ?? right.boundAt;
+          return new Date(leftAt).getTime() - new Date(rightAt).getTime();
+        })[0];
 
-        monitoringRefreshInFlightRef.current.add(project.path);
-        void checkProjectConnectionHeartbeat(project).finally(() => {
-          monitoringRefreshInFlightRef.current.delete(project.path);
-        });
+      if (!nextProject) {
+        return;
+      }
+
+      monitoringBatchInFlightRef.current = true;
+      monitoringRefreshInFlightRef.current.add(nextProject.path);
+      void refreshProjectRuntimeEvidence(nextProject, { silent: true }).finally(() => {
+        monitoringRefreshInFlightRef.current.delete(nextProject.path);
+        monitoringBatchInFlightRef.current = false;
       });
     }, 5000);
 
@@ -10579,10 +13493,11 @@ export default function App() {
 
     try {
       const next = await loadBootstrapState();
-      const [nextAuditEvents, nextBackups, nextRemoteCandidates] = await Promise.all([
+      const [nextAuditEvents, nextBackups, nextRemoteCandidates, nextModelEvaluationConfig] = await Promise.all([
         window.workbench.listAuditEvents(12),
         window.workbench.listBackups(8),
-        window.workbench.listRemoteSkillCandidates()
+        window.workbench.listRemoteSkillCandidates(),
+        window.workbench.getModelEvaluationConfig()
       ]);
       let summary: DailyMetricsSummary | null = null;
       let nextWeeklySummary: WeeklyMetricsSummary | null = null;
@@ -10590,16 +13505,18 @@ export default function App() {
       let nextProposals: OptimizationProposal[] = [];
       let nextGraph: GraphSnapshot | null = null;
       let nextBundles: SkillBundleSummary[] = [];
+      let nextSessionTraces: SessionTraceListItem[] = [];
 
       if (next.status === "ready") {
-        [summary, nextWeeklySummary, runs, nextProposals, nextGraph, nextBundles] =
+        [summary, nextWeeklySummary, runs, nextProposals, nextGraph, nextBundles, nextSessionTraces] =
           await Promise.all([
             window.workbench.getDailySummary(),
             window.workbench.getWeeklySummary(),
             window.workbench.listRecentRuns(runtimeRunFetchLimit),
             window.workbench.listOptimizationProposals("all"),
             window.workbench.getGraphSnapshot(),
-            window.workbench.listBundles()
+            window.workbench.listBundles(),
+            window.workbench.listSessionTraces({ limit: 120 })
           ]);
       }
 
@@ -10609,9 +13526,24 @@ export default function App() {
         setWeeklySummary(nextWeeklySummary);
         setGraphSnapshot(nextGraph);
         setRecentRuns(runs);
+        setSessionTraces(nextSessionTraces);
+        setSelectedSessionTraceId((current) =>
+          current && nextSessionTraces.some((trace) => trace.traceId === current)
+            ? current
+            : nextSessionTraces[0]?.traceId ?? null
+        );
         setAuditEvents(nextAuditEvents);
         setBackups(nextBackups);
         setRemoteCandidates(nextRemoteCandidates);
+        setModelEvaluationConfig(nextModelEvaluationConfig);
+        if (!modelEvaluationConfigHydratedRef.current) {
+          modelEvaluationConfigHydratedRef.current = true;
+          setModelProviderLabel(nextModelEvaluationConfig.providerLabel);
+          setModelEndpointUrl(nextModelEvaluationConfig.endpointUrl);
+          setModelName(nextModelEvaluationConfig.modelName);
+          setModelEvaluationEnabled(nextModelEvaluationConfig.enabled);
+          setModelSourceUploadAllowed(nextModelEvaluationConfig.allowSourceUpload);
+        }
         setProposals(nextProposals);
         setBundles(nextBundles);
         if (next.status === "ready") {
@@ -10635,6 +13567,86 @@ export default function App() {
         setLoading(false);
       }
     }
+  }
+
+  async function refreshSessionTraces() {
+    setSessionTraceLoading(true);
+    setSessionTraceError(null);
+    try {
+      const nextTraces = await window.workbench.listSessionTraces({ limit: 120 });
+      startTransition(() => {
+        setSessionTraces(nextTraces);
+        setSelectedSessionTraceId((current) =>
+          current && nextTraces.some((trace) => trace.traceId === current)
+            ? current
+            : nextTraces[0]?.traceId ?? null
+        );
+      });
+      if (nextTraces.length === 0) {
+        setSessionTraceDetail(null);
+      }
+    } catch (nextError) {
+      setSessionTraceError(nextError instanceof Error ? nextError.message : tx("Trace refresh failed.", "链路刷新失败。"));
+    } finally {
+      setSessionTraceLoading(false);
+    }
+  }
+
+  async function openTraceSkill(traceId: string, skillId: string, trigger?: HTMLButtonElement) {
+    traceSkillTriggerRef.current = trigger ?? null;
+    setTraceSkillDrawerOpen(true);
+    setTraceSkillLoading(true);
+    setTraceSkillDetail(null);
+    try {
+      const detail = await window.workbench.getTraceSkillDetail(traceId, skillId);
+      setTraceSkillDetail(detail);
+    } catch (nextError) {
+      setTraceSkillDrawerOpen(false);
+      showInteractionNotice({
+        area: tx("Session Trace", "会话链路"),
+        action: tx("Open Skill", "打开 Skill"),
+        result: nextError instanceof Error ? nextError.message : tx("Skill evidence failed to load.", "Skill 证据加载失败。"),
+        nextStep: tx("Refresh the trace and try the Skill node again.", "刷新链路后重新点击 Skill 节点。"),
+        tone: "warning"
+      });
+    } finally {
+      setTraceSkillLoading(false);
+    }
+  }
+
+  function closeTraceSkillDrawer(restoreFocus = true) {
+    setTraceSkillDrawerOpen(false);
+    setTraceSkillDetail(null);
+    setTraceSkillLoading(false);
+    if (restoreFocus) {
+      window.setTimeout(() => traceSkillTriggerRef.current?.focus(), 0);
+    }
+  }
+
+  function openTraceSkillInLibrary(skillId: string) {
+    setTraceReturnAvailable(true);
+    closeTraceSkillDrawer(false);
+    setActiveSkillAssetTab("local");
+    selectLibrarySkill(skillId);
+    navigateToProductSection("#local-skills");
+  }
+
+  function openTraceSkillInGraph(skillId: string) {
+    setTraceReturnAvailable(true);
+    closeTraceSkillDrawer(false);
+    setSelectedGraphNodeId(`skill:${skillId}`);
+    navigateToProductSection("#graph");
+  }
+
+  async function revealTraceSkillSource(skillId: string) {
+    const revealed = await window.workbench.revealSkillSource(skillId);
+    showInteractionNotice({
+      area: tx("Session Trace", "会话链路"),
+      action: tx("Reveal Source", "显示源文件"),
+      result: revealed ? tx("The Skill source is selected in Finder.", "已在 Finder 中选中 Skill 源文件。") : tx("The Skill source is unavailable.", "Skill 源文件不可用。"),
+      nextStep: tx("Return to the open trace drawer to continue inspection.", "返回已打开的链路抽屉继续查看。"),
+      tone: revealed ? "success" : "warning"
+    });
   }
 
   async function createBackup() {
@@ -10923,6 +13935,127 @@ export default function App() {
     }
   }
 
+  async function saveModelEvaluationConfig(clearApiKey = false) {
+    setBusyAction("model-config");
+    setError(null);
+    try {
+      const nextConfig = await window.workbench.saveModelEvaluationConfig({
+        providerLabel: modelProviderLabel,
+        endpointUrl: modelEndpointUrl,
+        modelName,
+        enabled: clearApiKey ? false : modelEvaluationEnabled,
+        allowSourceUpload: clearApiKey ? false : modelSourceUploadAllowed,
+        apiKey: clearApiKey ? undefined : modelApiKeyDraft.trim() || undefined,
+        clearApiKey
+      });
+      setModelEvaluationConfig(nextConfig);
+      setModelProviderLabel(nextConfig.providerLabel);
+      setModelEndpointUrl(nextConfig.endpointUrl);
+      setModelName(nextConfig.modelName);
+      setModelEvaluationEnabled(nextConfig.enabled);
+      setModelSourceUploadAllowed(nextConfig.allowSourceUpload);
+      setModelApiKeyDraft("");
+      setGeneratedModelEvaluationCases(null);
+      showInteractionNotice({
+        area: tx("Settings / AI Evaluation", "设置 / AI 评测"),
+        action: clearApiKey ? tx("Clear API Key", "清除 API Key") : tx("Save Model Settings", "保存模型设置"),
+        result: clearApiKey
+          ? tx("The encrypted API key was removed and AI evaluation was disabled.", "已清除加密 API Key，并关闭 AI 评测。")
+          : tx(
+              "Model settings were saved locally. The API key is not exposed back to the interface.",
+              "模型设置已保存在本地，API Key 不会回显到界面。"
+            ),
+        nextStep: clearApiKey
+          ? tx("Add a new key and save before using AI-assisted test generation again.", "重新填写 Key 并保存后，才可再次使用 AI 辅助生成用例。")
+          : tx("Test the connection before sending any selected source to the configured provider.", "向配置的服务商发送选中内容前，请先测试连接。"),
+        tone: "success"
+      });
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("Saving model settings failed.", "保存模型设置失败。");
+      setError(message);
+      showInteractionNotice({
+        area: tx("Settings / AI Evaluation", "设置 / AI 评测"),
+        action: tx("Save Model Settings", "保存模型设置"),
+        result: message,
+        nextStep: tx("Check the endpoint, model name, secure storage, and API key.", "请检查地址、模型名称、安全存储和 API Key。"),
+        tone: "warning"
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function testModelEvaluationConnection() {
+    setBusyAction("model-test");
+    setError(null);
+    try {
+      const result = await window.workbench.testModelEvaluationConnection();
+      const nextConfig = await window.workbench.getModelEvaluationConfig();
+      setModelEvaluationConfig(nextConfig);
+      showInteractionNotice({
+        area: tx("Settings / AI Evaluation", "设置 / AI 评测"),
+        action: tx("Test Connection", "测试连接"),
+        result: result.message,
+        nextStep:
+          result.status === "ready"
+            ? tx("Open Evaluation Reports to generate candidate test cases for the selected Skill.", "进入评测报告，为选中 Skill 生成候选测试用例。")
+            : tx("Correct the provider configuration, save it, then test again.", "修正服务商配置、保存后再测试。"),
+        tone: result.status === "ready" ? "success" : "warning"
+      });
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("Model connection test failed.", "模型连接测试失败。");
+      setError(message);
+      showInteractionNotice({
+        area: tx("Settings / AI Evaluation", "设置 / AI 评测"),
+        action: tx("Test Connection", "测试连接"),
+        result: message,
+        nextStep: tx("Save a valid enabled configuration before testing again.", "请先保存有效且已启用的配置后再测试。"),
+        tone: "warning"
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function generateModelEvaluationCases() {
+    if (!evaluationTargetRow) {
+      return;
+    }
+    setBusyAction("model-case-generation");
+    setError(null);
+    try {
+      const result = await window.workbench.generateModelEvaluationCases({
+        targetType: "skill",
+        targetId: evaluationTargetRow.skill.id,
+        focus: modelEvaluationFocus.trim() || undefined,
+        maxCases: 4
+      });
+      setGeneratedModelEvaluationCases(result);
+      showInteractionNotice({
+        area: tx("Evaluation Reports", "评测报告"),
+        action: tx("Generate AI Test Cases", "生成 AI 测试用例"),
+        result: tx(
+          `${result.testCases.length} candidate cases were generated for ${result.targetName}.`,
+          `已为 ${result.targetName} 生成 ${result.testCases.length} 条候选用例。`
+        ),
+        nextStep: tx("Run each case through the target harness and attach trace and outcome evidence.", "请用目标 Harness 执行每个用例，并补充链路与结果证据。"),
+        tone: "success"
+      });
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("AI test case generation failed.", "AI 测试用例生成失败。");
+      setError(message);
+      showInteractionNotice({
+        area: tx("Evaluation Reports", "评测报告"),
+        action: tx("Generate AI Test Cases", "生成 AI 测试用例"),
+        result: message,
+        nextStep: tx("Enable source upload, test the connection, and try again.", "请开启内容上传、测试连接后再试。"),
+        tone: "warning"
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   async function grantAuthorization() {
     if (!targetProjectRoot.trim()) {
       setError("Choose one project directory before authorizing.");
@@ -10993,14 +14126,19 @@ export default function App() {
     });
   }
 
-  function inspectManagedProject(project: ManagedProject) {
+  function inspectManagedProject(project: ManagedProject, initialView: ProjectDetailView = "overview") {
     startTransition(() => {
+      setProjectDetailView(initialView);
       setInspectedProjectPath(project.path);
       setInteractionNotice({
         area: tx("Project Management", "项目管理"),
-        action: tx("View Project", "查看项目"),
-        result: tx(`${project.name} project details are open.`, `${project.name} 的项目详情已打开。`),
-        nextStep: tx("Use the Skills column to inspect project Skills, workflow, and heartbeat summary.", "可通过技能列查看项目技能、工作流和心跳摘要。"),
+        action: initialView === "skills" ? tx("View Project Skills", "查看项目技能") : tx("View Project", "查看项目"),
+        result: initialView === "skills"
+          ? tx(`${project.name} Skills and workflow are open.`, `${project.name} 的技能与工作流已打开。`)
+          : tx(`${project.name} project details are open.`, `${project.name} 的项目详情已打开。`),
+        nextStep: initialView === "skills"
+          ? tx("Select a Skill in the list or switch to Runtime Monitoring.", "可查看技能列表，或切换到运行监控。")
+          : tx("Use the tabs to inspect Skills, workflow, and heartbeat evidence.", "可通过页签查看技能、工作流和心跳证据。"),
         tone: "info"
       });
     });
@@ -11227,15 +14365,15 @@ export default function App() {
     setProjectRepairFeedback({
       projectPath: project.path,
       status: "running",
-      detail: tx("Step 3/4: checking local Codex sessions...", "第 3/4 步：正在检查本地 Codex 会话...")
+      detail: tx("Step 3/4: checking the Codex project directory...", "第 3/4 步：正在检查 Codex 项目目录...")
     });
     appendProjectOnboardingLog(
       project.path,
       "connection",
       "info",
-      tx("Started matching local session cwd and explicit Skill evidence.", "开始匹配本地会话目录和明确的 Skill 调用证据。")
+      tx("Started matching the Codex task directory.", "开始匹配 Codex 任务目录。")
     );
-    const runtimeResult = await refreshProjectRuntimeEvidence(repairedProject);
+    const runtimeResult = await checkProjectConnectionHeartbeat(repairedProject);
     const observedWorkspace = getLatestObservedWorkspace(runtimeResult);
     const connectionComplete = runtimeResult?.status === "imported";
     const directoryConnected = connectionComplete || runtimeResult?.status === "connected_no_skill_runs";
@@ -11332,9 +14470,12 @@ export default function App() {
 
   function updateProjectMonitoringInterval(project: ManagedProject, intervalMs: number) {
     const safeInterval =
-      intervalMs === 30000 || intervalMs === 60000 || intervalMs === 120000
+      intervalMs === 60000 ||
+      intervalMs === 120000 ||
+      intervalMs === 300000 ||
+      intervalMs === 900000
         ? intervalMs
-        : 60000;
+        : 120000;
     setManagedProjects((projects) =>
       upsertManagedProject(projects, project.path, {
         monitoringIntervalMs: safeInterval
@@ -11404,9 +14545,16 @@ export default function App() {
     setError(null);
 
     try {
-      const result = await window.workbench.refreshProjectRuntimeEvidence(project.path);
-      const proposalResult = await window.workbench.refreshOptimizationProposals();
-      const nextGraph = await window.workbench.refreshGraph();
+      const result = await window.workbench.refreshProjectRuntimeEvidence(project.path, {
+        mode: options.silent ? "incremental" : "full",
+        since: options.silent
+          ? project.lastMonitorAt ?? project.lastScanAt ?? project.boundAt
+          : undefined
+      });
+      const proposalResult = options.silent
+        ? null
+        : await window.workbench.refreshOptimizationProposals();
+      const nextGraph = options.silent ? null : await window.workbench.refreshGraph();
       const runs = await window.workbench.listRecentRuns(runtimeRunFetchLimit);
       const latestMatchingWorkspaceRef = runs
         .filter((run) => run.workspaceRef && isPathInsideProject(run.workspaceRef, project.path))
@@ -11474,9 +14622,13 @@ export default function App() {
         );
         setProjectRuntimeRefreshResult(result);
         setProjectHeartbeatEntries((entries) => upsertProjectHeartbeatEntry(entries, heartbeatEntry));
-        setProposalRefreshResult(proposalResult);
-        setProposals(proposalResult.proposals);
-        setGraphSnapshot(nextGraph);
+        if (proposalResult) {
+          setProposalRefreshResult(proposalResult);
+          setProposals(proposalResult.proposals);
+        }
+        if (nextGraph) {
+          setGraphSnapshot(nextGraph);
+        }
         setRecentRuns(runs);
         if (!options.silent) {
           setInteractionNotice({
@@ -11493,7 +14645,18 @@ export default function App() {
           });
         }
       });
-      await refreshWorkbench(false);
+      if (options.silent) {
+        const [nextBoot, nextSessionTraces] = await Promise.all([
+          loadBootstrapState(),
+          window.workbench.listSessionTraces({ limit: 120 })
+        ]);
+        startTransition(() => {
+          setBoot(nextBoot);
+          setSessionTraces(nextSessionTraces);
+        });
+      } else {
+        await refreshWorkbench(false);
+      }
       return result;
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "Runtime evidence refresh failed";
@@ -11587,6 +14750,371 @@ export default function App() {
         })
       );
       return null;
+    }
+  }
+
+  async function diagnoseProjectAdapterReadiness(project: ManagedProject) {
+    setProjectAdapterReadinessLoading(true);
+    try {
+      const readiness = await window.workbench.diagnoseProjectAdapterReadiness(project.path);
+      setProjectAdapterReadiness(readiness);
+      showInteractionNotice({
+        area: tx("Adapter readiness", "接入器就绪诊断"),
+        action: tx("Check readiness", "检查就绪状态"),
+        result: readiness.exactTraceCount > 0
+          ? tx("Precise Adapter evidence is available for this project.", "该项目已收到精确接入事件。")
+          : tx("Connection and Skill observation were checked separately.", "已分别检查连接状态与技能观测状态。"),
+        nextStep: readiness.exactTraceCount > 0
+          ? tx("Open Session Trace to inspect the observed Skill chain.", "可打开会话链路查看已观测到的技能链路。")
+          : tx("Review the precision observation preview for the available import path.", "可展开精确观测接入预览，查看当前可用的导入路径。"),
+        tone: readiness.connectionStatus === "error" || readiness.connectionStatus === "workspace_unmatched"
+          ? "warning"
+          : "info"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tx("Adapter readiness check failed.", "Adapter 就绪检查失败。");
+      showInteractionNotice({
+        area: tx("Adapter readiness", "接入器就绪诊断"),
+        action: tx("Check readiness", "检查就绪状态"),
+        result: message,
+        nextStep: tx("Check the local project directory and telemetry authorization, then retry.", "检查本地项目目录和遥测授权后重试。"),
+        tone: "warning"
+      });
+    } finally {
+      setProjectAdapterReadinessLoading(false);
+    }
+  }
+
+  async function startProjectAppServerObservation(project: ManagedProject) {
+    setProjectAdapterReadinessLoading(true);
+    try {
+      const status = await window.workbench.startProjectAppServerObservation(project.path);
+      const readiness = await window.workbench.diagnoseProjectAdapterReadiness(project.path);
+      setProjectAdapterReadiness(readiness);
+      showInteractionNotice({
+        area: tx("Codex local observation", "Codex 本机观测"),
+        action: tx("Enable local observation", "确认启用本机观测"),
+        result: status.state === "ready" || status.state === "observing"
+          ? tx("The local stdio observer is ready. No existing session was taken over and no Turn was started.", "本机 stdio 观测器已就绪；未接管已有会话，也未启动 Turn。")
+          : status.lastError ?? tx("Local observation could not start.", "本机观测未能启动。"),
+        nextStep: status.state === "ready" || status.state === "observing"
+          ? tx("A future controlled session needs separate confirmation before it can emit lifecycle events.", "未来受控会话仍需单独确认后，才可能产生生命周期事件。")
+          : tx("Review the diagnostic message, then retry after resolving the local Codex requirement.", "请查看诊断信息，解决本机 Codex 条件后再重试。"),
+        tone: status.state === "ready" || status.state === "observing" ? "success" : "warning"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tx("Local observation could not start.", "本机观测未能启动。");
+      showInteractionNotice({
+        area: tx("Codex local observation", "Codex 本机观测"),
+        action: tx("Enable local observation", "确认启用本机观测"),
+        result: message,
+        nextStep: tx("Confirm the local Codex CLI is available for this bound project, then retry.", "请确认当前绑定项目可使用本机 Codex CLI 后重试。"),
+        tone: "warning"
+      });
+    } finally {
+      setProjectAdapterReadinessLoading(false);
+    }
+  }
+
+  async function stopProjectAppServerObservation(project: ManagedProject) {
+    setProjectAdapterReadinessLoading(true);
+    try {
+      await window.workbench.stopProjectAppServerObservation(project.path);
+      const readiness = await window.workbench.diagnoseProjectAdapterReadiness(project.path);
+      setProjectAdapterReadiness(readiness);
+      showInteractionNotice({
+        area: tx("Codex local observation", "Codex 本机观测"),
+        action: tx("Stop observation", "停止观测"),
+        result: tx("The local stdio observer was stopped.", "本机 stdio 观测器已停止。"),
+        nextStep: tx("Existing Codex sessions remain untouched.", "已有 Codex 会话未受影响。"),
+        tone: "info"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tx("Local observation could not stop.", "本机观测未能停止。");
+      showInteractionNotice({
+        area: tx("Codex local observation", "Codex 本机观测"),
+        action: tx("Stop observation", "停止观测"),
+        result: message,
+        nextStep: tx("Retry the stop action from this project detail panel.", "请在当前项目详情中重新尝试停止操作。"),
+        tone: "warning"
+      });
+    } finally {
+      setProjectAdapterReadinessLoading(false);
+    }
+  }
+
+  function openControlledVerification(project: ManagedProject) {
+    setControlledVerificationProjectPath(project.path);
+    setControlledVerificationResult(
+      projectAdapterReadiness?.projectRoot === normalizeProjectPath(project.path)
+        ? projectAdapterReadiness.appServerObservation.lastControlledVerification
+        : null
+    );
+  }
+
+  async function runControlledVerification(project: ManagedProject) {
+    setControlledVerificationRunning(true);
+    try {
+      const result = await window.workbench.runProjectControlledVerification(project.path);
+      setControlledVerificationResult(result);
+      const readiness = await window.workbench.diagnoseProjectAdapterReadiness(project.path);
+      setProjectAdapterReadiness(readiness);
+      showInteractionNotice({
+        area: tx("Controlled Codex verification", "受控 Codex 验证"),
+        action: tx("Run controlled verification", "运行受控验证"),
+        result: result.state === "completed"
+          ? tx("The separate read-only verification completed and its temporary thread was archived.", "独立只读验证已完成，临时线程已归档。")
+          : tx(`Verification ended as ${result.state}.`, `验证结束状态：${controlledVerificationStateLabel(result.state, languageMode)}。`),
+        nextStep: result.state === "completed"
+          ? tx("Review the lifecycle summary in the project detail. Skill evidence remains inferred unless Codex exposes official Skill events.", "请在项目详情查看生命周期摘要。除非 Codex 提供官方 Skill 事件，技能证据仍为推断。")
+          : tx("Review the compact result for the guard or failure code, then retry only after resolving it.", "请查看结果中的安全保护或失败代码，处理后再手动重试。"),
+        tone: result.state === "completed" ? "success" : "warning"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tx("Controlled verification could not start.", "受控验证未能启动。");
+      setControlledVerificationResult((current) => current ?? null);
+      showInteractionNotice({
+        area: tx("Controlled Codex verification", "受控 Codex 验证"),
+        action: tx("Run controlled verification", "运行受控验证"),
+        result: message,
+        nextStep: tx("Keep the observer enabled and retry from the explicit confirmation dialog.", "保持观测器已启用，并从明确确认弹窗中重新尝试。"),
+        tone: "warning"
+      });
+    } finally {
+      setControlledVerificationRunning(false);
+    }
+  }
+
+  async function openControlledVerificationTrace(traceId: string) {
+    setSessionTraceLoading(true);
+    setSessionTraceError(null);
+    try {
+      const [detail, nextTraces] = await Promise.all([
+        window.workbench.getSessionTrace(traceId),
+        window.workbench.listSessionTraces({ limit: 120 })
+      ]);
+      if (!detail) {
+        setSessionTraces(nextTraces);
+        setSessionTraceDetail(null);
+        setSessionTraceError(tx("The verification trace is not available in local evidence storage.", "验证链路不在本地证据存储中。"));
+        showInteractionNotice({
+          area: tx("Controlled Codex verification", "受控 Codex 验证"),
+          action: tx("Open session trace", "打开会话链路"),
+          result: tx("The verification summary exists, but its matching Turn trace is unavailable.", "验证摘要仍在，但对应的 Turn 链路不可用。"),
+          nextStep: tx("Run a new controlled verification only when a fresh lifecycle check is needed.", "仅在需要新的生命周期检查时，才重新运行受控验证。"),
+          tone: "warning"
+        });
+        return;
+      }
+
+      startTransition(() => {
+        setSessionTraces([
+          detail.turn,
+          ...nextTraces.filter((trace) => trace.traceId !== traceId)
+        ]);
+        setSelectedSessionTraceId(traceId);
+        setSessionTraceDetail(detail);
+        setInspectedProjectPath("");
+        setControlledVerificationProjectPath("");
+        setControlledVerificationResult(null);
+      });
+      navigateToProductSection("#session-trace");
+      showInteractionNotice({
+        area: tx("Controlled Codex verification", "受控 Codex 验证"),
+        action: tx("Open session trace", "打开会话链路"),
+        result: tx("Opened the exact Turn created by this verification.", "已打开本次验证创建的精确 Turn 链路。"),
+        nextStep: tx("Inspect lifecycle evidence; Skill hits remain inferred unless the harness reports official Skill events.", "可查看生命周期证据；除非运行端上报官方 Skill 事件，否则 Skill 命中仍为推断。"),
+        tone: "info"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tx("Trace failed to load.", "链路加载失败。");
+      setSessionTraceError(message);
+      showInteractionNotice({
+        area: tx("Controlled Codex verification", "受控 Codex 验证"),
+        action: tx("Open session trace", "打开会话链路"),
+        result: message,
+        nextStep: tx("Keep the stored verification summary and retry opening the trace later.", "已保留验证摘要，可稍后重新打开链路。"),
+        tone: "warning"
+      });
+    } finally {
+      setSessionTraceLoading(false);
+    }
+  }
+
+  async function refreshWorkflowLibraryState(projectRootOverride?: string, announce = false) {
+    const projectRoot = normalizeProjectPath(projectRootOverride ?? targetProjectRoot);
+    setWorkflowLibraryLoading(true);
+    try {
+      const templatesPromise = window.workbench.listWorkflowTemplates();
+      if (!projectRoot) {
+        const templates = await templatesPromise;
+        startTransition(() => {
+          setWorkflowTemplates(templates);
+          setProjectWorkflowBindings([]);
+          setProjectScenarioLoopRuns([]);
+          setProjectWorkflowDoctor(null);
+          setSelectedWorkflowTemplateId((current) =>
+            current && templates.some((template) => `${template.templateId}@${template.templateVersion}` === current)
+              ? current
+              : templates[0] ? `${templates[0].templateId}@${templates[0].templateVersion}` : null
+          );
+        });
+        return;
+      }
+      const [templates, bindings, loopRuns, doctor] = await Promise.all([
+        templatesPromise,
+        window.workbench.listProjectWorkflowBindings(projectRoot),
+        window.workbench.listProjectScenarioLoopRuns(projectRoot),
+        window.workbench.doctorProjectWorkflow(projectRoot)
+      ]);
+      startTransition(() => {
+        setWorkflowTemplates(templates);
+        setProjectWorkflowBindings(bindings);
+        setProjectScenarioLoopRuns(loopRuns);
+        setProjectWorkflowDoctor(doctor);
+        setSelectedWorkflowTemplateId((current) =>
+          current && templates.some((template) => `${template.templateId}@${template.templateVersion}` === current)
+            ? current
+            : templates[0] ? `${templates[0].templateId}@${templates[0].templateVersion}` : null
+        );
+      });
+      if (announce) {
+        showInteractionNotice({
+          area: tx("Workflow Library", "工作流库"),
+          action: tx("Refresh local state", "刷新本地状态"),
+          result: tx(
+            `${bindings.length} binding(s), ${loopRuns.length} Loop run(s), and ${doctor.checks.length} Doctor check(s) were read locally.`,
+            `已本地读取 ${bindings.length} 个绑定、${loopRuns.length} 条 Loop 运行和 ${doctor.checks.length} 项体检检查。`
+          ),
+          nextStep: tx("Review compatibility, preview a change, or inspect the recorded evidence.", "查看兼容性、预览变更，或下探已记录证据。"),
+          tone: doctor.summary === "blocked" ? "warning" : "success"
+        });
+      }
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("Workflow state refresh failed.", "工作流状态刷新失败。");
+      setError(message);
+      if (announce) {
+        showInteractionNotice({
+          area: tx("Workflow Library", "工作流库"),
+          action: tx("Refresh local state", "刷新本地状态"),
+          result: message,
+          nextStep: tx("Confirm that the selected project folder is still available, then try again.", "请确认所选项目目录仍可访问，再重试。"),
+          tone: "warning"
+        });
+      }
+    } finally {
+      setWorkflowLibraryLoading(false);
+    }
+  }
+
+  async function previewProjectWorkflowBinding(template: WorkflowTemplateSummary) {
+    const projectRoot = normalizeProjectPath(targetProjectRoot);
+    if (!projectRoot) {
+      navigateToProductSection("#discovery");
+      showInteractionNotice({
+        area: tx("Workflow Library", "工作流库"),
+        action: tx("Preview binding", "预览绑定"),
+        result: tx("Choose a project before previewing a Workflow binding.", "请先选择项目，再预览工作流绑定。"),
+        nextStep: tx("Bind or select one project from Project Management.", "请到项目管理绑定或选择一个项目。"),
+        tone: "warning"
+      });
+      return;
+    }
+    setWorkflowLibraryLoading(true);
+    try {
+      const preview = await window.workbench.previewProjectWorkflowBinding({
+        projectRoot,
+        templateId: template.templateId,
+        templateVersion: template.templateVersion
+      });
+      setWorkflowBindingPreview(preview);
+      setWorkflowBindingApplyResult(null);
+      showInteractionNotice({
+        area: tx("Workflow Library", "工作流库"),
+        action: tx("Preview binding", "预览绑定"),
+        result: tx("No project file has been changed. Review the version, compatibility, and warnings below.", "尚未修改项目文件，请在下方检查版本、兼容性与提醒。"),
+        nextStep: tx("Confirm and apply only after the preview is acceptable.", "预览确认无误后，再点击确认并应用。"),
+        tone: preview.readyForConfirmation ? "info" : "warning"
+      });
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("Binding preview failed.", "绑定预览失败。");
+      setError(message);
+      showInteractionNotice({ area: tx("Workflow Library", "工作流库"), action: tx("Preview binding", "预览绑定"), result: message, nextStep: tx("Resolve the compatibility issue and generate a new preview.", "请解决兼容性问题后重新生成预览。"), tone: "warning" });
+    } finally {
+      setWorkflowLibraryLoading(false);
+    }
+  }
+
+  async function previewProjectWorkflowMigration(binding: ProjectWorkflowBindingSummary) {
+    const projectRoot = normalizeProjectPath(targetProjectRoot);
+    if (!projectRoot) return;
+    setWorkflowLibraryLoading(true);
+    try {
+      const preview = await window.workbench.previewProjectWorkflowLegacyMigration({ projectRoot, legacyBindingId: binding.bindingId });
+      setWorkflowBindingPreview(preview);
+      setWorkflowBindingApplyResult(null);
+      showInteractionNotice({
+        area: tx("Workflow Library", "工作流库"),
+        action: tx("Preview shadow migration", "预览影子迁移"),
+        result: tx("The legacy declaration remains read-only. The preview only proposes a new managed binding file.", "旧声明会保持只读；预览仅提出新增受管绑定文件。"),
+        nextStep: tx("Review the retained source and confirm only when the new binding is correct.", "请检查保留的来源与新绑定，确认正确后再应用。"),
+        tone: preview.readyForConfirmation ? "info" : "warning"
+      });
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("Migration preview failed.", "迁移预览失败。");
+      setError(message);
+      showInteractionNotice({ area: tx("Workflow Library", "工作流库"), action: tx("Preview shadow migration", "预览影子迁移"), result: message, nextStep: tx("Install the exact local template or resolve the project compatibility issue.", "请安装精确匹配的本地模板，或解决项目兼容性问题。"), tone: "warning" });
+    } finally {
+      setWorkflowLibraryLoading(false);
+    }
+  }
+
+  async function previewProjectWorkflowRollback(binding: ProjectWorkflowBindingSummary) {
+    const projectRoot = normalizeProjectPath(targetProjectRoot);
+    if (!projectRoot) return;
+    setWorkflowLibraryLoading(true);
+    try {
+      const preview = await window.workbench.previewProjectWorkflowBindingRollback({ projectRoot, bindingId: binding.bindingId });
+      setWorkflowBindingPreview(preview);
+      setWorkflowBindingApplyResult(null);
+      showInteractionNotice({
+        area: tx("Workflow Library", "工作流库"),
+        action: tx("Preview rollback", "预览回退"),
+        result: tx("No version has changed. The captured prior version is shown in the preview.", "尚未变更版本，已在预览中展示此前捕获的版本。"),
+        nextStep: tx("Confirm only after checking the version and local fingerprint.", "请检查版本和本地指纹后，再确认应用。"),
+        tone: preview.readyForConfirmation ? "info" : "warning"
+      });
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("Rollback preview failed.", "回退预览失败。 ");
+      setError(message);
+      showInteractionNotice({ area: tx("Workflow Library", "工作流库"), action: tx("Preview rollback", "预览回退"), result: message, nextStep: tx("The captured local version must be available and unchanged before rollback.", "执行回退前，必须存在且未变更此前捕获的本地版本。"), tone: "warning" });
+    } finally {
+      setWorkflowLibraryLoading(false);
+    }
+  }
+
+  async function applyProjectWorkflowBindingPreview() {
+    const preview = workflowBindingPreview;
+    if (!preview) return;
+    setWorkflowLibraryLoading(true);
+    try {
+      const result = await window.workbench.applyProjectWorkflowBinding({ previewId: preview.previewId });
+      setWorkflowBindingApplyResult(result);
+      setWorkflowBindingPreview(result.preview);
+      await refreshWorkflowLibraryState(result.binding.projectRoot);
+      showInteractionNotice({
+        area: tx("Workflow Library", "工作流库"),
+        action: tx("Confirm and apply", "确认并应用"),
+        result: result.verified ? tx("The binding was written atomically and verified by reading it back.", "绑定已原子写入，并通过回读验证。") : tx("The write needs review.", "写入需要复核。"),
+        nextStep: tx("Review the refreshed binding and read-only Loop evidence for this project.", "查看该项目已刷新的绑定和只读 Loop 证据。"),
+        tone: result.verified ? "success" : "warning"
+      });
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("Binding apply failed.", "绑定应用失败。 ");
+      setError(message);
+      showInteractionNotice({ area: tx("Workflow Library", "工作流库"), action: tx("Confirm and apply", "确认并应用"), result: message, nextStep: tx("Generate a new preview if the project state changed.", "如项目状态已变化，请重新生成预览。"), tone: "warning" });
+    } finally {
+      setWorkflowLibraryLoading(false);
     }
   }
 
@@ -11752,10 +15280,10 @@ export default function App() {
 
     try {
       const result = await window.workbench.scanProjectSkills(projectRoot);
+      const scannedProjectRoot = normalizeProjectPath(result.rootPaths[0] ?? projectRoot);
       const proposalResult = await window.workbench.refreshOptimizationProposals();
       const nextGraph = await window.workbench.refreshGraph();
       startTransition(() => {
-        const scannedProjectRoot = normalizeProjectPath(result.rootPaths[0] ?? projectRoot);
         setTargetProjectRoot(scannedProjectRoot);
         setScanRoots([scannedProjectRoot]);
         setScanResult(result);
@@ -11768,6 +15296,11 @@ export default function App() {
             skillsChanged: result.skillsChanged,
             workflowApplied: result.workflowDetected
           })
+        );
+        setProjectRepairFeedback((current) =>
+          current?.projectPath === scannedProjectRoot && current.status !== "running"
+            ? null
+            : current
         );
         if (options.closeBindDialogOnComplete) {
           setPendingBindProjectRoot("");
@@ -11799,7 +15332,10 @@ export default function App() {
           tone: result.skillsFound > 0 && boot?.policy?.telemetryMode === "disabled" ? "warning" : "success"
         });
       });
-      await refreshWorkbench(false);
+      await Promise.all([
+        refreshWorkbench(false),
+        refreshWorkflowLibraryState(scannedProjectRoot)
+      ]);
       return result;
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "Project scan failed";
@@ -11994,7 +15530,10 @@ export default function App() {
         "success",
         tx("Project configuration repair completed successfully.", "项目配置修正成功完成。")
       );
-      await refreshWorkbench(false);
+      await Promise.all([
+        refreshWorkbench(false),
+        refreshWorkflowLibraryState(result.preview.projectRoot)
+      ]);
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "Workflow starter apply failed";
       setError(message);
@@ -12691,10 +16230,30 @@ export default function App() {
   const topUsedSkill = weeklySummary?.mostUsedSkills[0] ?? dailySummary?.mostUsedSkills[0] ?? null;
   const slowestSkill = weeklySummary?.slowestSkills[0] ?? dailySummary?.slowestSkills[0] ?? null;
   const highestWasteSkill = weeklySummary?.highestWasteSkills[0] ?? null;
+  const overviewManagedSkills = boot.skills.filter((skill) =>
+    managedProjects.some((project) => isPathInsideProject(skill.sourcePath, project.path))
+  );
+  const overviewManagedSkillIds = new Set(overviewManagedSkills.map((skill) => skill.id));
+  const overviewRuns = recentRuns.filter((run) => overviewManagedSkillIds.has(run.skillId));
+  const overviewRuntimeSummaryByPath = new Map(
+    projectRuntimeSummaries.map((summary) => [normalizeProjectPath(summary.projectPath), summary])
+  );
+  const overviewOpenProposalCount = proposals.filter(
+    (proposal) => proposal.status === "open" && overviewManagedSkillIds.has(proposal.skillId)
+  ).length;
+  const overviewProjectsWithRuns = new Set(
+    managedProjects
+      .filter(
+        (project) =>
+          (overviewRuntimeSummaryByPath.get(normalizeProjectPath(project.path))?.totalRuns ?? 0) > 0
+      )
+      .map((project) => project.id)
+  );
+  const overviewScannedProjectCount = managedProjects.filter((project) => Boolean(project.lastScanAt)).length;
   const overviewTodayKey = new Date().toISOString().slice(0, 10);
   const overviewWeekStart = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const overviewTodayRuns = currentProjectRuns.filter((run) => run.startedAt.slice(0, 10) === overviewTodayKey);
-  const overviewWeeklyRuns = currentProjectRuns.filter(
+  const overviewTodayRuns = overviewRuns.filter((run) => run.startedAt.slice(0, 10) === overviewTodayKey);
+  const overviewWeeklyRuns = overviewRuns.filter(
     (run) => new Date(run.startedAt).getTime() >= overviewWeekStart
   );
   const dailySuccessRate =
@@ -12720,7 +16279,7 @@ export default function App() {
     };
   });
   const overviewTrendBucketMap = new Map(overviewTrendBuckets.map((bucket) => [bucket.key, bucket]));
-  currentProjectRuns.forEach((run) => {
+  overviewRuns.forEach((run) => {
     const startedAt = new Date(run.startedAt);
     if (Number.isNaN(startedAt.getTime())) {
       return;
@@ -12787,29 +16346,34 @@ export default function App() {
   ];
   const overviewHealthSignals = [
     {
-      label: tx("Evaluation Coverage", "评测覆盖"),
-      value: currentProjectSkillCount > 0 ? Math.min(100, Math.round(((skillAnalysis ? 1 : 0) / currentProjectSkillCount) * 100)) : 0,
-      detail: tx(`${formatCount(Math.max(currentProjectSkillCount - (skillAnalysis ? 1 : 0), 0))} pending`, `${formatCount(Math.max(currentProjectSkillCount - (skillAnalysis ? 1 : 0), 0))} 待评测`)
-    },
-    {
-      label: tx("Runtime Evidence", "运行证据"),
-      value: currentProjectRuns.length > 0 ? Math.min(100, Math.round((currentProjectRuns.length / Math.max(currentProjectSkillCount, 1)) * 25)) : 0,
-      detail: tx(`${formatCount(currentProjectRuns.length)} recent runs`, `${formatCount(currentProjectRuns.length)} 最近运行`)
-    },
-    {
-      label: tx("Open Proposals", "待处理建议"),
-      value: currentProjectSkillCount > 0
-        ? Math.max(
-            8,
-            100 - proposals.filter((proposal) => proposal.status === "open" && currentProjectSkillIds.has(proposal.skillId)).length * 18
-          )
+      label: tx("Project Readiness", "项目就绪"),
+      value: managedProjects.length > 0
+        ? Math.round((overviewScannedProjectCount / managedProjects.length) * 100)
         : 0,
-      detail: currentProjectSkillCount > 0
-        ? tx(
-            `${proposals.filter((proposal) => proposal.status === "open" && currentProjectSkillIds.has(proposal.skillId)).length} need review`,
-            `${proposals.filter((proposal) => proposal.status === "open" && currentProjectSkillIds.has(proposal.skillId)).length} 个待处理`
-          )
-        : tx("Select a project first", "请先选择项目")
+      detail: tx(
+        `${formatCount(overviewScannedProjectCount)} of ${formatCount(managedProjects.length)} scanned`,
+        `${formatCount(overviewScannedProjectCount)} / ${formatCount(managedProjects.length)} 已扫描`
+      )
+    },
+    {
+      label: tx("Runtime Coverage", "运行覆盖"),
+      value: managedProjects.length > 0
+        ? Math.round((overviewProjectsWithRuns.size / managedProjects.length) * 100)
+        : 0,
+      detail: tx(
+        `${formatCount(overviewProjectsWithRuns.size)} project(s) observed`,
+        `${formatCount(overviewProjectsWithRuns.size)} 个项目已有证据`
+      )
+    },
+    {
+      label: tx("Governance Health", "治理健康"),
+      value: overviewManagedSkills.length > 0
+        ? Math.max(8, 100 - Math.round((overviewOpenProposalCount / overviewManagedSkills.length) * 100))
+        : 0,
+      detail: tx(
+        `${formatCount(overviewOpenProposalCount)} need review`,
+        `${formatCount(overviewOpenProposalCount)} 个待处理`
+      )
     }
   ];
   const overviewDashboardProgress = Math.round(
@@ -12821,7 +16385,9 @@ export default function App() {
     const openProposalCount = proposals.filter(
       (proposal) => proposal.status === "open" && projectSkillIds.has(proposal.skillId)
     ).length;
-    const runCount = recentRuns.filter((run) => projectSkillIds.has(run.skillId)).length;
+    const runCount =
+      overviewRuntimeSummaryByPath.get(normalizeProjectPath(project.path))?.totalRuns ??
+      recentRuns.filter((run) => projectSkillIds.has(run.skillId)).length;
     return {
       project,
       skillCount: project.skillsFound ?? projectSkills.length,
@@ -13015,6 +16581,29 @@ export default function App() {
     scrollProductWorkspaceToSection(href, "smooth");
   }
 
+  function navigateToTelemetryIntake() {
+    setInspectedProjectPath("");
+    navigateToProductSection("#analysis");
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const workspace = productWorkspaceRef.current;
+        const target = document.getElementById("telemetry");
+        if (!workspace || !target) {
+          target?.scrollIntoView({ block: "start", behavior: "smooth" });
+          return;
+        }
+
+        const workspaceRect = workspace.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        workspace.scrollTo({
+          top: Math.max(0, workspace.scrollTop + targetRect.top - workspaceRect.top - 12),
+          behavior: "smooth"
+        });
+      });
+    });
+  }
+
   function showInteractionNotice(notice: InteractionNotice) {
     setInteractionNotice(notice);
   }
@@ -13042,7 +16631,16 @@ export default function App() {
 
     const beforeNotice = interactionNoticeRef.current;
     const text = (interactive.textContent ?? "").replace(/\s+/g, " ").trim();
-    const action = text.slice(0, 72) || tx("Control Activated", "控件已触发");
+    const explicitAction = (
+      interactive.getAttribute("data-interaction-action")
+      ?? interactive.getAttribute("aria-label")
+      ?? interactive.getAttribute("title")
+      ?? ""
+    ).replace(/\s+/g, " ").trim();
+    const rawAction = explicitAction || text;
+    const action = rawAction.length > 56
+      ? `${Array.from(rawAction).slice(0, 55).join("")}…`
+      : rawAction || tx("Control Activated", "控件已触发");
 
     window.setTimeout(() => {
       if (interactionNoticeRef.current !== beforeNotice) {
@@ -13547,6 +17145,7 @@ export default function App() {
       label: tx("Assets", "资产"),
       items: [
         { href: "#local-skills", icon: "▥", label: tx("Skill Library", "技能库"), detail: tx("Local and remote assets", "本地与远程资产") },
+        { href: "#workflows", icon: "⌬", label: tx("Workflow Library", "工作流库"), detail: tx("Templates, bindings, Loop", "模板、绑定、Loop") },
         { href: "#remote-market", icon: "◈", label: tx("Remote Market", "远程市场"), detail: tx("GitHub and marketplace", "GitHub 与市场") },
         { href: "#bundles", icon: "⬡", label: tx("Bundles", "打包"), detail: tx("Export and import", "导出与导入") }
       ]
@@ -13556,6 +17155,7 @@ export default function App() {
       items: [
         { href: "#evaluate", icon: "◎", label: tx("Reports", "评测报告"), detail: tx("Project and Skill reports", "项目与技能报告") },
         { href: "#analysis", icon: "▤", label: tx("Monitoring", "运行监控"), detail: tx("Heartbeat and telemetry", "心跳与遥测") },
+        { href: "#session-trace", icon: "⌁", label: tx("Session Trace", "会话链路"), detail: tx("Message-to-Skill evidence", "消息到 Skill 证据") },
         { href: "#graph", icon: "⌘", label: tx("Graph", "图谱"), detail: tx("Relationships and focus", "关系与焦点") }
       ]
     },
@@ -13605,7 +17205,13 @@ export default function App() {
       <div className="product-shell">
         <aside className="product-sidebar" aria-label={tx("Workbench navigation", "工作台导航")}>
           <div className="product-brand">
-            <span className="product-brand-mark">OS</span>
+            <span className="product-brand-mark" aria-hidden="true">
+              <span className="product-brand-glyph">
+                <i />
+                <i />
+                <i />
+              </span>
+            </span>
             <div>
               <strong>Skill OS</strong>
               <span>{tx("Projects · Skills · Reports", "项目 · 技能 · 报告")}</span>
@@ -13765,20 +17371,41 @@ export default function App() {
       {interactionNotice && currentProductSection !== "overview" ? (
         <InteractionFeedback notice={interactionNotice} />
       ) : null}
+      {traceReturnAvailable && currentProductSection !== "session-trace" ? (
+        <div className="trace-return-bar" aria-live="polite">
+          <span>⌁</span>
+          <div>
+            <strong>{tx("Session trace is preserved", "会话链路位置已保留")}</strong>
+            <small>{sessionTraceDetail?.turn.messageSummary ?? tx("Return to the selected message.", "返回所选消息。")}</small>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setTraceReturnAvailable(false);
+              navigateToProductSection("#session-trace");
+            }}
+          >
+            {tx("Back to Trace", "返回会话链路")}
+          </button>
+        </div>
+      ) : null}
       <header className="hero" data-product-section="overview" id="overview">
         <div className="overview-dashboard-reference">
           <section className="overview-dashboard-hero">
             <div>
-              <span className="os-module-kicker">{tx("Project Path", "项目路径")}</span>
+              <span className="os-module-kicker">{tx("LOCAL WORKSPACE", "本地工作台")}</span>
               <h1>{tx("Overview", "总览")}</h1>
               <p>
-                {targetProjectRoot
-                  ? `${tx("Current workspace", "当前工作区")}：${targetProjectRoot}`
-                  : tx("No project selected. Bind one project folder to start project analysis.", "尚未选择项目。绑定一个项目文件夹后开始项目分析。")}
+                {managedProjects.length > 0
+                  ? tx(
+                      `${formatCount(managedProjects.length)} projects · ${formatCount(overviewManagedSkills.length)} indexed Skills`,
+                      `${formatCount(managedProjects.length)} 个项目 · ${formatCount(overviewManagedSkills.length)} 个已索引技能`
+                    )
+                  : tx("No project is bound yet.", "尚未绑定项目。")}
               </p>
             </div>
             <div className="overview-dashboard-progress">
-              <span>{tx("Project analysis progress", "项目分析进度")}</span>
+              <span>{tx("Overall health", "整体健康度")}</span>
               <strong>{overviewDashboardProgress}%</strong>
               <i style={{ "--value": `${overviewDashboardProgress}%` } as CSSProperties} />
             </div>
@@ -13823,7 +17450,7 @@ export default function App() {
                       {
                         id: "overview-next-default",
                         tone: "project",
-                        projectName: focusedProjectDisplayName || tx("No Project", "未选项目"),
+                        projectName: tx("All projects", "全部项目"),
                         title: recommendedFlowTitle,
                         detail: recommendedFlowInstruction,
                         href: recommendedFlowStep.href,
@@ -13844,12 +17471,12 @@ export default function App() {
               </div>
               <div className="overview-dashboard-boundary">
                 <div>
-                  <span>{tx("Local Project", "本地项目")}</span>
-                  <strong>{focusedProjectDisplayName || tx("Not bound", "未绑定")}</strong>
+                  <span>{tx("Bound Projects", "已绑定项目")}</span>
+                  <strong>{formatCount(managedProjects.length)}</strong>
                 </div>
                 <div>
                   <span>{tx("Indexed Skills", "已索引技能")}</span>
-                  <strong>{formatCount(currentProjectSkillCount)}</strong>
+                  <strong>{formatCount(overviewManagedSkills.length)}</strong>
                 </div>
                 <div>
                   <span>{tx("Remote Candidates", "远程候选")}</span>
@@ -14191,6 +17818,10 @@ export default function App() {
         <ProjectLibraryPanel
           projects={managedProjects}
           recentRuns={recentRuns}
+          runtimeSummaries={projectRuntimeSummaries}
+          runtimeRefreshRemainingSeconds={projectRuntimeRefreshRemainingSeconds}
+          runtimeRefreshedAt={projectRuntimeRefreshedAt}
+          runtimeRefreshing={projectRuntimeRefreshing}
           telemetryReady={Boolean(boot?.policy && boot.policy.telemetryMode !== "disabled")}
           repairFeedback={projectRepairFeedback}
           onboardingLogs={projectOnboardingLogs}
@@ -14199,10 +17830,12 @@ export default function App() {
           busy={busy}
           onBindProject={() => void beginBindProjectFlow()}
           onInspectProject={inspectManagedProject}
+          onInspectProjectSkills={(project) => inspectManagedProject(project, "skills")}
           onAnalyzeProject={analyzeManagedProject}
           onScanProject={scanManagedProject}
           onRepairProject={(project) => void repairManagedProject(project)}
           onViewOnboardingLog={(project) => setSelectedProjectLogPath(project.path)}
+          onRefreshRuntimeSnapshot={() => void refreshProjectManagementRuntimeSnapshot()}
           onToggleMonitoring={toggleProjectMonitoring}
           onUnbindProject={unbindManagedProject}
         />
@@ -14433,8 +18066,10 @@ export default function App() {
                           </button>
                         </td>
                         <td>
-                          <strong>{sourceProject?.name || focusedProjectDisplayName || tx("Unbound project", "未绑定项目")}</strong>
-                          <span>{row.skill.sourcePath}</span>
+                          <div className="skill-asset-project-cell">
+                            <strong>{sourceProject?.name || focusedProjectDisplayName || tx("Unbound project", "未绑定项目")}</strong>
+                            <span title={row.skill.sourcePath}>{row.skill.sourcePath}</span>
+                          </div>
                         </td>
                         <td>{row.roleLabel}</td>
                         <td>
@@ -15358,6 +18993,23 @@ export default function App() {
             >
               {busyAction === "skill-analysis" ? tx("Generating...", "生成中...") : tx("Generate Report", "生成报告")}
             </button>
+            <button
+              type="button"
+              disabled={
+                !evaluationTargetRow ||
+                busyAction === "model-case-generation" ||
+                !modelEvaluationConfig?.enabled ||
+                !modelEvaluationConfig.hasApiKey ||
+                !modelEvaluationConfig.allowSourceUpload ||
+                modelEvaluationConfig.lastTestStatus !== "ready"
+              }
+              onClick={() => void generateModelEvaluationCases()}
+              title={tx("Generate candidate test cases from the selected Skill", "根据选中 Skill 生成候选测试用例")}
+            >
+              {busyAction === "model-case-generation"
+                ? tx("Generating cases...", "正在生成用例...")
+                : tx("AI test cases", "AI 测试用例")}
+            </button>
           </div>
         </div>
         <div className="evaluation-report-grid">
@@ -15487,8 +19139,8 @@ export default function App() {
                 <strong>{evaluationOverallScore}</strong>
                 <small>
                   {tx(
-                    "Static + runtime evidence baseline. Full use-case execution comes next.",
-                    "静态 + 运行证据基线。完整用例执行将在下一步接入。"
+                    "Static + runtime evidence baseline. AI-generated cases remain proposals until real trace and outcome evidence is attached.",
+                    "静态 + 运行证据基线。AI 生成的用例在补充真实链路与结果证据前，只是候选方案。"
                   )}
                 </small>
               </article>
@@ -15547,6 +19199,99 @@ export default function App() {
                 <p>{tx("Compare token use, tool calls, failure rate, and repair loops before and after this Skill is active.", "比较此 Skill 生效前后的 Token、工具调用、失败率和反复修复次数。")}</p>
               </article>
             </div>
+
+            <section className="evaluate-ai-case-panel">
+              <div className="evaluate-ai-case-head">
+                <div>
+                  <span className="os-module-kicker">{tx("AI-assisted Test Design", "AI 辅助测试设计")}</span>
+                  <h3>{tx("Generate, then verify with real evidence", "先生成，再用真实证据验证")}</h3>
+                  <p>
+                    {tx(
+                      "The model creates candidate cases from the selected Skill only. It does not execute the Skill, inspect the whole project, or replace Session Trace evidence.",
+                      "模型只根据选中的 Skill 生成候选用例，不会执行 Skill、查看整个项目，也不能替代会话链路证据。"
+                    )}
+                  </p>
+                </div>
+                <div className="evaluate-ai-case-actions">
+                  <input
+                    value={modelEvaluationFocus}
+                    onChange={(event) => setModelEvaluationFocus(event.target.value)}
+                    placeholder={tx("Optional focus, e.g. security or false positives", "可选关注点，例如安全或误触发")}
+                    disabled={busyAction === "model-case-generation"}
+                  />
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={
+                      busyAction === "model-case-generation" ||
+                      !modelEvaluationConfig?.enabled ||
+                      !modelEvaluationConfig.hasApiKey ||
+                      !modelEvaluationConfig.allowSourceUpload ||
+                      modelEvaluationConfig.lastTestStatus !== "ready"
+                    }
+                    onClick={() => void generateModelEvaluationCases()}
+                  >
+                    {busyAction === "model-case-generation"
+                      ? tx("Generating...", "生成中...")
+                      : tx("Generate cases", "生成用例")}
+                  </button>
+                </div>
+              </div>
+              {!modelEvaluationConfig?.enabled ||
+              !modelEvaluationConfig.hasApiKey ||
+              !modelEvaluationConfig.allowSourceUpload ||
+              modelEvaluationConfig.lastTestStatus !== "ready" ? (
+                <div className="evaluate-ai-case-state">
+                  <strong>{tx("AI test design is not ready", "AI 测试设计尚未就绪")}</strong>
+                  <span>
+                    {tx(
+                      "Save a secure model configuration, test the connection, and explicitly allow selected-source upload in Settings.",
+                      "请在设置中保存安全模型配置、测试连接，并显式允许上传选中内容。"
+                    )}
+                  </span>
+                  <button type="button" onClick={() => navigateToProductSection("#settings")}>
+                    {tx("Open settings", "打开设置")}
+                  </button>
+                </div>
+              ) : null}
+              {generatedModelEvaluationCases ? (
+                <>
+                  <div className="evaluate-ai-case-meta">
+                    <span>{generatedModelEvaluationCases.modelName}</span>
+                    <span>{formatCount(generatedModelEvaluationCases.sourceCharsSent)} {tx("source chars sent", "字符已发送")}</span>
+                    <span>{formatDateTime(generatedModelEvaluationCases.generatedAt)}</span>
+                  </div>
+                  <div className="evaluate-ai-case-list">
+                    {generatedModelEvaluationCases.testCases.map((testCase) => (
+                      <article className="evaluate-ai-case-row" key={testCase.id}>
+                        <div>
+                          <span>{testCase.id}</span>
+                          <h4>{testCase.title}</h4>
+                          <p>{testCase.scenario}</p>
+                        </div>
+                        <dl>
+                          <div>
+                            <dt>{tx("Expected", "预期")}</dt>
+                            <dd>{testCase.expectedSignals.join(" · ")}</dd>
+                          </div>
+                          <div>
+                            <dt>{tx("Reject", "拒绝")}</dt>
+                            <dd>{testCase.rejectionSignals.join(" · ") || tx("None", "无")}</dd>
+                          </div>
+                          <div>
+                            <dt>{tx("Evidence", "证据")}</dt>
+                            <dd>{testCase.evidenceToCollect.join(" · ")}</dd>
+                          </div>
+                        </dl>
+                      </article>
+                    ))}
+                  </div>
+                  <ul className="evaluate-ai-case-limitations">
+                    {generatedModelEvaluationCases.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+                  </ul>
+                </>
+              ) : null}
+            </section>
 
             <div className="evaluate-harness-row">
               <article>
@@ -16102,6 +19847,18 @@ export default function App() {
           ) : null}
         </div>
       </section>
+
+      <SessionTraceExplorer
+        traces={sessionTraces}
+        selectedTraceId={selectedSessionTraceId}
+        detail={sessionTraceDetail}
+        loading={sessionTraceLoading}
+        error={sessionTraceError}
+        onRefresh={() => void refreshSessionTraces()}
+        onSelectTrace={setSelectedSessionTraceId}
+        onOpenSkill={(traceId, skillId, trigger) => void openTraceSkill(traceId, skillId, trigger)}
+        onOpenMonitoring={() => navigateToProductSection("#analysis")}
+      />
 
       <section className="panel os-module-panel" data-product-section="analysis" id="analysis">
         <div className="section-headline">
@@ -17133,21 +20890,58 @@ export default function App() {
               </div>
 
               <article className="leaderboard-card graph-topology-card skill-graph-canvas">
-                <GraphTopologyView
-                  snapshot={graphSnapshot}
-                  visibleGraph={visibleGraph}
-                  interactiveNodeIds={interactiveGraphNodeIds}
-                  navigableNodeIds={navigableGraphNodeIds}
-                  pinnedNeighborhood={pinnedGraphNeighborhood}
-                  selectedNodeId={selectedGraphNodeId}
-                  selectedTracePath={selectedTracePath}
-                  searchScopeSummary={searchScopeSummary}
-                  neighborhoodStatus={graphNeighborhoodStatus}
-                  onResetTopology={resetPinnedTopology}
-                  onClearSearchScope={clearGraphSearchScope}
-                  onClearTraceSelection={clearGraphTraceFocus}
-                  onSelectedNodeChange={handleSelectedGraphNodeChange}
-                />
+                <div className="graph-presentation-switcher" role="tablist" aria-label={tx("Graph presentation", "图谱呈现方式")}>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={graphPresentationMode === "flow"}
+                    className={graphPresentationMode === "flow" ? "active" : ""}
+                    onClick={() => setGraphPresentationMode("flow")}
+                  >
+                    {tx("Flowchart", "流程图")}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={graphPresentationMode === "mindmap"}
+                    className={graphPresentationMode === "mindmap" ? "active" : ""}
+                    onClick={() => setGraphPresentationMode("mindmap")}
+                  >
+                    {tx("Mind Map", "思维导图")}
+                  </button>
+                </div>
+                {graphPresentationMode === "flow" ? (
+                  <GraphTopologyView
+                    snapshot={graphSnapshot}
+                    visibleGraph={visibleGraph}
+                    interactiveNodeIds={interactiveGraphNodeIds}
+                    navigableNodeIds={navigableGraphNodeIds}
+                    pinnedNeighborhood={pinnedGraphNeighborhood}
+                    selectedNodeId={selectedGraphNodeId}
+                    selectedTracePath={selectedTracePath}
+                    searchScopeSummary={searchScopeSummary}
+                    neighborhoodStatus={graphNeighborhoodStatus}
+                    onResetTopology={resetPinnedTopology}
+                    onClearSearchScope={clearGraphSearchScope}
+                    onClearTraceSelection={clearGraphTraceFocus}
+                    onSelectedNodeChange={handleSelectedGraphNodeChange}
+                  />
+                ) : (
+                  <GraphMindMapView
+                    snapshot={graphSnapshot}
+                    visibleGraph={visibleGraph}
+                    interactiveNodeIds={interactiveGraphNodeIds}
+                    pinnedNeighborhood={pinnedGraphNeighborhood}
+                    selectedNodeId={selectedGraphNodeId}
+                    selectedTracePath={selectedTracePath}
+                    searchScopeSummary={searchScopeSummary}
+                    neighborhoodStatus={graphNeighborhoodStatus}
+                    onResetTopology={resetPinnedTopology}
+                    onClearSearchScope={clearGraphSearchScope}
+                    onClearTraceSelection={clearGraphTraceFocus}
+                    onSelectedNodeChange={handleSelectedGraphNodeChange}
+                  />
+                )}
               </article>
 
               <div className="skill-graph-focus">
@@ -18218,6 +22012,24 @@ export default function App() {
             />
           </section>
 
+          <WorkflowLibraryModule
+            templates={workflowTemplates}
+            selectedTemplateId={selectedWorkflowTemplateId}
+            projectRoot={normalizedTargetProjectRoot}
+            bindings={projectWorkflowBindings}
+            loopRuns={projectScenarioLoopRuns}
+            doctor={projectWorkflowDoctor}
+            preview={workflowBindingPreview}
+            applyResult={workflowBindingApplyResult}
+            loading={workflowLibraryLoading}
+            onSelectTemplate={setSelectedWorkflowTemplateId}
+            onPreviewBinding={(template) => void previewProjectWorkflowBinding(template)}
+            onPreviewMigration={(binding) => void previewProjectWorkflowMigration(binding)}
+            onPreviewRollback={(binding) => void previewProjectWorkflowRollback(binding)}
+            onApplyPreview={() => void applyProjectWorkflowBindingPreview()}
+            onRefreshProject={() => void refreshWorkflowLibraryState(undefined, true)}
+          />
+
           <section className="panel" data-product-section="registry" id="registry">
             <div className="section-headline">
               <div>
@@ -18327,6 +22139,10 @@ export default function App() {
             <ProjectLibraryPanel
               projects={managedProjects}
               recentRuns={recentRuns}
+              runtimeSummaries={projectRuntimeSummaries}
+              runtimeRefreshRemainingSeconds={projectRuntimeRefreshRemainingSeconds}
+              runtimeRefreshedAt={projectRuntimeRefreshedAt}
+              runtimeRefreshing={projectRuntimeRefreshing}
               telemetryReady={Boolean(boot?.policy && boot.policy.telemetryMode !== "disabled")}
               repairFeedback={projectRepairFeedback}
               onboardingLogs={projectOnboardingLogs}
@@ -18335,10 +22151,12 @@ export default function App() {
               busy={busy}
               onBindProject={() => void beginBindProjectFlow()}
               onInspectProject={inspectManagedProject}
+              onInspectProjectSkills={(project) => inspectManagedProject(project, "skills")}
               onAnalyzeProject={analyzeManagedProject}
               onScanProject={scanManagedProject}
               onRepairProject={(project) => void repairManagedProject(project)}
               onViewOnboardingLog={(project) => setSelectedProjectLogPath(project.path)}
+              onRefreshRuntimeSnapshot={() => void refreshProjectManagementRuntimeSnapshot()}
               onToggleMonitoring={toggleProjectMonitoring}
               onUnbindProject={unbindManagedProject}
             />
@@ -18516,6 +22334,148 @@ export default function App() {
                 </span>
               </div>
             </article>
+            <article className="os-module-card model-evaluation-settings-card">
+              <div className="model-evaluation-settings-head">
+                <div>
+                  <span className="os-module-kicker">{tx("AI Evaluation", "AI 评测")}</span>
+                  <h3>{tx("Generate test cases with your model", "使用你的模型生成测试用例")}</h3>
+                  <p>
+                    {tx(
+                      "Supports OpenAI-compatible chat completion endpoints. The key is encrypted through system secure storage and is never returned to the interface or local audit logs.",
+                      "支持 OpenAI 兼容的聊天补全接口。Key 通过系统安全存储加密，不会回显到界面或写入本地审计日志。"
+                    )}
+                  </p>
+                </div>
+                <div className={`model-evaluation-status status-${modelEvaluationConfig?.lastTestStatus ?? "not_tested"}`}>
+                  <span>{tx("Connection", "连接")}</span>
+                  <strong>
+                    {modelEvaluationConfig?.lastTestStatus === "ready"
+                      ? tx("Ready", "已连通")
+                      : modelEvaluationConfig?.lastTestStatus === "failed"
+                        ? tx("Failed", "失败")
+                        : tx("Not tested", "未测试")}
+                  </strong>
+                </div>
+              </div>
+              <div className="model-evaluation-form-grid">
+                <label>
+                  <span>{tx("Provider label", "服务商名称")}</span>
+                  <input
+                    value={modelProviderLabel}
+                    onChange={(event) => setModelProviderLabel(event.target.value)}
+                    placeholder={tx("OpenAI compatible", "OpenAI 兼容服务")}
+                  />
+                </label>
+                <label>
+                  <span>{tx("Model", "模型")}</span>
+                  <input
+                    value={modelName}
+                    onChange={(event) => setModelName(event.target.value)}
+                    placeholder="gpt-4.1-mini"
+                  />
+                </label>
+                <label className="model-evaluation-endpoint-field">
+                  <span>{tx("Base endpoint", "基础地址")}</span>
+                  <input
+                    value={modelEndpointUrl}
+                    onChange={(event) => setModelEndpointUrl(event.target.value)}
+                    placeholder="https://api.openai.com/v1"
+                    spellCheck={false}
+                  />
+                </label>
+                <label>
+                  <span>{tx("API key", "API Key")}</span>
+                  <input
+                    type="password"
+                    value={modelApiKeyDraft}
+                    onChange={(event) => setModelApiKeyDraft(event.target.value)}
+                    placeholder={
+                      modelEvaluationConfig?.hasApiKey
+                        ? tx("Saved securely. Enter only to replace.", "已安全保存，仅在替换时填写。")
+                        : tx("Enter API key", "填写 API Key")
+                    }
+                    autoComplete="off"
+                  />
+                </label>
+              </div>
+              <div className="model-evaluation-control-row">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={modelEvaluationEnabled}
+                  className="switch-control model-evaluation-switch"
+                  onClick={() => setModelEvaluationEnabled((value) => !value)}
+                  disabled={busyAction === "model-config"}
+                >
+                  <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+                  <span>{tx("AI evaluation", "AI 评测")}</span>
+                  <strong>{modelEvaluationEnabled ? tx("On", "已开") : tx("Off", "已关")}</strong>
+                </button>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={modelSourceUploadAllowed}
+                  className="switch-control model-evaluation-switch model-source-upload-switch"
+                  onClick={() => setModelSourceUploadAllowed((value) => !value)}
+                  disabled={busyAction === "model-config"}
+                >
+                  <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+                  <span>{tx("Upload selected source", "上传选中内容")}</span>
+                  <strong>{modelSourceUploadAllowed ? tx("Allowed", "已允许") : tx("Blocked", "已拦截")}</strong>
+                </button>
+                <div className="settings-pill-row">
+                  <span className="mini-pill">
+                    {modelEvaluationConfig?.secretStorage === "system_secure"
+                      ? tx("System secure storage", "系统安全存储")
+                      : tx("Secure storage unavailable", "安全存储不可用")}
+                  </span>
+                  <span className="mini-pill">
+                    {modelEvaluationConfig?.hasApiKey ? tx("Key saved", "Key 已保存") : tx("No key", "未保存 Key")}
+                  </span>
+                  {modelEvaluationConfig?.lastTestedAt ? (
+                    <span className="mini-pill">{formatDateTime(modelEvaluationConfig.lastTestedAt)}</span>
+                  ) : null}
+                </div>
+              </div>
+              <p className="model-evaluation-privacy-copy">
+                {tx(
+                  "Case generation sends only the selected Skill or workflow text after the second switch is explicitly enabled. It never uploads a whole project, session telemetry, or the API key.",
+                  "只有显式开启第二个开关后，生成用例才会发送选中的 Skill 或工作流文本。不会上传整个项目、会话遥测或 API Key。"
+                )}
+              </p>
+              <div className="model-evaluation-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busyAction === "model-config"}
+                  onClick={() => void saveModelEvaluationConfig()}
+                >
+                  {busyAction === "model-config" ? tx("Saving...", "保存中...") : tx("Save model settings", "保存模型设置")}
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    busyAction === "model-test" ||
+                    !modelEvaluationConfig?.enabled ||
+                    !modelEvaluationConfig.hasApiKey
+                  }
+                  onClick={() => void testModelEvaluationConnection()}
+                >
+                  {busyAction === "model-test" ? tx("Testing...", "测试中...") : tx("Test connection", "测试连接")}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={busyAction === "model-config" || !modelEvaluationConfig?.hasApiKey}
+                  onClick={() => void saveModelEvaluationConfig(true)}
+                >
+                  {tx("Clear saved key", "清除已保存 Key")}
+                </button>
+              </div>
+              {modelEvaluationConfig?.lastTestMessage ? (
+                <small className="model-evaluation-last-message">{modelEvaluationConfig.lastTestMessage}</small>
+              ) : null}
+            </article>
             <div className="os-settings-grid">
               <article className="os-module-card">
                 <span className="os-module-kicker">{tx("Storage", "存储")}</span>
@@ -18616,109 +22576,70 @@ export default function App() {
           >
             <ProjectAssetDetailPanel
               project={inspectedProject}
+              initialView={projectDetailView}
               profile={projectProfile}
-              currentProjectRoot={targetProjectRoot}
               localSkills={boot.skills}
               recentRuns={recentRuns}
+              traceCount={inspectedProjectTraceCount}
+              openProposalCount={inspectedProjectOpenProposalCount}
+              hasEvaluationEvidence={inspectedProjectHasEvaluationEvidence}
               heartbeatEntries={projectHeartbeatEntries}
               telemetryMode={boot.policy?.telemetryMode ?? "missing"}
               backgroundWatchAllowed={Boolean(boot.policy?.allowBackgroundWatch)}
               runtimeRefreshResult={projectRuntimeRefreshResult}
+              adapterReadiness={projectAdapterReadiness}
+              adapterReadinessLoading={projectAdapterReadinessLoading}
               busyAction={busyAction}
               busy={busy}
               onScanProject={scanManagedProject}
               onRefreshRuntimeEvidence={(project) => void refreshProjectRuntimeEvidence(project)}
+              onDiagnoseAdapterReadiness={(project) => void diagnoseProjectAdapterReadiness(project)}
+              onStartAppServerObservation={(project) => void startProjectAppServerObservation(project)}
+              onStopAppServerObservation={(project) => void stopProjectAppServerObservation(project)}
+              onOpenControlledVerification={openControlledVerification}
+              onOpenControlledVerificationTrace={(traceId) => void openControlledVerificationTrace(traceId)}
               onEnableTelemetry={(project) => void enableProjectTelemetry(project)}
               onToggleMonitoring={toggleProjectMonitoring}
               onUpdateMonitoringInterval={updateProjectMonitoringInterval}
               onRenameProject={renameManagedProject}
+              onNavigate={(href) => {
+                setInspectedProjectPath("");
+                navigateToProductSection(href);
+              }}
+              onOpenTelemetryIntake={navigateToTelemetryIntake}
               onClose={() => setInspectedProjectPath("")}
             />
           </section>
         </div>
       ) : null}
-      {selectedProjectLog ? (
-        <div
-          className="project-log-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setSelectedProjectLogPath("");
+      {controlledVerificationProject ? (
+        <ControlledVerificationModal
+          project={controlledVerificationProject}
+          result={controlledVerificationResult}
+          running={controlledVerificationRunning}
+          onConfirm={() => void runControlledVerification(controlledVerificationProject)}
+          onOpenTrace={(traceId) => void openControlledVerificationTrace(traceId)}
+          onClose={() => {
+            if (!controlledVerificationRunning) {
+              setControlledVerificationProjectPath("");
+              setControlledVerificationResult(null);
             }
           }}
-        >
-          <section
-            className="project-log-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="project-log-modal-title"
-          >
-            <div className="project-log-modal-head">
-              <div>
-                <span className="os-module-kicker">{tx("Onboarding Log", "接入日志")}</span>
-                <h2 id="project-log-modal-title">{selectedProjectLog.name}</h2>
-                <p>{selectedProjectLog.path}</p>
-              </div>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={tx("Close onboarding log", "关闭接入日志")}
-                onClick={() => setSelectedProjectLogPath("")}
-              >
-                ×
-              </button>
-            </div>
-            {projectRepairFeedback?.projectPath === selectedProjectLog.path ? (
-              <div className={`project-log-current status-${projectRepairFeedback.status}`}>
-                <strong>
-                  {projectRepairFeedback.status === "running"
-                    ? tx("Repairing", "修正中")
-                    : projectRepairFeedback.status === "completed"
-                      ? tx("Repair complete", "修正完成")
-                      : projectRepairFeedback.status === "connected-awaiting-skill"
-                        ? tx("Connected, awaiting Skill", "已连接待触发")
-                      : projectRepairFeedback.status === "connection-required"
-                        ? tx("Connection incomplete", "连接未完成")
-                        : projectRepairFeedback.status === "failed"
-                          ? tx("Repair failed", "修正失败")
-                          : tx("Action required", "需要确认")}
-                </strong>
-                <p>{projectRepairFeedback.detail}</p>
-              </div>
-            ) : null}
-            <div className="project-log-list">
-              {selectedProjectLogEntries.length > 0 ? (
-                selectedProjectLogEntries.map((entry) => (
-                  <div className={`project-log-entry tone-${entry.tone}`} key={entry.id}>
-                    <i aria-hidden="true" />
-                    <div>
-                      <span>
-                        {entry.stage === "scan"
-                          ? tx("Folder Scan", "目录扫描")
-                          : entry.stage === "skills"
-                            ? tx("Skill Index", "技能索引")
-                            : entry.stage === "workflow"
-                              ? tx("Workflow", "工作流")
-                              : entry.stage === "telemetry"
-                                ? tx("Permission", "监控授权")
-                                : entry.stage === "connection"
-                                  ? tx("Codex Connection", "Codex 连接")
-                                  : tx("Complete", "完成")}
-                      </span>
-                      <p>{entry.message}</p>
-                    </div>
-                    <time>{formatDateTime(entry.occurredAt)}</time>
-                  </div>
-                ))
-              ) : (
-                <div className="project-log-empty">
-                  <strong>{tx("No onboarding log yet", "还没有接入日志")}</strong>
-                  <p>{tx("Run Detect and Repair to generate a step-by-step log.", "点击“检测并修正”后，这里会逐步记录检查过程。")}</p>
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
+        />
+      ) : null}
+      {selectedProjectLog ? (
+        <ProjectRuntimeLogModal
+          project={selectedProjectLog}
+          runs={selectedProjectRuntimeRuns}
+          totalRunCount={selectedProjectRuntimeSummary?.totalRuns ?? selectedProjectRuntimeRuns.length}
+          onboardingEntries={selectedProjectLogEntries}
+          skills={boot?.skills ?? []}
+          onOpenSkillRun={(skill, fallbackRuns) => {
+            setSelectedProjectLogPath("");
+            void openSkillRunDetails(skill, fallbackRuns);
+          }}
+          onClose={() => setSelectedProjectLogPath("")}
+        />
       ) : null}
       {skillRunDetail ? (
         <SkillRunDetailModal
@@ -18798,6 +22719,16 @@ export default function App() {
             </div>
           </section>
         </div>
+      ) : null}
+      {traceSkillDrawerOpen ? (
+        <TraceSkillDrawer
+          detail={traceSkillDetail}
+          loading={traceSkillLoading}
+          onClose={closeTraceSkillDrawer}
+          onOpenLibrary={openTraceSkillInLibrary}
+          onOpenGraph={openTraceSkillInGraph}
+          onRevealSource={(skillId) => void revealTraceSkillSource(skillId)}
+        />
       ) : null}
       {scanResultDialog ? (
         <div
@@ -18892,6 +22823,10 @@ export default function App() {
                 <span>{tx("Errors", "错误")}</span>
                 <strong>{scanResultDialog.errorCount}</strong>
               </div>
+              <div>
+                <span>{tx("Workflow", "工作流")}</span>
+                <strong>{scanResultDialog.workflowVersion ?? tx("Not detected", "未检测到")}</strong>
+              </div>
             </div>
             <div className="project-onboarding-checklist" aria-label={tx("Project onboarding checks", "项目接入检查") }>
               <div className="is-ready">
@@ -18913,14 +22848,24 @@ export default function App() {
                 <strong>{tx("Workflow configuration", "工作流配置")}</strong>
                 <small>
                   {scanResultDialog.workflowDetected
-                    ? tx("Workflow markers detected", "已检测到工作流标记")
+                    ? tx(
+                        `Workflow markers detected (${scanResultDialog.workflowVersion ?? "version unavailable"}); review the project Doctor in Workflow Library.`,
+                        `已检测到工作流标记（${scanResultDialog.workflowVersion ?? "版本未知"}）；可在工作流库查看项目体检。`
+                      )
                     : tx("Workflow is incomplete; preview a repair plan", "工作流不完整，请预览修正方案")}
                 </small>
               </div>
-              <div className="needs-connection">
-                <span>→</span>
+              <div className={scanDialogWorkspaceMatchesProject ? "is-ready" : "needs-connection"}>
+                <span>{scanDialogWorkspaceMatchesProject ? "✓" : "→"}</span>
                 <strong>{tx("Codex project connection", "Codex 项目连接")}</strong>
-                <small>{tx("Start a Codex task from this exact project directory, then refresh evidence.", "请从该项目目录启动 Codex 任务，然后刷新运行证据。")}</small>
+                <small>
+                  {scanDialogWorkspaceMatchesProject
+                    ? tx("Codex directory matched", "Codex 目录已匹配")
+                    : tx(
+                        "Start a Codex task from this exact project directory, then refresh evidence.",
+                        "请从该项目目录启动 Codex 任务，然后刷新运行证据。"
+                      )}
+                </small>
               </div>
               <div className={boot?.policy?.telemetryMode !== "disabled" ? "is-ready" : "needs-action"}>
                 <span>{boot?.policy?.telemetryMode !== "disabled" ? "✓" : "!"}</span>
@@ -18968,6 +22913,17 @@ export default function App() {
               >
                 {tx("Review Project Skills", "查看项目技能")}
               </button>
+              {scanResultDialog.workflowDetected ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScanResultDialog(null);
+                    navigateToProductSection("#workflows");
+                  }}
+                >
+                  {tx("Open Workflow Library", "打开工作流库")}
+                </button>
+              ) : null}
               {isWorkflowAppliedToScanDialogProject ? (
                 <>
                   <button

@@ -14,8 +14,20 @@ import type {
   LocalToolTelemetryPreview,
   LocalToolTelemetrySource,
   ManagedProjectRecord,
+  ModelEvaluationCaseGenerationInput,
+  ModelEvaluationConfig,
+  ModelEvaluationConfigInput,
+  ProjectAppServerObservation,
+  ProjectControlledSessionVerification,
+  ProjectAdapterReadiness,
   ProjectProfileSummary,
   ProjectRuntimeEvidenceRefreshResult,
+  ProjectRuntimeSummary,
+  ProjectWorkflowBindingApplyInput,
+  ProjectWorkflowBindingPreview,
+  ProjectWorkflowBindingPreviewInput,
+  ProjectWorkflowBindingSummary,
+  ProjectWorkflowDoctorResult,
   RemoteMarketplaceCatalog,
   OptimizationProposal,
   OptimizationProposalRefreshResult,
@@ -26,6 +38,9 @@ import type {
   RemoteSkillImportResult,
   RemoteSkillSourceAnalysis,
   ScanResult,
+  SessionTraceDetail,
+  SessionTraceListItem,
+  SessionTraceQuery,
   SkillApplyPreview,
   SkillApplyPreviewInput,
   SkillBundleExportInput,
@@ -40,13 +55,121 @@ import type {
   SkillIntelligenceAnalysis,
   SkillRunSummary,
   SkillSummary,
+  TraceSkillHitSummary,
+  TraceSkillQuickDetail,
+  TraceSpanSummary,
   WeeklyMetricsSummary,
+  WorkflowTemplateSummary,
   WorkbenchApi
 } from "../../shared/types";
 
 const now = new Date("2026-06-05T09:30:00+08:00").toISOString();
 const storageRoot = "/Users/demo/Library/Application Support/Skill Management Workbench";
 let previewManagedProjects: ManagedProjectRecord[] = [];
+const previewAppServerObservations = new Map<string, ProjectAppServerObservation>();
+const previewControlledVerifications = new Map<string, ProjectControlledSessionVerification>();
+let previewProjectWorkflowBindings: ProjectWorkflowBindingSummary[] = [];
+const previewWorkflowBindingPreviews = new Map<string, ProjectWorkflowBindingPreview>();
+let previewWorkflowBindingSequence = 0;
+const previewWorkflowTemplates: WorkflowTemplateSummary[] = [
+  {
+    templateId: "foundation.engineering-governance",
+    templateVersion: "1.0.0",
+    name: "Engineering governance",
+    kind: "foundation",
+    status: "approved",
+    schemaVersion: "1.1.0",
+    sourcePath: "/Users/demo/workflow-skills/templates/foundation-engineering-governance/workflow.yaml",
+    manifestFingerprint: "sha256:preview-foundation",
+    dependencyTemplateIds: [],
+    skillRefs: ["project-profile-router", "project-requirement-gate"],
+    validation: { valid: true, issues: [], warnings: [] },
+    indexedAt: now
+  },
+  {
+    templateId: "scenario.design-to-frontend",
+    templateVersion: "1.0.0",
+    name: "Design to frontend",
+    kind: "scenario",
+    status: "approved",
+    schemaVersion: "1.1.0",
+    sourcePath: "/Users/demo/workflow-skills/templates/scenario-design-to-frontend/workflow.yaml",
+    manifestFingerprint: "sha256:preview-design-frontend",
+    dependencyTemplateIds: ["foundation.engineering-governance", "role.frontend-engineering"],
+    skillRefs: ["project-profile-router", "project-tech-solution", "project-code-generation"],
+    validation: { valid: true, issues: [], warnings: [] },
+    indexedAt: now
+  },
+  {
+    templateId: "scenario.feature-delivery",
+    templateVersion: "1.0.0",
+    name: "Feature delivery",
+    kind: "scenario",
+    status: "approved",
+    schemaVersion: "1.1.0",
+    sourcePath: "/Users/demo/workflow-skills/templates/scenario-feature-delivery/workflow.yaml",
+    manifestFingerprint: "sha256:preview-feature-delivery",
+    dependencyTemplateIds: ["foundation.engineering-governance"],
+    skillRefs: [
+      "project-profile-router",
+      "project-requirement-gate",
+      "project-scope-impact-guard",
+      "project-tech-solution",
+      "project-code-generation",
+      "project-code-review",
+      "project-verification-loop",
+      "project-test-and-report"
+    ],
+    validation: { valid: true, issues: [], warnings: [] },
+    indexedAt: now
+  }
+];
+
+function makePreviewWorkflowBinding(
+  input: ProjectWorkflowBindingPreviewInput
+): ProjectWorkflowBindingPreview {
+  const template =
+    previewWorkflowTemplates.find(
+      (candidate) =>
+        candidate.templateId === input.templateId &&
+        (!input.templateVersion || candidate.templateVersion === input.templateVersion)
+    ) ?? previewWorkflowTemplates[0];
+  return {
+    previewId: `preview-binding-${template.templateId}-${++previewWorkflowBindingSequence}`,
+    expiresAt: new Date(Date.parse(now) + 5 * 60 * 1000).toISOString(),
+    generatedAt: now,
+    projectRoot: input.projectRoot,
+    bindingFilePath: `${input.projectRoot}/.skill-os/workflow-bindings.yaml`,
+    changeType: "create",
+    template,
+    existingBinding: null,
+    compatibility: {
+      status: "ready",
+      readyForBinding: true,
+      projectWorkflowVersion: "0.8.0",
+      missingSkills: [],
+      messages: []
+    },
+    proposedBinding: {
+      bindingId: "preview-workflow-binding",
+      templateId: template.templateId,
+      templateVersion: template.templateVersion,
+      manifestFingerprint: template.manifestFingerprint,
+      overrides: {}
+    },
+    readyForConfirmation: true,
+    previewSteps: ["Preview local template", "Confirm binding", "Write and verify binding"],
+    warnings: []
+  };
+}
+
+function storePreviewWorkflowBinding(
+  input: ProjectWorkflowBindingPreviewInput
+): ProjectWorkflowBindingPreview {
+  const preview = makePreviewWorkflowBinding(input);
+  previewWorkflowBindingPreviews.set(preview.previewId, preview);
+  return preview;
+}
 
 const previewHealthScorePolicies: Record<SkillHealthScorePolicy["preset"], SkillHealthScorePolicy> = {
   balanced: {
@@ -122,6 +245,21 @@ const previewHealthScorePolicies: Record<SkillHealthScorePolicy["preset"], Skill
 };
 
 let activePreviewHealthScorePolicy = previewHealthScorePolicies.balanced;
+let previewModelEvaluationConfig: ModelEvaluationConfig = {
+  id: "default",
+  provider: "openai_compatible",
+  providerLabel: "OpenAI compatible",
+  endpointUrl: "https://api.openai.com/v1",
+  modelName: "",
+  enabled: false,
+  hasApiKey: false,
+  secretStorage: "system_secure",
+  allowSourceUpload: false,
+  updatedAt: null,
+  lastTestedAt: null,
+  lastTestStatus: "not_tested",
+  lastTestMessage: null
+};
 let previewRemoteCandidates: RemoteSkillCandidateSummary[] = [];
 const previewDirectoryChoices = [
   "/Users/demo/projects/skill-playground/skills",
@@ -653,6 +791,289 @@ const recentRuns: SkillRunSummary[] = [
     firstOutputLatencyMs: 280
   }
 ];
+
+const previewTraceHits: TraceSkillHitSummary[] = [
+  {
+    id: "hit-preview-superpowers",
+    spanId: "span-preview-skill-superpowers",
+    skillId: "skill-superpowers-dev",
+    skillName: "Superpowers Dev Implementer",
+    skillVersionId: "version-preview-superpowers",
+    hitState: "inferred",
+    hitIndex: 89,
+    confidence: 0.89,
+    captureMode: "estimated",
+    scoringVersion: "trace-hit-v1",
+    evidenceSummary: "5 项本地证据支持该 Skill 命中。",
+    evidence: [
+      { key: "workflow_route", label: "Workflow 路由", score: 30, detail: "code_generation、verification_loop" },
+      { key: "skill_reference", label: "Skill 引用", score: 25, detail: "会话日志包含 Skill 名称。" },
+      { key: "project_profile", label: "项目匹配", score: 20, detail: "会话目录命中已绑定项目。" },
+      { key: "tool_signal", label: "工具信号", score: 15, detail: "apply_patch、exec_command" },
+      { key: "temporal_adjacency", label: "时序相邻", score: 10, detail: "同一 Turn 内事件顺序一致。" }
+    ],
+    occurredAt: "2026-06-05T09:02:00+08:00"
+  },
+  {
+    id: "hit-preview-memory",
+    spanId: "span-preview-skill-memory",
+    skillId: "skill-memory",
+    skillName: "Memory Governance",
+    skillVersionId: "version-preview-memory",
+    hitState: "inferred",
+    hitIndex: 72,
+    confidence: 0.72,
+    captureMode: "estimated",
+    scoringVersion: "trace-hit-v1",
+    evidenceSummary: "4 项本地证据支持该 Skill 命中。",
+    evidence: [
+      { key: "skill_reference", label: "Skill 引用", score: 25, detail: "会话日志包含 Skill 名称。" },
+      { key: "project_profile", label: "项目匹配", score: 20, detail: "会话目录命中已绑定项目。" },
+      { key: "tool_signal", label: "工具信号", score: 15, detail: "read_file" },
+      { key: "temporal_adjacency", label: "时序相邻", score: 10, detail: "事件时序一致。" }
+    ],
+    occurredAt: "2026-06-05T09:02:01+08:00"
+  }
+];
+
+const previewSessionTraces: SessionTraceListItem[] = [
+  {
+    sessionId: "session-preview-codex",
+    sessionRef: "019f-preview-codex-session-0001",
+    sourceRef: "/Users/demo/.codex/sessions/preview-codex.jsonl",
+    turnId: "turn-preview-01",
+    traceId: "trace-preview-01",
+    projectId: "project-preview",
+    projectName: "Skill OS Preview",
+    workspaceRef: "/Users/demo/projects/skill-os-preview",
+    harnessId: "codex",
+    adapterId: "codex_jsonl_v1",
+    evidenceKind: "message_turn",
+    messageSummary: "第 6 条用户消息（原文未保存）",
+    receivedAt: "2026-06-05T09:02:00+08:00",
+    completedAt: "2026-06-05T09:02:03+08:00",
+    status: "completed",
+    durationMs: 3180,
+    totalTokens: 5830,
+    skillCandidateCount: 2,
+    skillInvokedCount: 0,
+    captureMode: "estimated",
+    confidence: 0.89,
+    skillHits: previewTraceHits
+  },
+  {
+    sessionId: "session-preview-codex",
+    sessionRef: "019f-preview-codex-session-0001",
+    sourceRef: "/Users/demo/.codex/sessions/preview-codex.jsonl",
+    turnId: "turn-preview-02",
+    traceId: "trace-preview-02",
+    projectId: "project-preview",
+    projectName: "Skill OS Preview",
+    workspaceRef: "/Users/demo/projects/skill-os-preview",
+    harnessId: "codex",
+    adapterId: "codex_jsonl_v1",
+    evidenceKind: "message_turn",
+    messageSummary: "第 5 条用户消息（原文未保存）",
+    receivedAt: "2026-06-05T08:55:00+08:00",
+    completedAt: "2026-06-05T08:55:02+08:00",
+    status: "completed",
+    durationMs: 1740,
+    totalTokens: 2650,
+    skillCandidateCount: 1,
+    skillInvokedCount: 0,
+    captureMode: "estimated",
+    confidence: 0.72,
+    skillHits: [previewTraceHits[1]]
+  },
+  {
+    sessionId: "session-preview-claude",
+    sessionRef: "019f-preview-claude-session-0001",
+    sourceRef: "/Users/demo/.claude/projects/preview-claude.jsonl",
+    turnId: "turn-preview-03",
+    traceId: "trace-preview-03",
+    projectId: "project-preview",
+    projectName: "Skill OS Preview",
+    workspaceRef: "/Users/demo/projects/skill-os-preview",
+    harnessId: "claude_code",
+    adapterId: "claude_code_jsonl_v1",
+    evidenceKind: "legacy_aggregate",
+    messageSummary: "历史运行记录（无原始消息）",
+    receivedAt: "2026-06-05T08:41:00+08:00",
+    completedAt: "2026-06-05T08:41:04+08:00",
+    status: "failed",
+    durationMs: 3920,
+    totalTokens: 4180,
+    skillCandidateCount: 1,
+    skillInvokedCount: 0,
+    captureMode: "estimated",
+    confidence: 0.68,
+    skillHits: [{ ...previewTraceHits[0], id: "hit-preview-graph", skillId: "skill-graph", skillName: "Graph Analyzer", hitIndex: 68 }]
+  }
+];
+
+function makePreviewTraceDetail(turn: SessionTraceListItem): SessionTraceDetail {
+  const rootSpanId = `${turn.traceId}-turn`;
+  const routeSpanId = `${turn.traceId}-route`;
+  const workflowSpanId = `${turn.traceId}-workflow`;
+  const spans: TraceSpanSummary[] = [
+    {
+      id: rootSpanId,
+      traceId: turn.traceId,
+      turnId: turn.turnId,
+      parentSpanId: null,
+      sequence: 1,
+      spanType: "turn",
+      phase: turn.evidenceKind === "legacy_aggregate" ? "aggregate" : "request",
+      name: turn.evidenceKind === "legacy_aggregate" ? "历史运行聚合" : "用户消息与响应",
+      startedAt: turn.receivedAt,
+      endedAt: turn.completedAt,
+      durationMs: turn.durationMs,
+      status: turn.status,
+      captureMode: turn.captureMode,
+      confidence: turn.confidence,
+      skillId: null,
+      skillVersionId: null,
+      workflowId: null,
+      workflowNodeId: null,
+      tokenCount: turn.totalTokens,
+      toolCallCount: 0,
+      metadata: { rawContentStored: false }
+    },
+    {
+      id: routeSpanId,
+      traceId: turn.traceId,
+      turnId: turn.turnId,
+      parentSpanId: rootSpanId,
+      sequence: 2,
+      spanType: "system_route",
+      phase: "route",
+      name: "系统路由",
+      startedAt: turn.receivedAt,
+      endedAt: turn.completedAt,
+      durationMs: turn.durationMs,
+      status: turn.status,
+      captureMode: "inferred",
+      confidence: 0.55,
+      skillId: null,
+      skillVersionId: null,
+      workflowId: null,
+      workflowNodeId: null,
+      tokenCount: 0,
+      toolCallCount: 0,
+      metadata: { evidenceBoundary: "preview inference" }
+    },
+    {
+      id: workflowSpanId,
+      traceId: turn.traceId,
+      turnId: turn.turnId,
+      parentSpanId: routeSpanId,
+      sequence: 3,
+      spanType: "workflow",
+      phase: "orchestrate",
+      name: "Workflow 信号",
+      startedAt: turn.receivedAt,
+      endedAt: turn.completedAt,
+      durationMs: turn.durationMs,
+      status: turn.status,
+      captureMode: "inferred",
+      confidence: 0.68,
+      skillId: null,
+      skillVersionId: null,
+      workflowId: null,
+      workflowNodeId: null,
+      tokenCount: 0,
+      toolCallCount: 0,
+      metadata: { signals: ["code_generation", "verification_loop"] }
+    },
+    ...turn.skillHits.map((hit, index): TraceSpanSummary => ({
+      id: hit.spanId,
+      traceId: turn.traceId,
+      turnId: turn.turnId,
+      parentSpanId: workflowSpanId,
+      sequence: 4 + index,
+      spanType: "skill",
+      phase: "execute",
+      name: hit.skillName,
+      startedAt: hit.occurredAt,
+      endedAt: turn.completedAt,
+      durationMs: turn.durationMs,
+      status: turn.status,
+      captureMode: hit.captureMode,
+      confidence: hit.confidence,
+      skillId: hit.skillId,
+      skillVersionId: hit.skillVersionId,
+      workflowId: null,
+      workflowNodeId: null,
+      tokenCount: Math.round(turn.totalTokens / Math.max(turn.skillHits.length, 1)),
+      toolCallCount: 2,
+      metadata: { hitState: hit.hitState, hitIndex: hit.hitIndex }
+    })),
+    {
+      id: `${turn.traceId}-verification`,
+      traceId: turn.traceId,
+      turnId: turn.turnId,
+      parentSpanId: rootSpanId,
+      sequence: 10,
+      spanType: "verification",
+      phase: "verify",
+      name: turn.status === "failed" ? "执行失败证据" : "执行完成验证",
+      startedAt: turn.receivedAt,
+      endedAt: turn.completedAt,
+      durationMs: turn.durationMs,
+      status: turn.status,
+      captureMode: "inferred",
+      confidence: 0.64,
+      skillId: null,
+      skillVersionId: null,
+      workflowId: null,
+      workflowNodeId: null,
+      tokenCount: 0,
+      toolCallCount: 0,
+      metadata: {}
+    },
+    {
+      id: `${turn.traceId}-response`,
+      traceId: turn.traceId,
+      turnId: turn.turnId,
+      parentSpanId: rootSpanId,
+      sequence: 11,
+      spanType: "response",
+      phase: "respond",
+      name: turn.evidenceKind === "legacy_aggregate" ? "运行记录结束" : "响应完成",
+      startedAt: turn.receivedAt,
+      endedAt: turn.completedAt,
+      durationMs: turn.durationMs,
+      status: turn.status,
+      captureMode: "inferred",
+      confidence: 0.58,
+      skillId: null,
+      skillVersionId: null,
+      workflowId: null,
+      workflowNodeId: null,
+      tokenCount: 0,
+      toolCallCount: 0,
+      metadata: { rawResponseStored: false }
+    }
+  ];
+  return {
+    turn,
+    spans,
+    skillHits: turn.skillHits,
+    events: spans.filter((span) => span.spanType === "skill").map((span, index) => ({
+      id: `${turn.traceId}-event-${index}`,
+      traceId: turn.traceId,
+      turnId: turn.turnId,
+      spanId: span.id,
+      sequence: index + 1,
+      eventType: "skill_run.completed",
+      occurredAt: span.endedAt ?? span.startedAt,
+      sourceType: "preview_local_log",
+      sourceRef: "/Users/demo/.codex/sessions/preview.jsonl",
+      captureMode: span.captureMode,
+      evidenceHash: `preview-evidence-${index}`
+    }))
+  };
+}
 
 const proposals: OptimizationProposal[] = [
   {
@@ -1654,6 +2075,153 @@ function makeProjectRuntimeEvidenceRefresh(
   };
 }
 
+function makePreviewControlledVerification(projectRoot: string): ProjectControlledSessionVerification {
+  return previewControlledVerifications.get(projectRoot) ?? {
+    projectRoot,
+    state: "not_run",
+    startedAt: null,
+    finishedAt: null,
+    ephemeral: true,
+    sandbox: "readOnly",
+    networkAccess: false,
+    approvalPolicy: "never",
+    timeoutMs: 90_000,
+    tokenWatchdogLimit: 32_000,
+    tokenWatchdogExceeded: false,
+    totalTokens: null,
+    lifecycleEventCount: 0,
+    itemTypes: [],
+    traceId: null,
+    threadArchived: false,
+    stopReason: null,
+    errorCode: null
+  } satisfies ProjectControlledSessionVerification;
+}
+
+function upsertPreviewControlledVerificationTrace(projectRoot: string, startedAt: string, finishedAt: string) {
+  const traceId = "trace_preview_controlled_verification";
+  const trace: SessionTraceListItem = {
+    sessionId: "session-preview-controlled-verification",
+    sessionRef: "controlled-verification-preview",
+    sourceRef: null,
+    turnId: "turn-preview-controlled-verification",
+    traceId,
+    projectId: null,
+    projectName: "受控验证预览",
+    workspaceRef: projectRoot,
+    harnessId: "codex_app_server",
+    adapterId: "codex_app_server_v1",
+    evidenceKind: "message_turn",
+    messageSummary: "受控验证 Turn（固定内容未保存）",
+    receivedAt: startedAt,
+    completedAt: finishedAt,
+    status: "completed",
+    durationMs: Math.max(0, new Date(finishedAt).getTime() - new Date(startedAt).getTime()),
+    totalTokens: 286,
+    skillCandidateCount: 0,
+    skillInvokedCount: 0,
+    captureMode: "precise",
+    confidence: 1,
+    skillHits: []
+  };
+  const existingIndex = previewSessionTraces.findIndex((entry) => entry.traceId === traceId);
+  if (existingIndex >= 0) {
+    previewSessionTraces.splice(existingIndex, 1, trace);
+  } else {
+    previewSessionTraces.unshift(trace);
+  }
+  return trace;
+}
+
+function makeProjectAdapterReadiness(projectRoot: string): ProjectAdapterReadiness {
+  const appServerObservation = previewAppServerObservations.get(projectRoot) ?? {
+    projectRoot,
+    enabled: false,
+    state: "not_enabled" as const,
+    capability: {
+      cliVersion: "codex-cli 0.131.0",
+      schemaFingerprint: "preview-codex-app-server-schema-v2",
+      generatedAt: now,
+      protocolVersion: "v2" as const,
+      lifecycleMethods: [
+        "thread/started",
+        "turn/started",
+        "item/started",
+        "item/completed",
+        "turn/completed",
+        "thread/tokenUsage/updated"
+      ],
+      supportsSkillCatalog: true,
+      supportsExactSkillEvents: false,
+      supported: true,
+      blockingReason: null
+    },
+    startedAt: null,
+    lastEventAt: null,
+    stoppedAt: null,
+    lastError: null,
+    lastControlledVerification: makePreviewControlledVerification(projectRoot)
+  } satisfies ProjectAppServerObservation;
+  return {
+    projectRoot,
+    checkedAt: now,
+    adapterId: "codex-local-log",
+    harnessId: "codex",
+    installationStatus: "installed",
+    connectionStatus: "recent_session_observed",
+    observationStatus: "skill_invoked_inferred",
+    sourceAvailable: true,
+    detectedWorkspaceRef: projectRoot,
+    latestEvidenceAt: now,
+    exactTraceCount: 0,
+    inferredTraceCount: 3,
+    checks: [
+      { id: "workflow-installation", status: "pass", evidenceRefs: [projectRoot] },
+      { id: "codex-source", status: "pass", evidenceRefs: ["codex-sessions"] },
+      { id: "workspace-connection", status: "pass", evidenceRefs: [projectRoot] },
+      { id: "skill-observation", status: "info", evidenceRefs: ["precise:0", "inferred:3"] },
+      {
+        id: "app-server-observation",
+        status: appServerObservation.state === "ready" || appServerObservation.state === "observing" ? "pass" : "info",
+        evidenceRefs: ["schema:preview-codex-app"]
+      }
+    ],
+    appServerObservation,
+    precisionPreview: {
+      planId: appServerObservation.enabled ? `precision-app-server-ready:${projectRoot}` : `precision-app-server-opt-in:${projectRoot}`,
+      generatedAt: now,
+      mode: appServerObservation.enabled ? "local_app_server_ready" : "local_app_server_opt_in",
+      noWritesPerformed: true,
+      requiresSeparateConfirmation: !appServerObservation.enabled,
+      affectedPaths: [
+        {
+          path: "Skill OS local application storage",
+          access: "write_after_confirmation",
+          purpose: "Store local App Server capability metadata and redacted lifecycle evidence.",
+          currentState: "available"
+        },
+        {
+          path: "Local stdio Codex App Server process",
+          access: "not_applicable",
+          purpose: "No project or Codex configuration is changed.",
+          currentState: "not_planned"
+        }
+      ],
+      requiredSteps: appServerObservation.enabled
+        ? ["Start a future controlled Skill OS session to receive App Server lifecycle events."]
+        : [
+            "Confirm the bound project and start a local stdio Codex App Server process.",
+            "Verify the generated schema before accepting lifecycle events.",
+            "Start a future controlled session only after a separate user confirmation."
+          ],
+      blockedReasons: ["This Codex schema does not expose explicit Skill invocation events. Skill evidence remains inferred."],
+      rollbackPoint: appServerObservation.enabled
+        ? "Stop observation to close the local stdio process."
+        : "Close this preview. No project or Codex configuration was changed."
+    }
+  };
+}
+
 function makeProjectProfile(projectRoot: string): ProjectProfileSummary {
   return {
     projectRoot,
@@ -1861,6 +2429,7 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
         ],
         directoriesToCreate: [".agents", ".agents/skills", ".specify", "specs"],
         fileConflicts: [],
+        preservedFiles: [],
         skippedExistingDirectories: [],
         skillCount: 24,
         totalFileCount: 52,
@@ -1873,9 +2442,98 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
         preview,
         appliedAt: now,
         copiedFileCount: preview.filesToCreate.length,
+        mergedFileCount: preview.preservedFiles.length,
         createdDirectoryCount: preview.directoriesToCreate.length
       });
     },
+    listWorkflowTemplates: () => delay(previewWorkflowTemplates),
+    listProjectWorkflowBindings: (projectRoot: string) =>
+      delay(previewProjectWorkflowBindings.filter((binding) => binding.projectRoot === projectRoot)),
+    previewProjectWorkflowBinding: (input: ProjectWorkflowBindingPreviewInput) =>
+      delay(storePreviewWorkflowBinding(input)),
+    previewProjectWorkflowLegacyMigration: async (input) => {
+      const preview = storePreviewWorkflowBinding({
+        projectRoot: input.projectRoot,
+        templateId: "foundation.engineering-governance"
+      });
+      return delay({
+        ...preview,
+        changeType: "migration" as const,
+        warnings: ["Shadow migration preview. Legacy project declaration is retained read-only."]
+      });
+    },
+    previewProjectWorkflowBindingRollback: async (input) => {
+      const preview = storePreviewWorkflowBinding({
+        projectRoot: input.projectRoot,
+        templateId: "foundation.engineering-governance"
+      });
+      return delay({
+        ...preview,
+        changeType: "rollback" as const,
+        proposedBinding: { ...preview.proposedBinding, bindingId: input.bindingId },
+        warnings: ["Rollback preview uses the locally captured version in the desktop application."]
+      });
+    },
+    applyProjectWorkflowBinding: async (input: ProjectWorkflowBindingApplyInput) => {
+      const preview = previewWorkflowBindingPreviews.get(input.previewId);
+      if (!preview) {
+        throw new Error("The Workflow binding preview has expired or is missing. Generate a new preview before confirmation.");
+      }
+      previewWorkflowBindingPreviews.delete(input.previewId);
+      const binding: ProjectWorkflowBindingSummary = {
+        bindingId: preview.proposedBinding.bindingId,
+        projectRoot: preview.projectRoot,
+        templateId: preview.template.templateId,
+        templateVersion: preview.template.templateVersion,
+        templateName: preview.template.name,
+        templateKind: preview.template.kind,
+        manifestFingerprint: preview.template.manifestFingerprint,
+        status: "active",
+        source: "binding_file",
+        bindingFilePath: preview.bindingFilePath,
+        readOnly: false,
+        compatibility: preview.compatibility,
+        overrides: {},
+        activatedAt: now,
+        updatedAt: now,
+        rollback: null,
+        warnings: []
+      };
+      previewProjectWorkflowBindings = [
+        binding,
+        ...previewProjectWorkflowBindings.filter((candidate) => candidate.bindingId !== binding.bindingId)
+      ];
+      return delay({ preview, binding, appliedAt: now, verified: true, warnings: binding.warnings });
+    },
+    doctorProjectWorkflow: (projectRoot: string): Promise<ProjectWorkflowDoctorResult> =>
+      delay({
+        projectRoot,
+        checkedAt: now,
+        bindingFilePath: `${projectRoot}/.skill-os/workflow-bindings.yaml`,
+        templateCount: previewWorkflowTemplates.length,
+        bindingCount: 0,
+        legacyReadOnlyCount: 0,
+        readyMigrationCount: 0,
+        checks: [
+          {
+            id: "registry",
+            status: "pass",
+            title: "本地模板注册表",
+            detail: "预览模板已通过静态校验。",
+            evidenceRefs: previewWorkflowTemplates.map((template) => template.sourcePath)
+          },
+          {
+            id: "active-binding",
+            status: "warning",
+            title: "项目绑定",
+            detail: "预览项目尚未绑定 Workflow。",
+            evidenceRefs: []
+          }
+        ],
+        summary: "attention"
+      }),
+    listProjectScenarioLoopRuns: () => delay([]),
+    getScenarioLoopRun: () => delay(null),
     listSkills: () => delay(skills),
     generateSkillAnalysis: (skillId: string) => delay(makeSkillAnalysis(skillId)),
     getLatestSkillAnalysis: (skillId: string) => delay(makeSkillAnalysis(skillId)),
@@ -1894,6 +2552,70 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
       };
       return delay(activePreviewHealthScorePolicy);
     },
+    getModelEvaluationConfig: () => delay(previewModelEvaluationConfig),
+    saveModelEvaluationConfig: (input: ModelEvaluationConfigInput) => {
+      previewModelEvaluationConfig = {
+        ...previewModelEvaluationConfig,
+        providerLabel: input.providerLabel || "OpenAI compatible",
+        endpointUrl: input.endpointUrl,
+        modelName: input.modelName,
+        enabled: input.enabled,
+        allowSourceUpload: input.allowSourceUpload,
+        hasApiKey: input.clearApiKey ? false : Boolean(input.apiKey?.trim()) || previewModelEvaluationConfig.hasApiKey,
+        updatedAt: new Date().toISOString(),
+        lastTestStatus: "not_tested",
+        lastTestedAt: null,
+        lastTestMessage: null
+      };
+      return delay(previewModelEvaluationConfig);
+    },
+    testModelEvaluationConnection: () => {
+      const testedAt = new Date().toISOString();
+      const ready = previewModelEvaluationConfig.enabled && previewModelEvaluationConfig.hasApiKey;
+      previewModelEvaluationConfig = {
+        ...previewModelEvaluationConfig,
+        lastTestedAt: testedAt,
+        lastTestStatus: ready ? "ready" : "failed",
+        lastTestMessage: ready ? "Preview model connection is ready." : "Save a key and enable AI evaluation first."
+      };
+      return delay({
+        status: ready ? "ready" : "failed",
+        testedAt,
+        latencyMs: ready ? 180 : null,
+        message: previewModelEvaluationConfig.lastTestMessage ?? "Preview connection failed."
+      });
+    },
+    generateModelEvaluationCases: (input: ModelEvaluationCaseGenerationInput) =>
+      delay({
+        generatedAt: new Date().toISOString(),
+        targetType: input.targetType,
+        targetId: input.targetId,
+        targetName: skills.find((skill) => skill.id === input.targetId)?.displayName ?? "Preview target",
+        modelName: previewModelEvaluationConfig.modelName || "preview-model",
+        sourceCharsSent: 2940,
+        testCases: [
+          {
+            id: "ai-case-1",
+            title: "Expected route and confirmation",
+            scenario: "Submit a meaningful change request matching the selected target and verify the correct route and gates are proposed before implementation.",
+            expectedSignals: ["Target route selected", "Scope and confirmation evidence captured"],
+            rejectionSignals: ["Unrelated Skill invocation", "Implementation starts before required confirmation"],
+            evidenceToCollect: ["Session trace", "Approved plan or gate record"]
+          },
+          {
+            id: "ai-case-2",
+            title: "Near-miss negative case",
+            scenario: "Submit a nearby task that should not load the selected target and verify the route remains narrow.",
+            expectedSignals: ["Alternative narrow route selected"],
+            rejectionSignals: ["Selected target added without evidence"],
+            evidenceToCollect: ["Session trace", "Token and context comparison"]
+          }
+        ],
+        limitations: [
+          "Preview cases are candidate test designs, not execution proof.",
+          "Validate them with traces and outcome evidence."
+        ]
+      }),
     previewSkillApply: (input: SkillApplyPreviewInput) => delay(makeApplyPreview(input)),
     listMarketplaceCatalog: (query?: string) => delay(makeMarketplaceCatalog(query)),
     importTelemetryFile: (filePath: string) =>
@@ -1920,7 +2642,81 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
       delay(makeProjectRuntimeEvidenceRefresh(projectRoot)),
     checkProjectConnection: (projectRoot: string) =>
       delay(makeProjectRuntimeEvidenceRefresh(projectRoot)),
+    diagnoseProjectAdapterReadiness: (projectRoot: string) =>
+      delay(makeProjectAdapterReadiness(projectRoot)),
+    startProjectAppServerObservation: (projectRoot: string) => {
+      const observation: ProjectAppServerObservation = {
+        projectRoot,
+        enabled: true,
+        state: "ready",
+        capability: makeProjectAdapterReadiness(projectRoot).appServerObservation.capability,
+        startedAt: new Date().toISOString(),
+        lastEventAt: null,
+        stoppedAt: null,
+        lastError: null,
+        lastControlledVerification: makePreviewControlledVerification(projectRoot)
+      };
+      previewAppServerObservations.set(projectRoot, observation);
+      return delay(observation);
+    },
+    runProjectControlledVerification: (projectRoot: string) => {
+      const startedAt = new Date().toISOString();
+      const finishedAt = new Date(Date.now() + 900).toISOString();
+      const trace = upsertPreviewControlledVerificationTrace(projectRoot, startedAt, finishedAt);
+      const result: ProjectControlledSessionVerification = {
+        ...makePreviewControlledVerification(projectRoot),
+        state: "completed",
+        startedAt,
+        finishedAt,
+        totalTokens: 286,
+        lifecycleEventCount: 6,
+        itemTypes: ["userMessage", "agentMessage"],
+        traceId: trace.traceId,
+        threadArchived: true,
+        stopReason: "completed",
+        errorCode: null
+      };
+      previewControlledVerifications.set(projectRoot, result);
+      const observation = previewAppServerObservations.get(projectRoot);
+      if (observation) {
+        previewAppServerObservations.set(projectRoot, {
+          ...observation,
+          state: "observing",
+          lastEventAt: result.finishedAt,
+          lastControlledVerification: result
+        });
+      }
+      return delay(result);
+    },
+    stopProjectAppServerObservation: (projectRoot: string) => {
+      const previous = makeProjectAdapterReadiness(projectRoot).appServerObservation;
+      const observation: ProjectAppServerObservation = {
+        ...previous,
+        enabled: false,
+        state: "stopped",
+        stoppedAt: new Date().toISOString(),
+        lastError: null
+      };
+      previewAppServerObservations.set(projectRoot, observation);
+      return delay(observation);
+    },
     listRecentRuns: (limit = 12) => delay(recentRuns.slice(0, limit)),
+    listProjectRuntimeSummaries: (projectPaths: string[]) =>
+      delay(
+        projectPaths.map((projectPath): ProjectRuntimeSummary => {
+          const matchingRuns = recentRuns.filter(
+            (run) => run.workspaceRef === projectPath || run.workspaceRef?.startsWith(`${projectPath}/`)
+          );
+          return {
+            projectPath,
+            totalRuns: matchingRuns.length,
+            explicitSkillRuns: matchingRuns.filter((run) => run.confidenceScore > 0.68).length,
+            qualifiedSkillRuns: matchingRuns.filter((run) => run.confidenceScore >= 0.68).length,
+            totalTokens: matchingRuns.reduce((total, run) => total + run.totalTokens, 0),
+            latestRunAt: matchingRuns[0]?.startedAt ?? null
+          };
+        })
+      ),
     listSkillRuns: (skillId: string, limit = 100) => {
       const skill = skills.find((entry) => entry.id === skillId);
       const existingRuns = recentRuns.filter((run) => run.skillId === skillId);
@@ -1948,6 +2744,56 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
       });
       return delay([...existingRuns, ...generatedRuns].slice(0, limit));
     },
+    listSessionTraces: (query: SessionTraceQuery = {}) => {
+      const normalizedQuery = query.query?.trim().toLowerCase() ?? "";
+      const filtered = previewSessionTraces
+        .filter((item) => !query.projectId || item.projectId === query.projectId)
+        .filter((item) => !query.harnessId || item.harnessId === query.harnessId)
+        .filter((item) => !query.skillId || item.skillHits.some((hit) => hit.skillId === query.skillId))
+        .filter((item) => !query.status || query.status === "all" || item.status === query.status)
+        .filter((item) => !query.captureMode || query.captureMode === "all" || item.captureMode === query.captureMode)
+        .filter((item) => !normalizedQuery || [
+          item.projectName,
+          item.messageSummary,
+          item.workspaceRef,
+          ...item.skillHits.map((hit) => hit.skillName)
+        ].filter(Boolean).join(" ").toLowerCase().includes(normalizedQuery));
+      return delay(filtered.slice(0, query.limit ?? 100));
+    },
+    getSessionTrace: (traceId: string) => {
+      const turn = previewSessionTraces.find((item) => item.traceId === traceId);
+      return delay(turn ? makePreviewTraceDetail(turn) : null);
+    },
+    getTraceSkillDetail: (traceId: string, skillId: string) => {
+      const turn = previewSessionTraces.find((item) => item.traceId === traceId);
+      const hit = turn?.skillHits.find((entry) => entry.skillId === skillId);
+      const skill = skills.find((entry) => entry.id === skillId);
+      if (!turn || !hit || !skill) {
+        return Promise.reject(new Error("Preview trace Skill was not found."));
+      }
+      const trace = makePreviewTraceDetail(turn);
+      const detail: TraceSkillQuickDetail = {
+        traceId,
+        skillId,
+        canonicalName: skill.canonicalName,
+        displayName: skill.displayName,
+        description: skill.description,
+        governanceRole: skill.governance.role,
+        sourcePath: `${skill.sourcePath}/SKILL.md`,
+        versionId: hit.skillVersionId,
+        versionFingerprint: skill.currentVersionFingerprint,
+        currentVersionFingerprint: skill.currentVersionFingerprint,
+        versionDetectedAt: now,
+        versionDrift: false,
+        contentMode: "current_file",
+        content: `# ${skill.displayName}\n\n${skill.description ?? ""}\n\n## Workflow\n\n1. Read the project context.\n2. Execute the scoped task.\n3. Verify the result with evidence.`,
+        contentTruncated: false,
+        hit,
+        relatedSpans: trace.spans.filter((span) => span.skillId === skillId || span.parentSpanId === hit.spanId)
+      };
+      return delay(detail);
+    },
+    revealSkillSource: () => delay(true),
     getDailySummary: () => delay(dailySummary),
     getWeeklySummary: () => delay(weeklySummary),
     refreshOptimizationProposals: () =>

@@ -240,6 +240,11 @@ async function connectWebSocket(wsUrl) {
 }
 
 async function runSelfTest() {
+  if (process.env.SKILL_OS_SELF_TEST_SOURCE_ONLY === "1") {
+    await runSourceContractFallback("Source-only UI self-test was explicitly requested.");
+    return;
+  }
+
   if (process.versions.electron) {
     await runElectronSelfTestInProcess();
     return;
@@ -374,6 +379,7 @@ function runSourceInteractionContractChecks() {
     "local-skills",
     "remote-market",
     "analysis",
+    "session-trace",
     "graph",
     "proposals",
     "apply-center",
@@ -408,6 +414,10 @@ function runSourceInteractionContractChecks() {
     ["InteractionFeedback", "Global interaction feedback component exists"],
     ["void beginBindProjectFlow()", "Project directory picker is wired"],
     ["void scanTargetProject()", "Project-only scan button is wired"],
+    ["refreshWorkflowLibraryState(scannedProjectRoot)", "Project scan refreshes local Workflow state after success"],
+    ["refreshWorkflowLibraryState(result.preview.projectRoot)", "Workflow Starter refreshes local Workflow state after application"],
+    ["Open Workflow Library", "Scan result can open the Workflow Library directly"],
+    ["workflowVersion ?? tx(\"Not detected\", \"未检测到\")", "Scan result displays the detected Workflow version"],
     ["handleMarketplaceAction", "Remote repository analysis button is wired"],
     ["showSkillTuning", "Skill scope explanation action is wired"],
     ["showSkillOptimization", "Skill optimization explanation action is wired"],
@@ -430,12 +440,40 @@ function runSourceInteractionContractChecks() {
     ["chooseApplyScope", "Apply Center scope cards are wired"],
     ["startApplyFlowPreview", "Apply Center preview action is wired"],
     ["User Session Insights", "User session analysis is visible"],
-    ["ProductModeSwitcher", "Guided/Builder mode switch is mounted"]
+    ["ProductModeSwitcher", "Guided/Builder mode switch is mounted"],
+    ["SessionTraceExplorer", "Session Trace explorer is mounted"],
+    ["TraceSkillDrawer", "Session Trace Skill quick drawer is mounted"],
+    ["getTraceSkillDetail", "Session Trace Skill drawer loads evidence through the API"],
+    ["trace.sessionRef", "Session Trace exposes searchable session IDs"],
+    ["trace-session-reference", "Session Trace detail displays the normalized session ID"],
+    ["AdapterReadinessPanel", "Project detail exposes Adapter readiness diagnostics"],
+    ["diagnoseProjectAdapterReadiness", "Project detail reads Adapter readiness through the local API"],
+    ["startProjectAppServerObservation", "Project detail can explicitly enable local Codex observation"],
+    ["runProjectControlledVerification", "Project detail exposes an explicitly confirmed controlled verification"],
+    ["ControlledVerificationModal", "Controlled verification uses a dedicated confirmation dialog"],
+    ["openControlledVerificationTrace", "Controlled verification can open its exact persisted session trace"],
+    ["getSessionTrace(traceId)", "Trace navigation verifies the exact local trace before opening it"],
+    ["verification.traceId", "Verification trace navigation requires an explicit opaque trace reference"],
+    ["Open session trace", "Controlled verification exposes a session trace drill-down action"],
+    ["Codex local precise observation (POC)", "Project detail explains the bounded App Server POC"],
+    ["scanDialogWorkspaceMatchesProject", "Scan result dialog derives Codex connection state from the bound project"],
+    ["className={scanDialogWorkspaceMatchesProject ? \"is-ready\" : \"needs-connection\"}", "Scan result dialog renders the actual Codex connection state"],
+    ["getModelEvaluationConfig()", "Settings loads local AI evaluation configuration"],
+    ["saveModelEvaluationConfig", "Settings saves AI evaluation configuration"],
+    ["testModelEvaluationConnection", "Settings tests the configured model connection"],
+    ["generateModelEvaluationCases", "Evaluation creates model-assisted candidate cases"],
+    ["allowSourceUpload", "Evaluation requires explicit selected-source upload consent"],
+    ["AI-assisted Test Design", "Evaluation exposes the AI candidate test-design workspace"],
+    ["Clear saved key", "Settings exposes encrypted API key removal"],
+    ["scenario.feature-delivery", "Workflow Library indexes the generic Feature delivery workflow"],
+    ["No conversation-observed Scenario Loop evidence", "Workflow Library distinguishes imported conversation evidence"]
   ];
 
   for (const [needle, label] of requiredAppContracts) {
     contractAssert(app.includes(needle), label);
   }
+  contractAssert(!app.includes("workflow-loop-launch-button"), "Desktop Workflow Library cannot start a Scenario Loop");
+  contractAssert(!app.includes("createScenarioLoopRun"), "Desktop renderer cannot create a Scenario Loop record");
 
   const requiredProductExperienceContracts = [
     ["Choose one project directory", "Product positioning states project-first scoping"],
@@ -497,7 +535,17 @@ function runSourceInteractionContractChecks() {
     ["reported-issue repair layer", "Reported issue repair style layer exists"],
     [".skill-action-feedback-grid", "Skill Library feedback grid is styled"],
     [".graph-topology-svg", "Graph topology has fit guardrails"],
-    [".settings-storage-panel", "Settings storage layout is guarded"]
+    [".settings-storage-panel", "Settings storage layout is guarded"],
+    [".trace-workspace", "Session Trace uses a stable split workspace"],
+    [".trace-skill-drawer", "Session Trace Skill quick drawer is styled"],
+    [".adapter-readiness-panel", "Adapter readiness panel is styled"],
+    [".adapter-precision-preview", "Adapter precision preview is styled"],
+    [".adapter-app-server-poc", "Bounded App Server observation panel is styled"],
+    [".controlled-verification-modal", "Controlled verification confirmation dialog is styled"],
+    [".model-evaluation-settings-card", "AI evaluation settings card is styled"],
+    [".model-evaluation-form-grid", "AI evaluation settings fields are responsive"],
+    [".model-evaluation-privacy-copy", "AI evaluation upload boundary is styled"],
+    [".workflow-library-actions {", "Workflow Library actions have a dedicated responsive layout"]
   ];
 
   for (const [needle, label] of requiredStyleContracts) {
@@ -517,7 +565,12 @@ function runSourceInteractionContractChecks() {
     ["Remote candidate Apply Center handoff visible", "Self-test verifies remote candidate Apply Center handoff"],
     ["Skill Library tabbed asset workflow", "Self-test covers Skill Library tabs, tables, filters, and drill-down"],
     ["Apply Center scope and preview flow", "Self-test covers Apply Center scope preview"],
-    ["Settings backup restore preview flow", "Self-test covers Settings backup/restore controls"]
+    ["Settings backup restore preview flow", "Self-test covers Settings backup/restore controls"],
+    ["Session Trace Skill evidence drill-down", "Self-test covers Trace selection, Skill evidence, and context return"],
+    ["Adapter readiness and precision preview", "Self-test covers project readiness diagnostics"],
+    ["Local App Server POC stays opt-in", "Self-test keeps local App Server observation opt-in"],
+    ["Controlled verification requires final confirmation", "Self-test opens but never confirms a controlled verification"],
+    ["Scenario Loop evidence is conversation-owned", "Self-test covers the conversation-owned Scenario Loop boundary"]
   ];
 
   for (const [needle, label] of requiredSelfTestContracts) {
@@ -1009,10 +1062,12 @@ async function runChecks(tab) {
     ["#evaluate", "evaluate"],
     ["#remote-market", "remote-market"],
     ["#analysis", "analysis"],
+    ["#session-trace", "session-trace"],
     ["#graph", "graph"],
     ["#proposals", "proposals"],
     ["#apply-center", "apply-center"],
     ["#bundles", "bundles"],
+    ["#workflows", "workflows"],
     ["#registry", "registry"],
     ["#audit", "audit"],
     ["#settings", "settings"]
@@ -1089,7 +1144,8 @@ async function runChecks(tab) {
         const row = table?.querySelector("tbody tr");
         const firstCell = table?.querySelector("tbody td:first-child");
         const firstName = firstCell?.querySelector("strong");
-        if (!table || !tableShell || !thead || !row || !firstCell || !firstName) return false;
+        const skillButton = table?.querySelector("tbody .project-skill-count-button");
+        if (!table || !tableShell || !thead || !row || !firstCell || !firstName || !skillButton) return false;
 
         const tableStyle = getComputedStyle(table);
         const headStyle = getComputedStyle(thead);
@@ -1099,6 +1155,8 @@ async function runChecks(tab) {
         const shellRect = tableShell.getBoundingClientRect();
         const nameRect = firstName.getBoundingClientRect();
         const rowRect = row.getBoundingClientRect();
+        const skillButtonRect = skillButton.getBoundingClientRect();
+        const skillButtonStyle = getComputedStyle(skillButton);
 
         return tableStyle.display === "table" &&
           headStyle.display === "table-header-group" &&
@@ -1108,6 +1166,9 @@ async function runChecks(tab) {
           firstName.textContent.trim() === "code" &&
           nameRect.width >= 24 &&
           nameRect.width >= nameRect.height &&
+          skillButtonRect.width >= 50 &&
+          skillButtonRect.width >= skillButtonRect.height &&
+          skillButtonStyle.whiteSpace === "nowrap" &&
           rowRect.width >= 520 &&
           shellRect.left >= -2 &&
           shellRect.right <= document.documentElement.clientWidth + 2 &&
@@ -1115,12 +1176,74 @@ async function runChecks(tab) {
       })()`
     );
     await expectNoVerticalFragmentation(tab, "Project Library has no vertical text fragments", "#discovery .project-library-panel");
-    await takeScreenshot(tab, "reported-project-library-table-horizontal");
+    await expect(tab, "Project Skill cells expose direct drill-down labels", `(() => {
+      const buttons = [...document.querySelectorAll("#discovery .project-skill-count-button")];
+      return buttons.length > 0 && buttons.every((button) => Boolean(button.getAttribute("aria-label")) && Boolean(button.getAttribute("title")));
+    })()`);
+    await clickSelector(tab, "#discovery .project-skill-count-button", "open project Skills from the Skills column");
+    await waitFor(tab, "Project Skills drill-down opens", `Boolean(document.querySelector(".project-detail-modal"))`);
+    await expect(tab, "Project Skills drill-down selects the Skills and Workflow view", `(() => {
+      const selected = document.querySelector('.project-detail-tabs [role="tab"][aria-selected="true"]');
+      return Boolean(selected) && (selected.textContent.includes("技能与工作流") || selected.textContent.includes("Skills & Workflow")) && Boolean(document.querySelector(".project-asset-detail-body"));
+    })()`);
+    await expect(tab, "Project Skills exposes both workflow presentations", `document.querySelectorAll(".skills-workflow-presentation-switcher [role=tab]").length === 2`);
+    await clickSelector(tab, '.skills-workflow-presentation-switcher [role=tab]:nth-child(2)', "open Skills Workflow mind map");
+    await expect(tab, "Skills Workflow mind map becomes active", `document.querySelector(".skills-workflow-presentation-switcher [role=tab]:nth-child(2)")?.getAttribute("aria-selected") === "true" && Boolean(document.querySelector(".skills-workflow-visual-board.presentation-mindmap .skills-workflow-mindmap"))`);
+    await delay(420);
+    await takeScreenshot(tab, "skills-workflow-mind-map");
+    await clickSelector(tab, '.skills-workflow-mindmap-stage', "select Skills Workflow mind map stage");
+    await expect(tab, "Mind map stage updates shared workflow detail", `Boolean(document.querySelector(".skills-workflow-stage-detail strong")?.textContent?.trim())`);
+    await clickSelector(tab, '.skills-workflow-presentation-switcher [role=tab]:nth-child(1)', "return to Skills Workflow flowchart");
+    await expect(tab, "Skills Workflow flowchart returns without losing detail panel", `document.querySelector(".skills-workflow-presentation-switcher [role=tab]:nth-child(1)")?.getAttribute("aria-selected") === "true" && Boolean(document.querySelector(".skills-workflow-stage-rail")) && Boolean(document.querySelector(".skills-workflow-stage-detail"))`);
+    await clickSelector(tab, '.project-detail-tabs [role="tab"]:nth-child(3)', "open project runtime monitoring");
+    await waitFor(tab, "Adapter readiness panel is visible", `Boolean(document.querySelector(".adapter-readiness-panel"))`);
+    await expect(tab, "Adapter readiness separates installation connection and observation", `document.querySelectorAll(".adapter-readiness-status-grid > div").length === 3 && Boolean(document.querySelector(".adapter-readiness-evidence"))`);
+    await expect(tab, "Local App Server POC stays opt-in", `(() => {
+      const panel = document.querySelector(".adapter-app-server-poc");
+      const text = panel?.textContent || "";
+      return Boolean(panel) && panel.getAttribute("data-app-server-observation") === "not_enabled" &&
+        (text.includes("不会启动 Turn") || text.includes("does not start a Turn")) &&
+        (text.includes("技能证据仍保持为推断") || text.includes("Skill evidence remains inferred"));
+    })()`);
+    await clickSelector(tab, ".adapter-precision-preview summary", "open precision observation preview");
+    await expect(tab, "Precision observation preview makes its no-write boundary visible", `document.querySelector(".adapter-precision-preview")?.open === true && (document.querySelector(".adapter-precision-preview")?.textContent.includes("只读预览") || document.querySelector(".adapter-precision-preview")?.textContent.includes("no writes"))`);
+    await expect(tab, "Adapter readiness stays inside project detail", `(() => {
+      const modal = document.querySelector(".project-detail-modal");
+      if (!modal) return false;
+      const rect = modal.getBoundingClientRect();
+      return rect.left >= -2 && rect.right <= document.documentElement.clientWidth + 2 && modal.scrollWidth <= modal.clientWidth + 2;
+    })()`);
+    await takeScreenshot(tab, "project-adapter-readiness");
+    await expect(tab, "Local observation confirmation is available without auto-starting it", `Boolean(document.querySelector(".adapter-precision-actions button.primary"))`);
+    await clickSelector(tab, ".adapter-app-server-poc-head button.primary", "enable local observation in preview before controlled verification review");
+    await waitFor(tab, "Local observation becomes ready in preview", `document.querySelector(".adapter-app-server-poc")?.getAttribute("data-app-server-observation") === "ready"`);
+    await clickSelector(tab, ".adapter-app-server-actions button.secondary", "open controlled verification confirmation");
+    await expect(tab, "Controlled verification requires final confirmation", `(() => {
+      const dialog = document.querySelector(".controlled-verification-modal");
+      const text = dialog?.textContent || "";
+      return Boolean(dialog) && (text.includes("确认并运行") || text.includes("Confirm and run")) &&
+        (text.includes("临时线程") || text.includes("ephemeral thread")) &&
+        (text.includes("只读沙箱") || text.includes("read-only sandbox")) &&
+        (text.includes("不会保存提示词") || text.includes("No prompt or output is stored"));
+    })()`);
+    await clickSelector(tab, ".controlled-verification-modal .icon-button", "close controlled verification without final confirmation");
+    await expect(tab, "Controlled verification remains unstarted after close", `!document.querySelector(".controlled-verification-modal") && document.querySelector(".adapter-app-server-poc")?.getAttribute("data-app-server-observation") === "ready"`);
+    await clickSelector(tab, '.project-detail-modal [aria-label="关闭项目详情"], .project-detail-modal [aria-label="Close project detail"]', "close project detail before telemetry navigation");
+    await clickSelector(tab, '.product-nav a[href="#analysis"]', "open telemetry analysis directly");
+    await waitFor(tab, "Telemetry import opens without starting local observation", `location.hash === "#analysis" && !document.querySelector(".project-detail-modal") && Boolean(document.querySelector("#telemetry .file-picker"))`);
+    await expect(tab, "Telemetry file picker is visible after adapter navigation", `(() => {
+      const picker = document.querySelector("#telemetry .file-picker");
+      if (!picker) return false;
+      const rect = picker.getBoundingClientRect();
+      return rect.top >= -2 && rect.bottom <= window.innerHeight + 2 && rect.width > 320;
+    })()`);
+    await delay(420);
+    await takeScreenshot(tab, "analysis-telemetry-intake-with-app-server-poc-opt-in");
   });
 
   await guarded("Topbar Settings action navigates without stale feedback", async () => {
     await clickSelector(tab, '.product-nav a[href="#discovery"]', "discovery nav for stale feedback setup");
-    await clickSelector(tab, '#discovery .project-library-head button', "choose project for feedback setup");
+    await clickSelector(tab, '#discovery [data-testid="bind-project"]', "choose project for feedback setup");
     await waitFor(tab, "Bind confirmation is visible before topbar navigation", `Boolean(document.querySelector(".bind-project-modal"))`);
     await clickSelector(tab, '.bind-project-modal-head .icon-button', "close bind confirmation");
     await waitFor(tab, "Setup interaction feedback is visible before topbar navigation", `Boolean(document.querySelector(".interaction-action-feedback"))`);
@@ -1131,13 +1254,34 @@ async function runChecks(tab) {
 
   await guarded("Discovery scan flow", async () => {
     await clickSelector(tab, '.product-nav a[href="#discovery"]', "discovery nav");
-    await clickSelector(tab, '#discovery .project-library-head button', "choose project");
+    await clickSelector(tab, '#discovery [data-testid="bind-project"]', "choose project");
     await waitFor(tab, "Bind Project opens folder confirmation", `Boolean(document.querySelector(".bind-project-modal"))`);
     await expect(tab, "Selected project folder is shown before scanning", `Boolean(document.querySelector(".bind-project-path")?.textContent.trim())`);
     await clickSelector(tab, '.bind-project-modal-actions button.primary', "scan and bind project");
     await waitFor(tab, "Discovery scan result appears", `Boolean(document.querySelector(".scan-result-modal"))`, 12000);
     await expect(tab, "Discovery scan result reports completion", `document.querySelector(".scan-result-modal")?.textContent.includes("项目扫描完成") || document.querySelector(".scan-result-modal")?.textContent.includes("Project scan complete")`);
     await clickButtonByText(tab, ".scan-result-modal", ["Stay in Project Management", "留在项目管理"], "close scan result and stay in project management");
+  });
+
+  await guarded("Scenario Loop evidence is conversation-owned", async () => {
+    await clickSelector(tab, '.product-nav a[href="#workflows"]', "workflow library nav");
+    await expect(
+      tab,
+      "Feature delivery template is visible",
+      `document.querySelector("#workflows .workflow-template-table")?.textContent.includes("工程功能交付")`
+    );
+    await expectNoHorizontalOverflow(tab, "Workflow Library stays inside viewport", "workflows");
+    await expect(
+      tab,
+      "Workflow Library has no desktop Loop launcher",
+      `!document.querySelector("#workflows .workflow-loop-launch-button")`
+    );
+    await expect(
+      tab,
+      "Empty Loop evidence is described as conversation-observed",
+      `document.querySelector("#workflows .workflow-loop-section")?.textContent.includes("由会话产生") || document.querySelector("#workflows .workflow-loop-section")?.textContent.includes("conversation-observed")`
+    );
+    await takeScreenshot(tab, "scenario-loop-conversation-evidence");
   });
 
   await guarded("Remote repository analysis flow", async () => {
@@ -1229,6 +1373,16 @@ async function runChecks(tab) {
       return shellRect.width >= panelRect.width - 36 && shell.scrollWidth <= shell.clientWidth + 1;
     })()`);
     await expect(tab, "Skill Library exposes search filters and sorting", `document.querySelectorAll("#local-skills .skill-library-controls select").length >= 3 && Boolean(document.querySelector("#local-skills .skill-library-search input"))`);
+    await expect(tab, "Skill Library separates project names from source paths", `(() => {
+      const cell = document.querySelector("#local-skills .skill-asset-project-cell");
+      if (!cell) return true;
+      const name = cell.querySelector("strong");
+      const path = cell.querySelector("span");
+      if (!name || !path) return false;
+      const nameRect = name.getBoundingClientRect();
+      const pathRect = path.getBoundingClientRect();
+      return pathRect.top >= nameRect.bottom - 1 && Boolean(path.getAttribute("title"));
+    })()`);
     await evaluate(tab, `(() => {
       const selects = [...document.querySelectorAll("#local-skills .skill-library-controls select")];
       const sort = selects.at(-1);
@@ -1259,6 +1413,37 @@ async function runChecks(tab) {
     await expect(tab, "Telemetry import shows visible interaction feedback", `document.querySelector(".interaction-action-feedback")?.textContent.includes("Import Telemetry") || document.querySelector(".interaction-action-feedback")?.textContent.includes("导入遥测")`);
   });
 
+  await guarded("Session Trace Skill evidence drill-down", async () => {
+    await clickSelector(tab, '.product-nav a[href="#session-trace"]', "session trace nav");
+    await expect(tab, "Session Trace split workspace is visible", `Boolean(document.querySelector("#session-trace .trace-workspace"))`);
+    await expect(tab, "Session Trace lists message turns", `document.querySelectorAll("#session-trace .trace-turn-row").length >= 2`);
+    await clickSelector(tab, '#session-trace .trace-turn-row:nth-child(3)', "select legacy aggregate trace");
+    await waitFor(tab, "Legacy aggregate is not presented as a reconstructed message", `Boolean(document.querySelector("#session-trace .trace-legacy-notice"))`);
+    await takeScreenshot(tab, "session-trace-legacy-aggregate");
+    await clickSelector(tab, '#session-trace .trace-turn-row:first-child', "select trace message");
+    await waitFor(tab, "Session Trace timeline renders spans", `document.querySelectorAll("#session-trace .trace-span-row").length >= 5`);
+    await expect(tab, "Session Trace marks inferred evidence", `document.querySelector("#session-trace .trace-capture-pill")?.textContent.includes("推断") || document.querySelector("#session-trace .trace-capture-pill")?.textContent.includes("Inferred")`);
+    await clickSelector(tab, '#session-trace .trace-view-switch button:nth-child(2)', "switch to trace tree");
+    await expect(tab, "Session Trace tree view becomes active", `document.querySelector("#session-trace .trace-span-list")?.getAttribute("data-trace-view") === "tree"`);
+    await clickSelector(tab, '#session-trace .trace-skill-link', "open trace Skill quick view");
+    await waitFor(tab, "Trace Skill drawer opens", `Boolean(document.querySelector('[data-trace-skill-drawer="true"]'))`);
+    await expect(tab, "Trace Skill drawer keeps trace visible behind it", `Boolean(document.querySelector("#session-trace .trace-span-list"))`);
+    await clickSelector(tab, '.trace-drawer-tabs button:nth-child(2)', "open trace Skill content tab");
+    await expect(tab, "Trace Skill content is readable", `Boolean(document.querySelector(".trace-skill-content pre")?.textContent?.trim())`);
+    await clickSelector(tab, '.trace-drawer-tabs button:nth-child(3)', "open trace Skill evidence tab");
+    await expect(tab, "Trace Skill evidence exposes scored factors", `document.querySelectorAll(".trace-evidence-list > div").length >= 3`);
+    await takeScreenshot(tab, "session-trace-skill-evidence");
+    await clickSelector(tab, '.trace-drawer-actions button:nth-child(2)', "open trace Skill in graph");
+    await waitFor(tab, "Trace Skill opens Graph with return context", `document.querySelector('.product-nav a[href="#graph"]')?.classList.contains("active") && Boolean(document.querySelector(".trace-return-bar"))`);
+    await clickSelector(tab, '.trace-return-bar button', "return to preserved session trace");
+    await expect(tab, "Session Trace return restores selected message", `document.querySelector('.product-nav a[href="#session-trace"]')?.classList.contains("active") && Boolean(document.querySelector("#session-trace .trace-turn-row.selected"))`);
+    await clickSelector(tab, '#session-trace .trace-skill-link', "reopen trace Skill quick view");
+    await waitFor(tab, "Trace Skill drawer reopens", `Boolean(document.querySelector('[data-trace-skill-drawer="true"]'))`);
+    await clickSelector(tab, '.trace-drawer-close', "close trace Skill drawer");
+    await expect(tab, "Closing Skill drawer restores trigger focus", `!document.querySelector('[data-trace-skill-drawer="true"]') && document.activeElement?.classList.contains("trace-skill-link")`);
+    await expectNoHorizontalOverflow(tab, "Session Trace workspace stays inside viewport", "session-trace");
+  });
+
   await guarded("Graph refresh and search flow", async () => {
     await clickSelector(tab, '.product-nav a[href="#graph"]', "graph nav");
     await clickSelector(tab, '#graph .section-headline button.primary', "refresh graph");
@@ -1272,6 +1457,14 @@ async function runChecks(tab) {
     await waitFor(tab, "Graph search scope feedback visible", `document.querySelector(".graph-action-feedback")?.textContent.includes("Search Focus") || document.querySelector(".graph-action-feedback")?.textContent.includes("搜索焦点")`);
     await clickSelector(tab, '#graph .graph-search-item', "select graph search result");
     await waitFor(tab, "Graph focus analysis selected node visible", `Boolean(document.querySelector("#graph .skill-graph-focus")) && !document.querySelector("#graph .graph-focus-primer-card")`);
+    await expect(tab, "Graph exposes flowchart and mind map presentations", `document.querySelectorAll("#graph .graph-presentation-switcher [role=tab]").length === 2`);
+    await clickSelector(tab, '#graph .graph-presentation-switcher [role=tab]:nth-child(2)', "open graph mind map");
+    await expect(tab, "Graph mind map renders from current local scope", `document.querySelector("#graph .graph-presentation-switcher [role=tab]:nth-child(2)")?.getAttribute("aria-selected") === "true" && Boolean(document.querySelector("#graph .graph-mindmap-svg")) && Boolean(document.querySelector("#graph .graph-mindmap-center"))`);
+    await expectNoHorizontalOverflow(tab, "Graph mind map stays inside viewport", "graph");
+    await delay(420);
+    await takeScreenshot(tab, "graph-mind-map");
+    await clickSelector(tab, '#graph .graph-presentation-switcher [role=tab]:nth-child(1)', "return to graph flowchart");
+    await expect(tab, "Graph flowchart returns without rebuilding the visible scope", `document.querySelector("#graph .graph-presentation-switcher [role=tab]:nth-child(1)")?.getAttribute("aria-selected") === "true" && Boolean(document.querySelector("#graph .graph-topology-svg"))`);
     await expectReadablePanel(tab, "Graph Focus selected panel is readable width", "#graph .skill-graph-focus", { minWidth: 760 });
     await expect(tab, "Graph Focus cards do not collapse into narrow columns", `(() => {
       const cards = [...document.querySelectorAll("#graph .graph-focus-card, #graph .graph-focus-item")];
@@ -1332,6 +1525,12 @@ async function runChecks(tab) {
     await clickSelector(tab, '#bundles button.primary', "export bundle");
     await delay(500);
     await expect(tab, "Bundle export feedback visible", `Boolean(document.querySelector(".bundle-action-feedback"))`);
+    await waitFor(
+      tab,
+      "Bundle controls are ready after export",
+      `Boolean(document.querySelector('#bundle-import button:nth-of-type(1):not(:disabled)'))`,
+      12000
+    );
     await clickSelector(tab, '#bundle-import button:nth-of-type(1)', "choose bundle manifest");
     await waitFor(tab, "Choose Bundle Manifest shows visible interaction feedback", `document.querySelector(".interaction-action-feedback")?.textContent.includes("Choose Bundle Manifest") || document.querySelector(".interaction-action-feedback")?.textContent.includes("选择 Bundle 清单")`);
     await clickSelector(tab, '#bundle-import button:nth-of-type(2)', "validate bundle");

@@ -1,6 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -10,6 +10,7 @@ import type {
   LocalToolTelemetryPreview,
   LocalToolTelemetrySource,
   LocalToolTelemetrySourceKind,
+  ProjectRuntimeEvidenceRefreshOptions,
   ProjectRuntimeEvidenceRefreshResult,
   TelemetryImportResult
 } from "../shared/types";
@@ -36,8 +37,11 @@ interface SourceFile {
 
 interface RunDraft {
   runId: string;
+  turnRef: string;
   sourceRef: string;
   sessionRef: string | null;
+  messageHash: string | null;
+  messageSummary: string | null;
   workspaceRef: string | null;
   startedAt: string | null;
   finishedAt: string | null;
@@ -63,12 +67,18 @@ interface NormalizedScan {
 
 interface ScanOptions {
   projectRoot?: string;
+  mode?: "full" | "incremental";
+  since?: string;
 }
 
 const MAX_FILES_PER_SOURCE = 120;
 const MAX_DIRECTORIES_PER_SOURCE = 4000;
 const MAX_LINES_PER_FILE = 20000;
 const MAX_BYTES_PER_TEXT_FILE = 150 * 1024 * 1024;
+const MAX_INCREMENTAL_FILES = 3;
+const MAX_INCREMENTAL_LINES_PER_FILE = 4000;
+const MAX_INCREMENTAL_BYTES_PER_FILE = 4 * 1024 * 1024;
+const SOURCE_INVENTORY_CACHE_MS = 15_000;
 const LOG_EXTENSIONS = new Set([".jsonl", ".ndjson", ".json", ".log", ".txt"]);
 const SENSITIVE_PATTERNS = [
   /\bsk-[A-Za-z0-9_-]{12,}/,
@@ -432,6 +442,19 @@ function detectTokenFields(record: JsonRecord) {
   };
 }
 
+function isUserMessageRecord(record: JsonRecord) {
+  const topLevelType = readString(record, ["type", "role"]);
+  const payload = isRecord(record.payload) ? record.payload : null;
+  const payloadType = payload ? readString(payload, ["type"]) : null;
+  const payloadRole = payload ? readString(payload, ["role"]) : null;
+  return payloadType === "user_message"
+    || (payloadType === "message" && payloadRole === "user")
+    || payloadRole === "user"
+    || payloadType === "user"
+    || topLevelType === "user_message"
+    || topLevelType === "user";
+}
+
 function updateRunDraft(
   draft: RunDraft,
   record: JsonRecord,
@@ -518,15 +541,25 @@ interface BuildEventsResult {
 export class LocalToolTelemetryService {
   private readonly projectRefreshCache = new Map<
     string,
-    { fingerprint: string; result: ProjectRuntimeEvidenceRefreshResult }
+    {
+      fingerprint: string;
+      mode: "full" | "incremental";
+      result: ProjectRuntimeEvidenceRefreshResult;
+    }
   >();
+  private readonly sourceFilesByPath = new Map<string, SourceFile[]>();
+  private readonly projectSourceFingerprints = new Map<string, Map<string, string>>();
+  private sourceInventoryCache: { expiresAt: number; sources: LocalToolTelemetrySource[] } | null = null;
+  private readonly stagingCleanupPromise: Promise<void>;
 
   constructor(
     private readonly database: WorkbenchDatabase,
     private readonly authorizationService: AuthorizationService,
     private readonly telemetryService: TelemetryService,
     private readonly storagePaths: AppStoragePaths
-  ) {}
+  ) {
+    this.stagingCleanupPromise = this.cleanupProjectRuntimeStagingFiles();
+  }
 
   checkProjectConnection(projectRoot: string): ProjectRuntimeEvidenceRefreshResult {
     const normalizedProjectRoot = normalizeProjectPath(projectRoot);
@@ -609,6 +642,9 @@ export class LocalToolTelemetryService {
   }
 
   async discoverSources(): Promise<LocalToolTelemetrySource[]> {
+    if (this.sourceInventoryCache && this.sourceInventoryCache.expiresAt > Date.now()) {
+      return this.sourceInventoryCache.sources;
+    }
     const home = homedir();
     const sources = [
       await this.buildSource({
@@ -673,6 +709,10 @@ export class LocalToolTelemetryService {
       }
     ];
 
+    this.sourceInventoryCache = {
+      expiresAt: Date.now() + SOURCE_INVENTORY_CACHE_MS,
+      sources
+    };
     return sources;
   }
 
@@ -711,8 +751,13 @@ export class LocalToolTelemetryService {
     return { source: normalizedSource, preview, telemetry };
   }
 
-  async refreshProjectRuntimeEvidence(projectRoot: string): Promise<ProjectRuntimeEvidenceRefreshResult> {
+  async refreshProjectRuntimeEvidence(
+    projectRoot: string,
+    options: ProjectRuntimeEvidenceRefreshOptions = {}
+  ): Promise<ProjectRuntimeEvidenceRefreshResult> {
+    await this.stagingCleanupPromise;
     const normalizedProjectRoot = normalizeProjectPath(projectRoot);
+    const refreshMode = options.mode ?? "full";
     const policy = this.authorizationService.getActivePolicy();
     if (!policy) {
       return {
@@ -796,7 +841,10 @@ export class LocalToolTelemetryService {
       .map((source) => `${source.id}:${source.fileCount}:${source.byteCount}:${source.lastModifiedAt ?? ""}`)
       .join("|");
     const cached = this.projectRefreshCache.get(normalizedProjectRoot);
-    if (cached?.fingerprint === sourceFingerprint) {
+    if (
+      cached?.fingerprint === sourceFingerprint &&
+      (refreshMode === "incremental" || cached.mode === "full")
+    ) {
       const refreshedAt = nowIso();
       return {
         ...cached.result,
@@ -821,7 +869,11 @@ export class LocalToolTelemetryService {
     let latestObservedWorkspaceRef: string | null = null;
 
     for (const source of sources) {
-      const scan = await this.scanSource(source, { projectRoot: normalizedProjectRoot });
+      const scan = await this.scanSource(source, {
+        projectRoot: normalizedProjectRoot,
+        mode: refreshMode,
+        since: options.since
+      });
       const preview: LocalToolTelemetryPreview = {
         source,
         previewedAt: nowIso(),
@@ -846,7 +898,12 @@ export class LocalToolTelemetryService {
         `${source.id}-${hashId(normalizedProjectRoot)}-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`
       );
       await writeFile(outputPath, scan.events.map((event) => JSON.stringify(event)).join("\n") + "\n", "utf8");
-      const telemetry: TelemetryImportResult = await this.telemetryService.importJsonlFile(outputPath);
+      let telemetry: TelemetryImportResult;
+      try {
+        telemetry = await this.telemetryService.importJsonlFile(outputPath);
+      } finally {
+        await unlink(outputPath).catch(() => undefined);
+      }
       importedRuns += telemetry.importedRuns;
       updatedRuns += telemetry.updatedRuns;
       for (const skillId of telemetry.affectedSkillIds) {
@@ -856,6 +913,9 @@ export class LocalToolTelemetryService {
         errors.add(error);
       }
     }
+
+    matchedWorkspaceRef ??= cached?.result.matchedWorkspaceRef ?? null;
+    latestObservedWorkspaceRef ??= cached?.result.latestObservedWorkspaceRef ?? null;
 
     const result: ProjectRuntimeEvidenceRefreshResult = {
       projectRoot: normalizedProjectRoot,
@@ -881,6 +941,7 @@ export class LocalToolTelemetryService {
     };
     this.projectRefreshCache.set(normalizedProjectRoot, {
       fingerprint: sourceFingerprint,
+      mode: refreshMode,
       result
     });
     return result;
@@ -926,6 +987,7 @@ export class LocalToolTelemetryService {
   }): Promise<LocalToolTelemetrySource> {
     try {
       const files = await this.listCandidateFiles(input.path, input.pathType);
+      this.sourceFilesByPath.set(resolve(input.path), files);
       return {
         ...input,
         exists: true,
@@ -939,6 +1001,7 @@ export class LocalToolTelemetryService {
           .at(-1) ?? null
       };
     } catch {
+      this.sourceFilesByPath.delete(resolve(input.path));
       return {
         ...input,
         exists: false,
@@ -1038,7 +1101,32 @@ export class LocalToolTelemetryService {
       return this.emptyScan(["No indexed Skills are available. Scan approved roots before importing tool telemetry."]);
     }
 
-    const files = await this.listCandidateFiles(source.path, source.pathType === "file" ? "file" : "directory");
+    const sourcePath = resolve(source.path);
+    const candidateFiles =
+      this.sourceFilesByPath.get(sourcePath) ??
+      await this.listCandidateFiles(source.path, source.pathType === "file" ? "file" : "directory");
+    const incrementalKey = options.projectRoot
+      ? `${normalizeProjectPath(options.projectRoot)}::${options.mode ?? "full"}::${source.id}::${sourcePath}`
+      : null;
+    const previousFingerprints = incrementalKey
+      ? this.projectSourceFingerprints.get(incrementalKey)
+      : null;
+    const changedFiles = previousFingerprints
+      ? candidateFiles.filter(
+          (file) => previousFingerprints.get(file.path) !== `${file.size}:${file.modifiedAt ?? ""}`
+        )
+      : candidateFiles;
+    const incrementalSince = options.since ? new Date(options.since).getTime() : Number.NaN;
+    const files = options.mode === "incremental"
+      ? changedFiles
+          .filter((file) => {
+            if (!Number.isFinite(incrementalSince) || !file.modifiedAt) {
+              return true;
+            }
+            return new Date(file.modifiedAt).getTime() >= incrementalSince - 2_000;
+          })
+          .slice(0, MAX_INCREMENTAL_FILES)
+      : changedFiles;
     const warnings = [...source.warnings];
     const runs = new Map<string, RunDraft>();
     const detectedSkillNames = new Set<string>();
@@ -1056,8 +1144,22 @@ export class LocalToolTelemetryService {
     for (const file of files) {
       readableFiles += 1;
       let fileWorkspaceRef: string | null = null;
+      let fileSessionRef: string | null = null;
+      let fileTurnRef = `file-${hashId(file.path)}`;
+      let fileTurnMessageHash: string | null = null;
+      let fileTurnMessageSummary: string | null = null;
+      let fileTurnSequence = 0;
+      const incrementalStart = options.mode === "incremental"
+        ? Math.max(0, file.size - MAX_INCREMENTAL_BYTES_PER_FILE)
+        : 0;
+      const maxLines = options.mode === "incremental"
+        ? MAX_INCREMENTAL_LINES_PER_FILE
+        : MAX_LINES_PER_FILE;
       const reader = createInterface({
-        input: createReadStream(file.path, { encoding: "utf8" }),
+        input: createReadStream(file.path, {
+          encoding: "utf8",
+          start: incrementalStart
+        }),
         crlfDelay: Infinity
       });
       let lineCount = 0;
@@ -1065,8 +1167,11 @@ export class LocalToolTelemetryService {
         for await (const rawLine of reader) {
           lineCount += 1;
           scannedLines += 1;
-          if (lineCount > MAX_LINES_PER_FILE) {
-            warnings.push(`Stopped reading ${file.path} after ${MAX_LINES_PER_FILE} lines.`);
+          if (incrementalStart > 0 && lineCount === 1) {
+            continue;
+          }
+          if (lineCount > maxLines) {
+            warnings.push(`Stopped reading ${file.path} after ${maxLines} lines.`);
             break;
           }
           const line = rawLine.trim();
@@ -1080,6 +1185,16 @@ export class LocalToolTelemetryService {
           const parsed = this.parseLine(line);
           const text = parsed ? collectPrimitiveText(parsed).join("\n") : line;
           const record = parsed ?? { line: text };
+          fileSessionRef = this.readSessionRef(record) ?? fileSessionRef;
+          if (isUserMessageRecord(record)) {
+            fileTurnSequence += 1;
+            fileTurnRef =
+              this.readExplicitTurnRef(record) ??
+              this.readMessageRef(record) ??
+              `message-${fileTurnSequence}-${hashId(`${file.path}:${lineCount}`)}`;
+            fileTurnMessageHash = createHash("sha256").update(text).digest("hex");
+            fileTurnMessageSummary = `第 ${fileTurnSequence} 条用户消息（原文未保存）`;
+          }
           const workspaceRef = readDeepString(record, [
             "cwd",
             "workdir",
@@ -1126,13 +1241,16 @@ export class LocalToolTelemetryService {
           }
 
           detectedEvents += 1;
-          const runKey = this.buildRunKey(source, file.path, record);
+          const runKey = this.buildRunKey(source, file.path, record, fileSessionRef, fileTurnRef);
           const draft =
             runs.get(runKey) ??
             ({
               runId: `local-tool-${hashId(`${source.id}:${runKey}`)}`,
+              turnRef: fileTurnRef,
               sourceRef: file.path,
-              sessionRef: this.readSessionRef(record),
+              sessionRef: fileSessionRef,
+              messageHash: fileTurnMessageHash,
+              messageSummary: fileTurnMessageSummary,
               workspaceRef: effectiveWorkspaceRef,
               startedAt: null,
               finishedAt: null,
@@ -1184,7 +1302,7 @@ export class LocalToolTelemetryService {
       detectedSkillNames.add(skillName);
     }
     const preview = {
-      candidateFiles: files.length,
+      candidateFiles: candidateFiles.length,
       readableFiles,
       scannedLines,
       detectedEvents,
@@ -1200,7 +1318,28 @@ export class LocalToolTelemetryService {
       warnings: Array.from(new Set(warnings)).slice(0, 10)
     };
 
+    if (incrementalKey) {
+      this.projectSourceFingerprints.set(
+        incrementalKey,
+        new Map(candidateFiles.map((file) => [file.path, `${file.size}:${file.modifiedAt ?? ""}`]))
+      );
+    }
+
     return { preview, events, matchedWorkspaceRef, latestObservedWorkspaceRef };
+  }
+
+  private async cleanupProjectRuntimeStagingFiles() {
+    const importDir = join(this.storagePaths.eventsDir, "project-runtime-imports");
+    try {
+      const entries = await readdir(importDir, { withFileTypes: true });
+      await Promise.all(
+        entries
+          .filter((entry) => entry.isFile() && LOG_EXTENSIONS.has(extensionOf(entry.name)))
+          .map((entry) => unlink(join(importDir, entry.name)).catch(() => undefined))
+      );
+    } catch {
+      // The staging directory is optional until the first runtime import.
+    }
   }
 
   private emptyScan(warnings: string[]): NormalizedScan {
@@ -1236,10 +1375,24 @@ export class LocalToolTelemetryService {
     }
   }
 
-  private buildRunKey(source: LocalToolTelemetrySource, filePath: string, record: JsonRecord) {
-    const sessionRef = this.readSessionRef(record) ?? hashId(filePath);
-    const turnRef = readDeepString(record, ["turn_id", "turnId", "request_id", "requestId"]);
-    return `${source.id}:${sessionRef}:${turnRef ?? hashId(filePath)}`;
+  private buildRunKey(
+    source: LocalToolTelemetrySource,
+    filePath: string,
+    record: JsonRecord,
+    sessionOverride: string | null,
+    turnOverride: string
+  ) {
+    const sessionRef = this.readSessionRef(record) ?? sessionOverride ?? hashId(filePath);
+    const turnRef = this.readExplicitTurnRef(record) ?? turnOverride;
+    return `${source.id}:${sessionRef}:${turnRef}`;
+  }
+
+  private readExplicitTurnRef(record: JsonRecord) {
+    return readDeepString(record, ["turn_id", "turnId", "request_id", "requestId"]);
+  }
+
+  private readMessageRef(record: JsonRecord) {
+    return readDeepString(record, ["message_id", "messageId", "id"]);
   }
 
   private readSessionRef(record: JsonRecord) {
@@ -1291,6 +1444,7 @@ export class LocalToolTelemetryService {
         const runId = `${draft.runId}-${hashId(skillName)}`;
         const base = {
           run_id: runId,
+          turn_ref: draft.turnRef,
           skill_name: skillName,
           source_type: sourceType,
           capture_mode: "estimated",
@@ -1305,22 +1459,33 @@ export class LocalToolTelemetryService {
           total_tokens:
             draft.totalTokens != null ? Math.max(Math.round(draft.totalTokens / splitCount), 0) : undefined,
           tool_call_count: Math.max(Math.ceil(toolCallCount / splitCount), toolCallCount > 0 ? 1 : 0),
+          tool_names: Array.from(draft.toolNames).sort((left, right) => left.localeCompare(right)),
+          workflow_signals: Array.from(draft.workflowSignals).sort((left, right) => left.localeCompare(right)),
+          skill_hit_state: "inferred",
+          hit_index: Math.min(
+            89,
+            Math.round(this.confidenceScoreForDraft(draft, inferredNames.has(skillName)) * 100)
+          ),
+          message_hash: draft.messageHash,
+          user_message_summary: draft.messageSummary,
           workspace_ref: draft.workspaceRef,
           session_ref: draft.sessionRef,
           source_ref: draft.sourceRef
         };
         events.push({
           ...base,
-          event_id: randomUUID(),
+          event_id: `event-${hashId(`${runId}:started`)}`,
           event_type: "skill_run.started",
+          event_order: 1,
           occurred_at: startedAt,
           started_at: startedAt
         });
         if (draft.firstOutputLatencyMs != null) {
           events.push({
             ...base,
-            event_id: randomUUID(),
+            event_id: `event-${hashId(`${runId}:first-output`)}`,
             event_type: "skill_run.first_output",
+            event_order: 2,
             occurred_at: startedAt,
             latency_ms: draft.firstOutputLatencyMs
           });
@@ -1328,15 +1493,17 @@ export class LocalToolTelemetryService {
         if (toolCallCount > 0) {
           events.push({
             ...base,
-            event_id: randomUUID(),
+            event_id: `event-${hashId(`${runId}:tool-called`)}`,
             event_type: "skill_run.tool_called",
+            event_order: 3,
             occurred_at: finishedAt
           });
         }
         events.push({
           ...base,
-          event_id: randomUUID(),
+          event_id: `event-${hashId(`${runId}:completed`)}`,
           event_type: "skill_run.completed",
+          event_order: 4,
           occurred_at: finishedAt,
           started_at: startedAt,
           finished_at: finishedAt,

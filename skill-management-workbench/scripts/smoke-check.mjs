@@ -27,7 +27,10 @@ const database = read("src/main/database.ts");
 const main = read("src/main/index.ts");
 const registryService = read("src/main/registry-service.ts");
 const localToolTelemetryService = read("src/main/local-tool-telemetry-service.ts");
+const traceService = read("src/main/trace-service.ts");
 const projectProfileService = read("src/main/project-profile-service.ts");
+const modelEvaluationService = read("src/main/model-evaluation-service.ts");
+const workflowStarterService = read("src/main/workflow-starter-service.ts");
 const preload = read("src/preload/index.ts");
 const previewApi = read("src/renderer/src/preview-api.ts");
 const packageJson = read("package.json");
@@ -65,6 +68,7 @@ const requiredProductSections = [
   "evaluate",
   "remote-market",
   "analysis",
+  "session-trace",
   "graph",
   "proposals",
   "apply-center",
@@ -73,6 +77,62 @@ const requiredProductSections = [
   "audit",
   "settings"
 ];
+
+assertIncludes(
+  "src/main/database.ts",
+  database,
+  "CREATE TABLE IF NOT EXISTS trace_sessions",
+  "Session Trace persistence schema"
+);
+assertIncludes(
+  "src/main/trace-service.ts",
+  traceService,
+  "ingestTelemetryEvents",
+  "Session Trace event ingestion"
+);
+assertIncludes(
+  "src/main/trace-service.ts",
+  traceService,
+  "backfillLegacyRuns",
+  "Session Trace legacy evidence backfill"
+);
+assertIncludes(
+  "src/main/trace-service.ts",
+  traceService,
+  "trace_sessions.source_ref",
+  "Session Trace search includes the source session reference"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "trace.sessionRef",
+  "Session Trace UI exposes searchable session IDs"
+);
+assertIncludes(
+  "src/main/local-tool-telemetry-service.ts",
+  localToolTelemetryService,
+  "const turnRef = this.readExplicitTurnRef(record) ?? turnOverride;",
+  "Session Turn boundaries ignore unrelated response message IDs"
+);
+const explicitTurnRefBlock = localToolTelemetryService.match(
+  /private readExplicitTurnRef\(record: JsonRecord\) \{[\s\S]*?\n  \}/
+)?.[0] ?? "";
+assert(
+  explicitTurnRefBlock.length > 0 && !explicitTurnRefBlock.includes("message_id"),
+  "Explicit Turn references must not include generic message_id fields."
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "TraceSkillDrawer",
+  "Session Trace Skill quick drawer"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".trace-workspace",
+  "Session Trace stable split workspace styling"
+);
 
 for (const section of requiredProductSections) {
   assertIncludes(
@@ -512,6 +572,54 @@ assertIncludes(
   app,
   "graph-operator-band",
   "Graph Studio exposes a compact first-screen Search/Select/Trace operator flow"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "type GraphPresentationMode = \"flow\" | \"mindmap\"",
+  "Graph and workflow visualizations share explicit flowchart and mind map modes"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "function buildGraphMindMapScene",
+  "Graph mind map is derived from the same visible graph snapshot"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "function GraphMindMapView",
+  "Graph mind map has an interactive presentation component"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "graph-presentation-switcher",
+  "Graph canvas exposes a presentation switcher"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "skills-workflow-presentation-switcher",
+  "Beginner workflow guide exposes the same presentation switcher"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "skills-workflow-mindmap",
+  "Beginner workflow guide renders a conceptual mind map"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".graph-mindmap-scroll",
+  "Graph mind map has a bounded scrolling canvas"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".skills-workflow-mindmap",
+  "Workflow mind map has dedicated layout styling"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -1904,6 +2012,162 @@ assertIncludes(
   "Project status should expose the connected-awaiting-Skill state"
 );
 assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  '"inferred-skill"',
+  "Project status should distinguish inferred Skill evidence from no trigger"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "refreshProjectRuntimeEvidence(nextProject, { silent: true })",
+  "Background monitoring should import runtime evidence instead of only checking the Codex directory"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "ProjectRuntimeLogModal",
+  "Project runtime evidence should open in a dedicated project log dialog"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "SkillsWorkflowVisual",
+  "Project detail should expose the complete Skills Workflow as a visible interactive process"
+);
+const workflowVisualInvocation = app.indexOf("<SkillsWorkflowVisual", app.indexOf("function ProjectAssetDetailPanel"));
+const projectDetailEnd = app.indexOf("function WorkflowStarterCard", workflowVisualInvocation);
+const overviewStart = app.indexOf('data-product-section="overview"');
+const overviewEnd = app.indexOf('data-product-section="discovery"', overviewStart);
+assert(
+  workflowVisualInvocation > 0 && workflowVisualInvocation < projectDetailEnd,
+  "Skills Workflow must be rendered inside Project Detail."
+);
+assert(
+  !app.slice(overviewStart, overviewEnd).includes("<SkillsWorkflowVisual"),
+  "Overview must not render a single-project Skills Workflow."
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'mode: options.silent ? "incremental" : "full"',
+  "Background monitoring should use bounded incremental session reads"
+);
+assertIncludes(
+  "src/main/local-tool-telemetry-service.ts",
+  localToolTelemetryService,
+  "cleanupProjectRuntimeStagingFiles",
+  "Generated runtime import staging files should be cleaned automatically"
+);
+assertIncludes(
+  "src/main/local-tool-telemetry-service.ts",
+  localToolTelemetryService,
+  "await unlink(outputPath).catch(() => undefined);",
+  "Generated runtime import files should be removed after database ingestion"
+);
+assertIncludes(
+  "src/main/index.ts",
+  main,
+  "app.requestSingleInstanceLock()",
+  "Desktop runtime should prevent duplicate monitoring instances"
+);
+assertIncludes(
+  "src/shared/types.ts",
+  sharedTypes,
+  "export interface ProjectRuntimeSummary",
+  "Project management should receive total runtime counts independently from the recent-run window"
+);
+assertIncludes(
+  "src/main/telemetry-service.ts",
+  read("src/main/telemetry-service.ts"),
+  "listProjectRuntimeSummaries",
+  "Telemetry service should provide project-level runtime aggregates"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "projectManagementRefreshIntervalMs = 15_000",
+  "Project management should refresh its runtime snapshot on a bounded countdown"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "Refresh in ${runtimeRefreshRemainingSeconds}s",
+  "Project management should expose the next runtime refresh countdown"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "const overviewRuntimeSummaryByPath = new Map(",
+  "Overview project coverage should use project runtime aggregates instead of the recent-run window"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "overviewRuntimeSummaryByPath.get(normalizeProjectPath(project.path))?.totalRuns",
+  "Overview project run counts should match the Project Library runtime totals"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".project-runtime-refresh-status",
+  "Project management countdown styling"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'tx("From request to verified result", "从一条需求到可验证结果")',
+  "Skills Workflow should explain the request-to-verification lifecycle in beginner-facing copy"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".skills-workflow-stage-rail {\n  display: grid;\n  grid-template-columns: repeat(4, minmax(0, 1fr));",
+  "Desktop Skills Workflow should show all eight stages in a two-row grid without horizontal scrolling"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'tx("View runtime log", "查看运行日志")',
+  "Project list log actions should open runtime evidence instead of only onboarding history"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "project-runtime-skill-link",
+  "Project runtime logs should expose clickable Skill detail actions"
+);
+assertIncludes(
+  "src/main/local-tool-telemetry-service.ts",
+  localToolTelemetryService,
+  'payloadType === "message" && payloadRole === "user"',
+  "Codex response-item user messages should create stable per-message telemetry turns"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "checkProjectConnectionHeartbeat(repairedProject)",
+  "Project repair should use the fast Codex directory check instead of importing full runtime history"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'current?.projectPath === scannedProjectRoot && current.status !== "running"',
+  "A successful direct scan should clear stale project repair feedback"
+);
+assertIncludes(
+  "src/main/workflow-starter-service.ts",
+  workflowStarterService,
+  "Existing AGENTS.md will be preserved and extended",
+  "Workflow starter should safely handle an existing AGENTS entry file"
+);
+assertIncludes(
+  "src/main/workflow-starter-service.ts",
+  workflowStarterService,
+  "renderStarterText",
+  "Workflow starter should render project placeholders before writing files"
+);
+assertIncludes(
   "src/main/project-profile-service.ts",
   projectProfileService,
   "project-profile.mjs",
@@ -1926,6 +2190,54 @@ assertIncludes(
   app,
   "project-profile-summary",
   "Project detail should show the local Profile summary"
+);
+assertIncludes(
+  "src/main/database.ts",
+  database,
+  "CREATE TABLE IF NOT EXISTS model_evaluation_config",
+  "AI evaluation configuration must have a local persistence schema"
+);
+assertIncludes(
+  "src/main/model-evaluation-service.ts",
+  modelEvaluationService,
+  "System secure storage is unavailable, so Skill OS will not store an API key.",
+  "AI evaluation must reject plaintext-key fallback"
+);
+assertIncludes(
+  "src/main/model-evaluation-service.ts",
+  modelEvaluationService,
+  "Model endpoints must use HTTPS, except a local localhost endpoint.",
+  "AI evaluation must restrict provider endpoints to HTTPS or local development"
+);
+assertIncludes(
+  "src/main/index.ts",
+  main,
+  '"workbench:generate-model-evaluation-cases"',
+  "AI case generation must stay in the main-process IPC boundary"
+);
+assertIncludes(
+  "src/preload/index.ts",
+  preload,
+  "generateModelEvaluationCases",
+  "Renderer should receive a narrow AI test-case generation API"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "AI-assisted Test Design",
+  "Evaluation reports must clearly label AI-assisted test design"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "It does not execute the Skill",
+  "AI case generation must not claim execution evidence"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  ".model-evaluation-settings-card",
+  "AI evaluation settings need dedicated responsive layout styling"
 );
 
 console.log(

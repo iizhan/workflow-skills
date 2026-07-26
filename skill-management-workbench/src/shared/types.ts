@@ -243,6 +243,70 @@ export interface SkillHealthScorePolicyInput {
   preset: SkillHealthScorePolicyPreset;
 }
 
+export type ModelEvaluatorSecretStorage = "system_secure" | "unavailable";
+export type ModelEvaluationConnectionStatus = "not_tested" | "ready" | "failed";
+export type ModelEvaluationTargetType = "skill" | "workflow";
+
+export interface ModelEvaluationConfig {
+  id: "default";
+  provider: "openai_compatible";
+  providerLabel: string;
+  endpointUrl: string;
+  modelName: string;
+  enabled: boolean;
+  hasApiKey: boolean;
+  secretStorage: ModelEvaluatorSecretStorage;
+  allowSourceUpload: boolean;
+  updatedAt: string | null;
+  lastTestedAt: string | null;
+  lastTestStatus: ModelEvaluationConnectionStatus;
+  lastTestMessage: string | null;
+}
+
+export interface ModelEvaluationConfigInput {
+  providerLabel: string;
+  endpointUrl: string;
+  modelName: string;
+  enabled: boolean;
+  allowSourceUpload: boolean;
+  apiKey?: string;
+  clearApiKey?: boolean;
+}
+
+export interface ModelEvaluationConnectionTestResult {
+  status: "ready" | "failed";
+  testedAt: string;
+  latencyMs: number | null;
+  message: string;
+}
+
+export interface GeneratedEvaluationCase {
+  id: string;
+  title: string;
+  scenario: string;
+  expectedSignals: string[];
+  rejectionSignals: string[];
+  evidenceToCollect: string[];
+}
+
+export interface ModelEvaluationCaseGenerationInput {
+  targetType: ModelEvaluationTargetType;
+  targetId: string;
+  focus?: string;
+  maxCases?: number;
+}
+
+export interface ModelEvaluationCaseGenerationResult {
+  generatedAt: string;
+  targetType: ModelEvaluationTargetType;
+  targetId: string;
+  targetName: string;
+  modelName: string;
+  sourceCharsSent: number;
+  testCases: GeneratedEvaluationCase[];
+  limitations: string[];
+}
+
 export interface SkillHealthTrend {
   latestScore: number;
   previousScore: number | null;
@@ -379,6 +443,7 @@ export interface WorkflowStarterPreview {
   filesToCreate: string[];
   directoriesToCreate: string[];
   fileConflicts: string[];
+  preservedFiles: string[];
   skippedExistingDirectories: string[];
   skillCount: number;
   totalFileCount: number;
@@ -390,7 +455,337 @@ export interface WorkflowStarterApplyResult {
   preview: WorkflowStarterPreview;
   appliedAt: string;
   copiedFileCount: number;
+  mergedFileCount: number;
   createdDirectoryCount: number;
+}
+
+export type WorkflowTemplateKind = "foundation" | "role" | "scenario" | "integration" | "project_legacy";
+
+export type WorkflowTemplateStatus =
+  | "draft"
+  | "sandbox"
+  | "trial"
+  | "approved"
+  | "recommended"
+  | "deprecated"
+  | "retired"
+  | "invalid"
+  | "unknown";
+
+export type WorkflowValidationSeverity = "error" | "warning" | "info";
+
+export interface WorkflowValidationIssue {
+  severity: WorkflowValidationSeverity;
+  code: string;
+  source: string;
+  path: string;
+  message: string;
+}
+
+export interface WorkflowTemplateSummary {
+  templateId: string;
+  templateVersion: string;
+  name: string;
+  kind: WorkflowTemplateKind;
+  status: WorkflowTemplateStatus;
+  schemaVersion: string;
+  sourcePath: string;
+  manifestFingerprint: string;
+  dependencyTemplateIds: string[];
+  skillRefs: string[];
+  validation: {
+    valid: boolean;
+    issues: WorkflowValidationIssue[];
+    warnings: WorkflowValidationIssue[];
+  };
+  indexedAt: string;
+}
+
+export type ProjectWorkflowCompatibilityStatus =
+  | "ready"
+  | "requires_workflow_starter"
+  | "missing_skills"
+  | "core_incompatible"
+  | "template_invalid"
+  | "template_missing"
+  | "legacy_read_only";
+
+export interface ProjectWorkflowCompatibility {
+  status: ProjectWorkflowCompatibilityStatus;
+  readyForBinding: boolean;
+  projectWorkflowVersion: string | null;
+  missingSkills: string[];
+  messages: string[];
+}
+
+export type ProjectWorkflowBindingStatus =
+  | "active"
+  | "needs_upgrade"
+  | "incompatible"
+  | "disabled"
+  | "legacy_read_only";
+
+export type ProjectWorkflowBindingSource =
+  | "binding_file"
+  | "project_declaration"
+  | "task_06_legacy";
+
+export interface ProjectWorkflowBindingSummary {
+  bindingId: string;
+  projectRoot: string;
+  templateId: string;
+  templateVersion: string;
+  templateName: string;
+  templateKind: WorkflowTemplateKind;
+  manifestFingerprint: string | null;
+  manifestSnapshot?: string | null;
+  status: ProjectWorkflowBindingStatus;
+  source: ProjectWorkflowBindingSource;
+  bindingFilePath: string | null;
+  sourcePath?: string | null;
+  readOnly: boolean;
+  compatibility: ProjectWorkflowCompatibility;
+  overrides: Record<string, unknown>;
+  activatedAt: string | null;
+  updatedAt: string;
+  rollback: {
+    templateVersion: string;
+    manifestFingerprint: string | null;
+    manifestSnapshot?: string | null;
+    capturedAt: string;
+  } | null;
+  warnings: string[];
+}
+
+export interface ProjectWorkflowBindingPreviewInput {
+  projectRoot: string;
+  templateId: string;
+  templateVersion?: string;
+}
+
+export interface ProjectWorkflowLegacyMigrationPreviewInput {
+  projectRoot: string;
+  legacyBindingId: string;
+}
+
+export interface ProjectWorkflowBindingRollbackPreviewInput {
+  projectRoot: string;
+  bindingId: string;
+}
+
+export type ProjectWorkflowBindingChangeType =
+  | "create"
+  | "upgrade"
+  | "rebind"
+  | "migration"
+  | "rollback";
+
+export interface ProjectWorkflowBindingPreview {
+  previewId: string;
+  expiresAt: string;
+  generatedAt: string;
+  projectRoot: string;
+  bindingFilePath: string;
+  changeType: ProjectWorkflowBindingChangeType;
+  template: WorkflowTemplateSummary;
+  existingBinding: ProjectWorkflowBindingSummary | null;
+  compatibility: ProjectWorkflowCompatibility;
+  proposedBinding: {
+    bindingId: string;
+    templateId: string;
+    templateVersion: string;
+    manifestFingerprint: string;
+    overrides: Record<string, never>;
+  };
+  readyForConfirmation: boolean;
+  previewSteps: string[];
+  warnings: string[];
+}
+
+export interface ProjectWorkflowBindingApplyInput {
+  previewId: string;
+}
+
+export interface ProjectWorkflowBindingApplyResult {
+  preview: ProjectWorkflowBindingPreview;
+  binding: ProjectWorkflowBindingSummary;
+  appliedAt: string;
+  verified: boolean;
+  warnings: string[];
+}
+
+export type ProjectWorkflowDoctorCheckStatus = "pass" | "warning" | "fail";
+
+export interface ProjectWorkflowDoctorCheck {
+  id: string;
+  status: ProjectWorkflowDoctorCheckStatus;
+  title: string;
+  detail: string;
+  evidenceRefs: string[];
+}
+
+export interface ProjectWorkflowDoctorResult {
+  projectRoot: string;
+  checkedAt: string;
+  bindingFilePath: string;
+  templateCount: number;
+  bindingCount: number;
+  legacyReadOnlyCount: number;
+  readyMigrationCount: number;
+  checks: ProjectWorkflowDoctorCheck[];
+  summary: "healthy" | "attention" | "blocked";
+}
+
+export type ScenarioLoopRunStatus =
+  | "pending"
+  | "running"
+  | "verified"
+  | "verified_with_risk"
+  | "needs_user_decision"
+  | "blocked"
+  | "budget_exhausted"
+  | "cancelled"
+  | "evolution_candidate";
+
+export type ScenarioLoopIterationStatus =
+  | "needs_repair"
+  | "verified"
+  | "verified_with_risk"
+  | "blocked"
+  | "budget_exhausted"
+  | "evolution_candidate";
+
+export type ScenarioLoopStopReason =
+  | "quality_gate_passed"
+  | "scope_change"
+  | "contract_change"
+  | "permission_change"
+  | "migration_required"
+  | "external_effect"
+  | "release_action"
+  | "budget_critical"
+  | "budget_exhausted"
+  | "budget_unknown"
+  | "duplicate_strategy"
+  | "root_cause_strategy_limit"
+  | "max_iterations_reached"
+  | "missing_repair_diagnosis"
+  | "blocking_defect"
+  | "user_cancelled";
+
+export type ScenarioLoopChangeSignal =
+  | "scope_change"
+  | "contract_change"
+  | "permission_change"
+  | "migration_required"
+  | "external_effect"
+  | "release_action";
+
+export type ScenarioLoopBudgetState = "available" | "warning" | "critical" | "exhausted" | "unknown";
+
+export interface ScenarioLoopFormalPackage {
+  requirementVersion: string;
+  designVersion: string;
+  impactVersion: string;
+  taskBreakdownVersion: string;
+  verificationPlanVersion: string;
+  confirmedAt: string;
+  confirmationRef: string;
+}
+
+export interface ScenarioLoopPolicy {
+  maxIterations: number;
+  maxSameRootCauseStrategies: number;
+  onScopeChange: "require_reconfirmation";
+  onBudgetExhausted: "needs_user_decision";
+  passScore: number;
+  dimensionFloors: Record<string, number>;
+  requiredChecks: string[];
+}
+
+export interface ScenarioLoopTemplateDefinition {
+  templateId: string;
+  templateVersion: string;
+  templateName: string;
+  templateKind: "scenario" | "integration";
+  manifestFingerprint: string;
+  policy: ScenarioLoopPolicy;
+}
+
+export interface ScenarioLoopQualityCheck {
+  id: string;
+  passed: boolean;
+  evidenceRefs: string[];
+}
+
+export interface ScenarioLoopQualityEvaluation {
+  score: number | null;
+  dimensionScores: Record<string, number | null>;
+  checks: ScenarioLoopQualityCheck[];
+  blockingDefects: string[];
+  residualRisks: string[];
+  evidenceRefs: string[];
+  policyRef: string | null;
+}
+
+export interface ScenarioLoopBudgetSummary {
+  state: ScenarioLoopBudgetState;
+  budgetPoolId: string | null;
+  estimatedTokens: number | null;
+  reservedTokens: number | null;
+  observedTokens: number | null;
+  remainingTokens: number | null;
+  evidenceRefs: string[];
+}
+
+export interface ScenarioLoopIterationSummary {
+  id: string;
+  runId: string;
+  iteration: number;
+  status: ScenarioLoopIterationStatus;
+  workflowRunRef: string | null;
+  rootCauseKey: string | null;
+  strategyFingerprint: string | null;
+  changeSignals: ScenarioLoopChangeSignal[];
+  quality: ScenarioLoopQualityEvaluation;
+  budget: ScenarioLoopBudgetSummary;
+  stopReason: ScenarioLoopStopReason | null;
+  createdAt: string;
+  completedAt: string;
+}
+
+export interface ScenarioLoopRunSummary {
+  id: string;
+  projectRoot: string;
+  bindingId: string;
+  template: ScenarioLoopTemplateDefinition;
+  formalPackage: ScenarioLoopFormalPackage;
+  status: ScenarioLoopRunStatus;
+  stopReason: ScenarioLoopStopReason | null;
+  currentIteration: number;
+  latestQuality: ScenarioLoopQualityEvaluation | null;
+  latestBudget: ScenarioLoopBudgetSummary | null;
+  iterations: ScenarioLoopIterationSummary[];
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+}
+
+export interface ScenarioLoopRunCreateInput {
+  projectRoot: string;
+  bindingId: string;
+  formalPackage: ScenarioLoopFormalPackage;
+  initialBudget?: ScenarioLoopBudgetSummary;
+}
+
+export interface ScenarioLoopIterationRecordInput {
+  runId: string;
+  workflowRunRef?: string;
+  rootCauseKey?: string;
+  strategyFingerprint?: string;
+  changeSignals?: ScenarioLoopChangeSignal[];
+  quality: ScenarioLoopQualityEvaluation;
+  budget: ScenarioLoopBudgetSummary;
 }
 
 export interface TelemetryImportResult {
@@ -472,6 +867,11 @@ export type ProjectRuntimeEvidenceRefreshStatus =
   | "telemetry_disabled"
   | "unauthorized";
 
+export interface ProjectRuntimeEvidenceRefreshOptions {
+  mode?: "full" | "incremental";
+  since?: string;
+}
+
 export interface ProjectRuntimeEvidenceRefreshResult {
   projectRoot: string;
   refreshedAt: string;
@@ -488,6 +888,160 @@ export interface ProjectRuntimeEvidenceRefreshResult {
   warnings: string[];
   errors: string[];
   sourcePreviews: LocalToolTelemetryPreview[];
+}
+
+export type AdapterInstallationStatus =
+  | "not_installed"
+  | "installed"
+  | "invalid"
+  | "upgrade_required"
+  | "read_only";
+
+export type AdapterConnectionStatus =
+  | "source_unavailable"
+  | "source_ready"
+  | "workspace_unmatched"
+  | "workspace_matched"
+  | "recent_session_observed"
+  | "stale"
+  | "error";
+
+export type SkillObservationStatus =
+  | "no_skill_evidence"
+  | "skill_available"
+  | "skill_routed_inferred"
+  | "skill_invoked_inferred"
+  | "skill_invoked_precise"
+  | "skill_completed"
+  | "skill_failed";
+
+export type AdapterReadinessCheckStatus = "pass" | "warning" | "fail" | "info";
+
+export interface AdapterReadinessCheck {
+  id: string;
+  status: AdapterReadinessCheckStatus;
+  evidenceRefs: string[];
+}
+
+export interface AdapterReadinessPathPreview {
+  path: string;
+  access: "read" | "write_after_confirmation" | "not_applicable";
+  purpose: string;
+  currentState: "available" | "missing" | "not_planned";
+}
+
+export interface AdapterPrecisionEnablementPreview {
+  planId: string;
+  generatedAt: string;
+  mode:
+    | "manual_structured_import"
+    | "already_precise"
+    | "external_adapter_required"
+    | "local_app_server_opt_in"
+    | "local_app_server_ready";
+  noWritesPerformed: true;
+  requiresSeparateConfirmation: boolean;
+  affectedPaths: AdapterReadinessPathPreview[];
+  requiredSteps: string[];
+  blockedReasons: string[];
+  rollbackPoint: string;
+}
+
+export type ProjectAppServerObservationState =
+  | "not_enabled"
+  | "checking"
+  | "ready"
+  | "observing"
+  | "stopped"
+  | "unsupported"
+  | "error";
+
+export interface CodexAppServerCapabilitySnapshot {
+  cliVersion: string | null;
+  schemaFingerprint: string | null;
+  generatedAt: string | null;
+  protocolVersion: "v1" | "v2" | null;
+  lifecycleMethods: string[];
+  supportsSkillCatalog: boolean;
+  supportsExactSkillEvents: boolean;
+  supported: boolean;
+  blockingReason: string | null;
+}
+
+export interface ProjectAppServerObservation {
+  projectRoot: string;
+  enabled: boolean;
+  state: ProjectAppServerObservationState;
+  capability: CodexAppServerCapabilitySnapshot | null;
+  startedAt: string | null;
+  lastEventAt: string | null;
+  stoppedAt: string | null;
+  lastError: string | null;
+  lastControlledVerification: ProjectControlledSessionVerification;
+}
+
+export type ProjectControlledSessionVerificationState =
+  | "not_run"
+  | "running"
+  | "completed"
+  | "interrupted"
+  | "failed";
+
+export type ProjectControlledSessionVerificationStopReason =
+  | "completed"
+  | "timeout"
+  | "token_watchdog"
+  | "unsafe_item_detected"
+  | "observer_stopped"
+  | "app_server_error"
+  | "request_failed";
+
+/**
+ * A deliberately narrow, local App Server verification record. It never
+ * contains the prompt, model output, command content, tool/file payload paths, item IDs,
+ * or raw App Server Thread/Turn identifiers.
+ */
+export interface ProjectControlledSessionVerification {
+  projectRoot: string;
+  state: ProjectControlledSessionVerificationState;
+  startedAt: string | null;
+  finishedAt: string | null;
+  ephemeral: true;
+  sandbox: "readOnly";
+  networkAccess: false;
+  approvalPolicy: "never";
+  timeoutMs: number;
+  tokenWatchdogLimit: number;
+  tokenWatchdogExceeded: boolean;
+  totalTokens: number | null;
+  lifecycleEventCount: number;
+  itemTypes: string[];
+  /**
+   * A TraceService-issued opaque identifier. It is set only after the
+   * verification Turn has been normalized into the local trace store.
+   */
+  traceId: string | null;
+  threadArchived: boolean;
+  stopReason: ProjectControlledSessionVerificationStopReason | null;
+  errorCode: string | null;
+}
+
+export interface ProjectAdapterReadiness {
+  projectRoot: string;
+  checkedAt: string;
+  adapterId: string;
+  harnessId: string;
+  installationStatus: AdapterInstallationStatus;
+  connectionStatus: AdapterConnectionStatus;
+  observationStatus: SkillObservationStatus;
+  sourceAvailable: boolean;
+  detectedWorkspaceRef: string | null;
+  latestEvidenceAt: string | null;
+  exactTraceCount: number;
+  inferredTraceCount: number;
+  checks: AdapterReadinessCheck[];
+  appServerObservation: ProjectAppServerObservation;
+  precisionPreview: AdapterPrecisionEnablementPreview;
 }
 
 export interface ManagedProjectRecord {
@@ -572,6 +1126,164 @@ export interface SkillRunSummary {
   sourceType: string;
   workspaceRef: string | null;
   firstOutputLatencyMs: number | null;
+}
+
+export interface ProjectRuntimeSummary {
+  projectPath: string;
+  totalRuns: number;
+  explicitSkillRuns: number;
+  qualifiedSkillRuns: number;
+  totalTokens: number;
+  latestRunAt: string | null;
+}
+
+export type TraceCaptureMode = "precise" | "estimated" | "inferred" | "unknown";
+
+export type TraceSpanType =
+  | "turn"
+  | "system_route"
+  | "context_load"
+  | "workflow"
+  | "workflow_node"
+  | "skill_candidate"
+  | "skill"
+  | "tool"
+  | "approval_gate"
+  | "verification"
+  | "memory"
+  | "response";
+
+export type SkillHitState =
+  | "candidate"
+  | "matched"
+  | "selected"
+  | "loaded"
+  | "invoked"
+  | "completed"
+  | "failed"
+  | "inferred"
+  | "rejected"
+  | "unknown";
+
+export interface TraceSkillHitSummary {
+  id: string;
+  spanId: string;
+  skillId: string;
+  skillName: string;
+  skillVersionId: string | null;
+  hitState: SkillHitState;
+  hitIndex: number;
+  confidence: number;
+  captureMode: TraceCaptureMode;
+  scoringVersion: string;
+  evidenceSummary: string;
+  evidence: Array<{
+    key: string;
+    label: string;
+    score: number;
+    detail: string;
+  }>;
+  occurredAt: string;
+}
+
+export interface SessionTraceListItem {
+  sessionId: string;
+  sessionRef: string;
+  sourceRef: string | null;
+  turnId: string;
+  traceId: string;
+  projectId: string | null;
+  projectName: string | null;
+  workspaceRef: string | null;
+  harnessId: string;
+  adapterId: string;
+  evidenceKind: "message_turn" | "legacy_aggregate";
+  messageSummary: string;
+  receivedAt: string;
+  completedAt: string | null;
+  status: "running" | "completed" | "failed";
+  durationMs: number | null;
+  totalTokens: number;
+  skillCandidateCount: number;
+  skillInvokedCount: number;
+  captureMode: TraceCaptureMode;
+  confidence: number;
+  skillHits: TraceSkillHitSummary[];
+}
+
+export interface SessionTraceQuery {
+  projectId?: string;
+  harnessId?: string;
+  skillId?: string;
+  status?: "all" | "running" | "completed" | "failed";
+  captureMode?: "all" | "precise" | "estimated" | "inferred";
+  query?: string;
+  limit?: number;
+}
+
+export interface TraceSpanSummary {
+  id: string;
+  traceId: string;
+  turnId: string;
+  parentSpanId: string | null;
+  sequence: number;
+  spanType: TraceSpanType;
+  phase: string;
+  name: string;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  status: "running" | "completed" | "failed";
+  captureMode: TraceCaptureMode;
+  confidence: number;
+  skillId: string | null;
+  skillVersionId: string | null;
+  workflowId: string | null;
+  workflowNodeId: string | null;
+  tokenCount: number;
+  toolCallCount: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface TraceEventSummary {
+  id: string;
+  traceId: string;
+  turnId: string;
+  spanId: string | null;
+  sequence: number;
+  eventType: string;
+  occurredAt: string;
+  sourceType: string;
+  sourceRef: string | null;
+  captureMode: TraceCaptureMode;
+  evidenceHash: string;
+}
+
+export interface SessionTraceDetail {
+  turn: SessionTraceListItem;
+  spans: TraceSpanSummary[];
+  events: TraceEventSummary[];
+  skillHits: TraceSkillHitSummary[];
+}
+
+export interface TraceSkillQuickDetail {
+  traceId: string;
+  skillId: string;
+  canonicalName: string;
+  displayName: string;
+  description: string | null;
+  governanceRole: SkillRole;
+  sourcePath: string;
+  versionId: string | null;
+  versionFingerprint: string | null;
+  currentVersionFingerprint: string | null;
+  versionDetectedAt: string | null;
+  versionDrift: boolean;
+  contentMode: "runtime_snapshot" | "current_file" | "unavailable";
+  content: string;
+  contentTruncated: boolean;
+  hit: TraceSkillHitSummary;
+  relatedSpans: TraceSpanSummary[];
 }
 
 export interface SkillMetricLeader {
@@ -1090,6 +1802,23 @@ export interface WorkbenchApi {
   scanProjectSkills: (projectRoot: string) => Promise<ScanResult>;
   previewRecommendedWorkflowStarter: (projectRoot: string) => Promise<WorkflowStarterPreview>;
   applyRecommendedWorkflowStarter: (projectRoot: string) => Promise<WorkflowStarterApplyResult>;
+  listWorkflowTemplates: () => Promise<WorkflowTemplateSummary[]>;
+  listProjectWorkflowBindings: (projectRoot: string) => Promise<ProjectWorkflowBindingSummary[]>;
+  previewProjectWorkflowBinding: (
+    input: ProjectWorkflowBindingPreviewInput
+  ) => Promise<ProjectWorkflowBindingPreview>;
+  previewProjectWorkflowLegacyMigration: (
+    input: ProjectWorkflowLegacyMigrationPreviewInput
+  ) => Promise<ProjectWorkflowBindingPreview>;
+  previewProjectWorkflowBindingRollback: (
+    input: ProjectWorkflowBindingRollbackPreviewInput
+  ) => Promise<ProjectWorkflowBindingPreview>;
+  applyProjectWorkflowBinding: (
+    input: ProjectWorkflowBindingApplyInput
+  ) => Promise<ProjectWorkflowBindingApplyResult>;
+  doctorProjectWorkflow: (projectRoot: string) => Promise<ProjectWorkflowDoctorResult>;
+  listProjectScenarioLoopRuns: (projectRoot: string) => Promise<ScenarioLoopRunSummary[]>;
+  getScenarioLoopRun: (runId: string) => Promise<ScenarioLoopRunSummary | null>;
   listSkills: () => Promise<SkillSummary[]>;
   generateSkillAnalysis: (skillId: string) => Promise<SkillIntelligenceAnalysis>;
   getLatestSkillAnalysis: (skillId: string) => Promise<SkillIntelligenceAnalysis | null>;
@@ -1102,6 +1831,12 @@ export interface WorkbenchApi {
   updateHealthScorePolicy: (
     input: SkillHealthScorePolicyInput
   ) => Promise<SkillHealthScorePolicy>;
+  getModelEvaluationConfig: () => Promise<ModelEvaluationConfig>;
+  saveModelEvaluationConfig: (input: ModelEvaluationConfigInput) => Promise<ModelEvaluationConfig>;
+  testModelEvaluationConnection: () => Promise<ModelEvaluationConnectionTestResult>;
+  generateModelEvaluationCases: (
+    input: ModelEvaluationCaseGenerationInput
+  ) => Promise<ModelEvaluationCaseGenerationResult>;
   previewSkillApply: (input: SkillApplyPreviewInput) => Promise<SkillApplyPreview>;
   listMarketplaceCatalog: (query?: string) => Promise<RemoteMarketplaceCatalog>;
   importTelemetryFile: (filePath: string) => Promise<TelemetryImportResult>;
@@ -1113,11 +1848,21 @@ export interface WorkbenchApi {
     source: LocalToolTelemetrySource
   ) => Promise<LocalToolTelemetryImportResult>;
   refreshProjectRuntimeEvidence: (
-    projectRoot: string
+    projectRoot: string,
+    options?: ProjectRuntimeEvidenceRefreshOptions
   ) => Promise<ProjectRuntimeEvidenceRefreshResult>;
   checkProjectConnection: (projectRoot: string) => Promise<ProjectRuntimeEvidenceRefreshResult>;
+  diagnoseProjectAdapterReadiness: (projectRoot: string) => Promise<ProjectAdapterReadiness>;
+  startProjectAppServerObservation: (projectRoot: string) => Promise<ProjectAppServerObservation>;
+  stopProjectAppServerObservation: (projectRoot: string) => Promise<ProjectAppServerObservation>;
+  runProjectControlledVerification: (projectRoot: string) => Promise<ProjectControlledSessionVerification>;
   listRecentRuns: (limit?: number) => Promise<SkillRunSummary[]>;
+  listProjectRuntimeSummaries: (projectPaths: string[]) => Promise<ProjectRuntimeSummary[]>;
   listSkillRuns: (skillId: string, limit?: number) => Promise<SkillRunSummary[]>;
+  listSessionTraces: (query?: SessionTraceQuery) => Promise<SessionTraceListItem[]>;
+  getSessionTrace: (traceId: string) => Promise<SessionTraceDetail | null>;
+  getTraceSkillDetail: (traceId: string, skillId: string) => Promise<TraceSkillQuickDetail>;
+  revealSkillSource: (skillId: string) => Promise<boolean>;
   getDailySummary: (date?: string) => Promise<DailyMetricsSummary>;
   getWeeklySummary: (endDate?: string) => Promise<WeeklyMetricsSummary>;
   refreshOptimizationProposals: (date?: string) => Promise<OptimizationProposalRefreshResult>;

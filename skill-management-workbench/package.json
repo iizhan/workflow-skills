@@ -10,8 +10,17 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "smoke": "node scripts/smoke-check.mjs",
+    "test:starter": "node scripts/workflow-starter-integration.mjs",
+    "test:workflow-registry": "esbuild scripts/workflow-registry-integration.ts --bundle --platform=node --format=esm --outfile=tmp/workflow-registry-integration.mjs --external:better-sqlite3 --external:esbuild && ELECTRON_RUN_AS_NODE=1 electron tmp/workflow-registry-integration.mjs",
+    "test:scenario-loop": "ELECTRON_RUN_AS_NODE=1 electron scripts/scenario-loop-integration.mjs",
+    "test:trace": "esbuild scripts/trace-service-integration.ts --bundle --platform=node --format=esm --outfile=tmp/trace-service-integration.mjs --external:better-sqlite3 && ELECTRON_RUN_AS_NODE=1 electron tmp/trace-service-integration.mjs",
+    "test:harness-events": "esbuild scripts/harness-event-integration.ts --bundle --platform=node --format=esm --outfile=tmp/harness-event-integration.mjs --external:better-sqlite3 && ELECTRON_RUN_AS_NODE=1 electron tmp/harness-event-integration.mjs",
+    "test:adapter-readiness": "esbuild scripts/adapter-readiness-integration.ts --bundle --platform=node --format=esm --outfile=tmp/adapter-readiness-integration.mjs --external:better-sqlite3 && ELECTRON_RUN_AS_NODE=1 electron tmp/adapter-readiness-integration.mjs",
+    "test:app-server-observation": "esbuild scripts/codex-app-server-observation-integration.ts --bundle --platform=node --format=esm --outfile=tmp/codex-app-server-observation-integration.mjs --external:better-sqlite3 && ELECTRON_RUN_AS_NODE=1 electron tmp/codex-app-server-observation-integration.mjs",
+    "test:model-evaluation": "esbuild scripts/model-evaluation-integration.ts --bundle --platform=node --format=esm --outfile=tmp/model-evaluation-integration.mjs --external:better-sqlite3 && ELECTRON_RUN_AS_NODE=1 electron tmp/model-evaluation-integration.mjs",
     "layout:check": "node scripts/layout-check.mjs",
     "self-test:ui": "SKILL_OS_SELF_TEST_REQUIRE_BROWSER=1 node scripts/self-test-ui.mjs",
+    "self-test:ui:source": "SKILL_OS_SELF_TEST_SOURCE_ONLY=1 node scripts/self-test-ui.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {

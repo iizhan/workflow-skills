@@ -2,7 +2,14 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   AuthorizationInput,
   LocalToolTelemetrySource,
+  ProjectAdapterReadiness,
+  ProjectRuntimeEvidenceRefreshOptions,
+  ProjectRuntimeSummary,
   ProjectProfileSummary,
+  ProjectWorkflowBindingApplyInput,
+  ProjectWorkflowBindingPreviewInput,
+  ProjectWorkflowBindingRollbackPreviewInput,
+  ProjectWorkflowLegacyMigrationPreviewInput,
   SkillBundleExportInput,
   SkillBundleImportInput,
   WorkbenchApi
@@ -36,6 +43,22 @@ const api: WorkbenchApi = {
     ipcRenderer.invoke("workbench:preview-recommended-workflow-starter", projectRoot),
   applyRecommendedWorkflowStarter: (projectRoot: string) =>
     ipcRenderer.invoke("workbench:apply-recommended-workflow-starter", projectRoot),
+  listWorkflowTemplates: () => ipcRenderer.invoke("workbench:list-workflow-templates"),
+  listProjectWorkflowBindings: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:list-project-workflow-bindings", projectRoot),
+  previewProjectWorkflowBinding: (input: ProjectWorkflowBindingPreviewInput) =>
+    ipcRenderer.invoke("workbench:preview-project-workflow-binding", input),
+  previewProjectWorkflowLegacyMigration: (input: ProjectWorkflowLegacyMigrationPreviewInput) =>
+    ipcRenderer.invoke("workbench:preview-project-workflow-legacy-migration", input),
+  previewProjectWorkflowBindingRollback: (input: ProjectWorkflowBindingRollbackPreviewInput) =>
+    ipcRenderer.invoke("workbench:preview-project-workflow-binding-rollback", input),
+  applyProjectWorkflowBinding: (input: ProjectWorkflowBindingApplyInput) =>
+    ipcRenderer.invoke("workbench:apply-project-workflow-binding", input),
+  doctorProjectWorkflow: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:doctor-project-workflow", projectRoot),
+  listProjectScenarioLoopRuns: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:list-project-scenario-loop-runs", projectRoot),
+  getScenarioLoopRun: (runId: string) => ipcRenderer.invoke("workbench:get-scenario-loop-run", runId),
   listSkills: () => ipcRenderer.invoke("workbench:list-skills"),
   generateSkillAnalysis: (skillId: string) =>
     ipcRenderer.invoke("workbench:generate-skill-analysis", skillId),
@@ -53,6 +76,13 @@ const api: WorkbenchApi = {
   getHealthScorePolicy: () => ipcRenderer.invoke("workbench:get-health-score-policy"),
   updateHealthScorePolicy: (input) =>
     ipcRenderer.invoke("workbench:update-health-score-policy", input),
+  getModelEvaluationConfig: () => ipcRenderer.invoke("workbench:get-model-evaluation-config"),
+  saveModelEvaluationConfig: (input) =>
+    ipcRenderer.invoke("workbench:save-model-evaluation-config", input),
+  testModelEvaluationConnection: () =>
+    ipcRenderer.invoke("workbench:test-model-evaluation-connection"),
+  generateModelEvaluationCases: (input) =>
+    ipcRenderer.invoke("workbench:generate-model-evaluation-cases", input),
   previewSkillApply: (input) => ipcRenderer.invoke("workbench:preview-skill-apply", input),
   listMarketplaceCatalog: (query?: string) =>
     ipcRenderer.invoke("workbench:list-marketplace-catalog", query),
@@ -64,13 +94,30 @@ const api: WorkbenchApi = {
     ipcRenderer.invoke("workbench:preview-local-tool-telemetry-source", source),
   importLocalToolTelemetrySource: (source: LocalToolTelemetrySource) =>
     ipcRenderer.invoke("workbench:import-local-tool-telemetry-source", source),
-  refreshProjectRuntimeEvidence: (projectRoot: string) =>
-    ipcRenderer.invoke("workbench:refresh-project-runtime-evidence", projectRoot),
+  refreshProjectRuntimeEvidence: (
+    projectRoot: string,
+    options?: ProjectRuntimeEvidenceRefreshOptions
+  ) => ipcRenderer.invoke("workbench:refresh-project-runtime-evidence", projectRoot, options),
   checkProjectConnection: (projectRoot: string) =>
     ipcRenderer.invoke("workbench:check-project-connection", projectRoot),
+  diagnoseProjectAdapterReadiness: (projectRoot: string): Promise<ProjectAdapterReadiness> =>
+    ipcRenderer.invoke("workbench:diagnose-project-adapter-readiness", projectRoot),
+  startProjectAppServerObservation: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:start-project-app-server-observation", projectRoot),
+  stopProjectAppServerObservation: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:stop-project-app-server-observation", projectRoot),
+  runProjectControlledVerification: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:run-project-controlled-verification", projectRoot),
   listRecentRuns: (limit?: number) => ipcRenderer.invoke("workbench:list-recent-runs", limit),
+  listProjectRuntimeSummaries: (projectPaths: string[]): Promise<ProjectRuntimeSummary[]> =>
+    ipcRenderer.invoke("workbench:list-project-runtime-summaries", projectPaths),
   listSkillRuns: (skillId: string, limit?: number) =>
     ipcRenderer.invoke("workbench:list-skill-runs", skillId, limit),
+  listSessionTraces: (query) => ipcRenderer.invoke("workbench:list-session-traces", query),
+  getSessionTrace: (traceId: string) => ipcRenderer.invoke("workbench:get-session-trace", traceId),
+  getTraceSkillDetail: (traceId: string, skillId: string) =>
+    ipcRenderer.invoke("workbench:get-trace-skill-detail", traceId, skillId),
+  revealSkillSource: (skillId: string) => ipcRenderer.invoke("workbench:reveal-skill-source", skillId),
   getDailySummary: (date?: string) => ipcRenderer.invoke("workbench:get-daily-summary", date),
   getWeeklySummary: (endDate?: string) =>
     ipcRenderer.invoke("workbench:get-weekly-summary", endDate),

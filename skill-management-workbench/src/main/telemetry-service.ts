@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type {
   DailyMetricsSummary,
+  ProjectRuntimeSummary,
   SkillMetricLeader,
   SkillRunSummary,
   SkillWasteLeader,
@@ -12,6 +13,8 @@ import type {
 import type { WeeklyMetricsSummary } from "../shared/types";
 import type { AuthorizationService } from "./authorization-service";
 import type { WorkbenchDatabase } from "./database";
+import type { TraceService, TraceTelemetryEventInput } from "./trace-service";
+import { recordAt, stringAt, validateHarnessEventEnvelope } from "./harness-event";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -43,6 +46,7 @@ interface MutableRunPatch {
   errorSummary?: string;
   workspaceRef?: string;
   sessionRef?: string;
+  turnRef?: string;
   policyRef?: string;
   sourceRef?: string;
   eventCount: number;
@@ -55,6 +59,7 @@ interface ExistingRunRow {
   capture_mode: string;
   confidence_score: number;
   source_type: string;
+  workspace_ref: string | null;
   started_at: string;
   first_output_at: string | null;
   finished_at: string | null;
@@ -129,7 +134,12 @@ function getContainers(record: JsonRecord) {
   const payload = isRecord(record.payload) ? record.payload : null;
   const skillRoot = isRecord(record.skill) ? record.skill : null;
   const skillPayload = payload && isRecord(payload.skill) ? payload.skill : null;
-  return [record, payload, skillRoot, skillPayload].filter((value): value is JsonRecord => Boolean(value));
+  const skillRef = isRecord(record.skill_ref) ? record.skill_ref : null;
+  const workflowRef = isRecord(record.workflow_ref) ? record.workflow_ref : null;
+  const project = isRecord(record.project) ? record.project : null;
+  const usage = isRecord(record.usage) ? record.usage : null;
+  return [record, payload, skillRoot, skillPayload, skillRef, workflowRef, project, usage]
+    .filter((value): value is JsonRecord => Boolean(value));
 }
 
 function readValue(record: JsonRecord, keys: string[]): unknown {
@@ -225,6 +235,24 @@ function normalizeRunStatus(value: string | null | undefined): RunStatus {
     return value;
   }
   return "running";
+}
+
+function telemetryEventType(eventType: string) {
+  if (eventType === "skill.invoked") {
+    return "skill_run.started";
+  }
+  if (eventType === "skill.completed") {
+    return "skill_run.completed";
+  }
+  if (eventType === "skill.failed") {
+    return "skill_run.failed";
+  }
+  return eventType;
+}
+
+function isTraceEventType(eventType: string) {
+  return /^(adapter|workspace|session|turn|workflow|skill|tool|verification|user)\./.test(eventType)
+    || /^skill_run\./.test(eventType);
 }
 
 function readSummaryNumber(record: JsonRecord, key: string) {
@@ -325,7 +353,8 @@ function toRunSummary(row: Record<string, unknown>): SkillRunSummary {
 export class TelemetryService {
   constructor(
     private readonly database: WorkbenchDatabase,
-    private readonly authorizationService: AuthorizationService
+    private readonly authorizationService: AuthorizationService,
+    private readonly traceService: TraceService
   ) {}
 
   async importJsonlFile(filePath: string): Promise<TelemetryImportResult> {
@@ -338,6 +367,7 @@ export class TelemetryService {
     }
 
     const patches = new Map<string, MutableRunPatch>();
+    const traceEvents: TraceTelemetryEventInput[] = [];
     const errors: string[] = [];
     let linesRead = 0;
     let processedEvents = 0;
@@ -360,11 +390,23 @@ export class TelemetryService {
           continue;
         }
 
-        const eventType = readString(record, ["event_type", "eventType", "type"]);
-        if (!eventType) {
+        const sourceEventType = readString(record, ["event_type", "eventType", "type"]);
+        if (!sourceEventType) {
           errors.push(`Line ${linesRead}: missing event_type.`);
           continue;
         }
+        const claimsHarnessEnvelope = typeof record.schema_version === "string";
+        const envelope = validateHarnessEventEnvelope(record);
+        if (claimsHarnessEnvelope && !envelope.valid) {
+          errors.push(`Line ${linesRead}: ${envelope.reason}`);
+          continue;
+        }
+        if (!isTraceEventType(sourceEventType)) {
+          ignoredEvents += 1;
+          continue;
+        }
+        traceEvents.push({ record, lineNumber: linesRead });
+        const eventType = telemetryEventType(sourceEventType);
 
         if (
           ![
@@ -375,13 +417,13 @@ export class TelemetryService {
             "skill_run.failed"
           ].includes(eventType)
         ) {
-          ignoredEvents += 1;
+          processedEvents += 1;
           continue;
         }
 
         const runId = readString(record, ["run_id", "runId", "id"]);
         if (!runId) {
-          errors.push(`Line ${linesRead}: ${eventType} is missing run_id.`);
+          errors.push(`Line ${linesRead}: ${sourceEventType} is missing run_id.`);
           continue;
         }
 
@@ -395,7 +437,9 @@ export class TelemetryService {
 
         patch.eventCount += 1;
         patch.sourceType = readString(record, ["source_type", "sourceType"]) ?? patch.sourceType;
-        patch.captureMode = readString(record, ["capture_mode", "captureMode"]) ?? patch.captureMode;
+        patch.captureMode = envelope.valid
+          ? "precise"
+          : readString(record, ["capture_mode", "captureMode"]) ?? patch.captureMode;
         patch.confidenceScore = mergeNumber(
           patch.confidenceScore,
           readNumber(record, ["confidence_score", "confidenceScore"])
@@ -421,13 +465,18 @@ export class TelemetryService {
         patch.toolCallCount = Math.max(patch.toolCallCount ?? 0, explicitToolCallCount);
         patch.workspaceRef = readString(record, ["workspace_ref", "workspaceRef"]) ?? patch.workspaceRef;
         patch.sessionRef = readString(record, ["session_ref", "sessionRef"]) ?? patch.sessionRef;
+        patch.turnRef = readString(record, ["turn_ref", "turnRef", "turn_id", "turnId"]) ?? patch.turnRef;
         patch.policyRef = readString(record, ["policy_ref", "policyRef"]) ?? patch.policyRef;
         patch.sourceRef = readString(record, ["source_ref", "sourceRef"]) ?? patch.sourceRef;
 
-        const skillId = readString(record, ["skill_id", "skillId"]);
-        const skillName = readString(record, ["skill_name", "skillName", "name"]);
+        const skillRef = recordAt(record, "skill_ref");
+        const skillId = readString(record, ["skill_id", "skillId"]) ?? stringAt(skillRef, "id");
+        const skillName = readString(record, ["skill_name", "skillName", "name"]) ?? stringAt(skillRef, "name");
         const skillPath = normalizeSkillPath(
           readString(record, ["skill_path", "skillPath", "source_path", "sourcePath", "path"])
+            ?? stringAt(skillRef, "source_path")
+            ?? stringAt(skillRef, "sourcePath")
+            ?? undefined
         );
 
         patch.skillRef = {
@@ -546,16 +595,17 @@ export class TelemetryService {
       const upsertRun = this.database.db.prepare(
         `INSERT INTO skill_runs (
            id, skill_id, skill_version_id, capture_mode, confidence_score, source_type,
-           started_at, first_output_at, finished_at, duration_ms, prompt_tokens,
+           workspace_ref, started_at, first_output_at, finished_at, duration_ms, prompt_tokens,
            completion_tokens, total_tokens, estimated_cost_usd, model_name,
            tool_call_count, status, error_code, error_summary, summary_json
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            skill_id = excluded.skill_id,
            skill_version_id = excluded.skill_version_id,
            capture_mode = excluded.capture_mode,
            confidence_score = excluded.confidence_score,
            source_type = excluded.source_type,
+           workspace_ref = excluded.workspace_ref,
            started_at = excluded.started_at,
            first_output_at = excluded.first_output_at,
            finished_at = excluded.finished_at,
@@ -656,13 +706,15 @@ export class TelemetryService {
         const sourceType = patch.sourceType ?? existing?.source_type ?? "log_parser";
         const existingSummary = safeParseSummary(existing?.summary_json);
         const previousEventCount = readSummaryNumber(existingSummary, "eventCount") ?? 0;
+        const workspaceRef = patch.workspaceRef ?? existing?.workspace_ref ?? null;
         const summary = {
           ...existingSummary,
           eventCount: previousEventCount + patch.eventCount,
           importSource: filePath,
           importedAt: importCompletedAt,
-          workspaceRef: patch.workspaceRef,
+          workspaceRef,
           sessionRef: patch.sessionRef,
+          turnRef: patch.turnRef,
           policyRef: patch.policyRef,
           sourceRef: patch.sourceRef
         };
@@ -686,6 +738,7 @@ export class TelemetryService {
           captureMode,
           confidenceScore,
           sourceType,
+          workspaceRef,
           startedAt,
           firstOutputAt ?? null,
           finishedAt ?? null,
@@ -763,6 +816,7 @@ export class TelemetryService {
     });
 
     importTransaction();
+    this.traceService.ingestTelemetryEvents(traceEvents, filePath);
 
     return {
       filePath,
@@ -811,6 +865,44 @@ export class TelemetryService {
       .all(safeLimit) as Record<string, unknown>[];
 
     return rows.map(toRunSummary);
+  }
+
+  listProjectRuntimeSummaries(projectPaths: string[]): ProjectRuntimeSummary[] {
+    const uniquePaths = Array.from(
+      new Set(
+        projectPaths
+          .map((path) => resolve(path.trim()).replace(/\/+$/, ""))
+          .filter(Boolean)
+      )
+    );
+    const selectSummary = this.database.db.prepare(
+      `SELECT
+         COUNT(*) AS total_runs,
+         SUM(CASE WHEN confidence_score > 0.68 THEN 1 ELSE 0 END) AS explicit_skill_runs,
+         SUM(CASE WHEN confidence_score >= 0.68 THEN 1 ELSE 0 END) AS qualified_skill_runs,
+         COALESCE(SUM(total_tokens), 0) AS total_tokens,
+         MAX(started_at) AS latest_run_at
+       FROM skill_runs
+       WHERE workspace_ref = ? OR workspace_ref LIKE ?`
+    );
+
+    return uniquePaths.map((projectPath) => {
+      const row = selectSummary.get(projectPath, `${projectPath}/%`) as {
+        total_runs: number;
+        explicit_skill_runs: number | null;
+        qualified_skill_runs: number | null;
+        total_tokens: number | null;
+        latest_run_at: string | null;
+      };
+      return {
+        projectPath,
+        totalRuns: Number(row.total_runs ?? 0),
+        explicitSkillRuns: Number(row.explicit_skill_runs ?? 0),
+        qualifiedSkillRuns: Number(row.qualified_skill_runs ?? 0),
+        totalTokens: Number(row.total_tokens ?? 0),
+        latestRunAt: row.latest_run_at ?? null
+      };
+    });
   }
 
   listSkillRuns(skillId: string, limit = 100): SkillRunSummary[] {
