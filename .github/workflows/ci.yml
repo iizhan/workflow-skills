@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop, codex/**]
+  pull_request:
+
+jobs:
+  project-engineering-workflow:
+    name: project-engineering-workflow tests
+    runs-on: ubuntu-latest
+    working-directory: project-engineering-workflow
+    defaults:
+      run:
+        working-directory: project-engineering-workflow
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: "project-engineering-workflow/package.json"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm test
+
+      - name: Validate workflows
+        run: npm run validate:workflows
+
+      - name: Doctor check on template-root
+        run: bash scripts/doctor.sh ./assets/template-root
+
+      - name: Smoke tests
+        run: npm run smoke
+
+      - name: Dry-run pack
+        run: npm run pack:dry-run
+
+  skill-management-workbench:
+    name: skill-management-workbench build & tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: skill-management-workbench
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: "skill-management-workbench/package-lock.json"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke tests
+        run: npm run smoke
+
+      - name: Layout checks
+        run: npm run layout:check
+
+  evaluations:
+    name: Workflow skills evaluations
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: evaluations/skills-workflow
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Run evaluation contract check
+        run: node scripts/check-contract.mjs
