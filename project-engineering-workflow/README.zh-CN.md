@@ -28,7 +28,7 @@ npx @workflow-skills/project-engineering-workflow doctor \
 ```bash
 npx @workflow-skills/project-engineering-workflow release-doctor \
   --output-dir "/absolute/path/to/your-repo" \
-  --release-version "0.6.0" \
+  --release-version "0.7.0" \
   --json \
   --json-out "docs/workflow-release-doctor.json"
 ```
@@ -40,6 +40,15 @@ npx @workflow-skills/project-engineering-workflow memory-index \
   --output-dir "/absolute/path/to/your-repo" \
   --json \
   --json-out "docs/workflow-memory-index.json"
+```
+
+在推荐或启用项目本地 Workflow 前，先校验声明、依赖、Skill 引用、质量门禁和 Loop 上限：
+
+```bash
+npx @workflow-skills/project-engineering-workflow workflow-validate \
+  --output-dir "/absolute/path/to/your-repo" \
+  --json \
+  --json-out "docs/workflow-manifest-validation.json"
 ```
 
 给一个已经接入过的项目做安全升级，并且不碰历史 `specs/` 工件：
@@ -72,6 +81,8 @@ npx @workflow-skills/project-engineering-workflow upgrade \
 `0.4.x` 新增 `fast / standard / controlled` 自适应任务通道、版本化确认门禁、完整影响范围、范围变化暂停机制，以及“事项/影响 → 验证证据 → 用户验收”闭环。
 `0.5.x` 新增后端和前端两条完整角色 Workflow。每条都覆盖需求到交付，但只按已确认的变更面加载架构、接口、数据、运行时、体验、无障碍、性能和测试引用。
 `0.6.x` 新增项目 Profile、架构摘要、已确认决策记忆和证据指纹。首次分析后，后续任务复用新鲜上下文，只有证据变化时才按范围刷新。
+`0.7.x` 新增正式实现前的方案确认闭环：设计方案、任务拆解、影响范围、验收与自测计划统一版本化；中途发生实质范围变化时暂停并重新确认，完成后进行影响范围自查并等待用户验收。
+`0.8.x` 新增可版本化的 Workflow Template、项目本地声明、单主场景路由、有界 Scenario Loop Engineering 和静态 Manifest 校验。`0.8.1` 进一步新增“工程功能交付”场景，用于不以设计稿或 API 契约为起点的普通功能、修复与重构。`0.8.2` 明确 Codex 项目会话是唯一的 Loop 执行入口：确认方案包后由同一会话启动并写入项目任务证据；桌面端只读取和展示已导入证据。声明图保持 DAG；修复通过有限迭代记录，不允许任意脚本或无限重试。
 远端 push 和 npm publish 仍然必须显式人工批准；内置 release 脚本会拒绝额外 push / publish 参数，避免把外部动作混进本地 release 准备。
 
 生成内容包含 `AGENTS.md`、项目本地 skills、spec-kit 风格工件、记忆治理、框架进化、分支与发布治理、Superpowers 路由、GSD 状态文件、gstack 角色评审、后端/前端角色 Workflow、默认开发规范、前端栈规范、Codex / Claude Code 适配说明、安全审查、分阶段验证、代码审查和测试报告。
@@ -90,3 +101,5 @@ token 成本通过评估目录里的 token economics 模板和估算脚本记录
 `0.3.x` 升级到自适应确认流程见 `references/08-upgrade-compatibility-pack/v0.3-to-v0.4-upgrade-manual.md`。
 `0.4.x` 升级到前端/后端角色 Workflow 见 `references/08-upgrade-compatibility-pack/v0.4-to-v0.5-upgrade-manual.md`。
 `0.5.x` 升级到项目 Profile 见 `references/08-upgrade-compatibility-pack/v0.5-to-v0.6-upgrade-manual.md`。
+`0.6.x` 升级到方案确认闭环见 `references/08-upgrade-compatibility-pack/v0.6-to-v0.7-upgrade-manual.md`。
+`0.7.x` 升级到 Workflow Template 与 Loop Engineering 见 `references/08-upgrade-compatibility-pack/v0.7-to-v0.8-upgrade-manual.md`。

@@ -70,6 +70,16 @@ workflow starter 可以升级，但默认不能破坏已经生成的项目工件
 - 创建 `v<version>` 标签前，worktree 必须干净，且发布说明与发布检查工件已更新。
 - 合并到 `main` 必须发生在已验证的 release 提交之后。
 
+### X. Workflow Template 与 Loop 必须受控
+
+- Skill 是原子能力；Workflow Template 只编排已治理的 Skill、门禁、检查点和子流程。
+- 每个请求最多一个主场景或联调 Workflow；基础和角色 Workflow 只能作为依赖。
+- 激活 Workflow 版本不可原地修改；升级必须 Preview-Confirm-Apply-Verify，并保留回退点。
+- 声明图保持 DAG。修复循环只能通过有上限的 Scenario Loop Run 表达，不得加入无限重试或任意脚本节点。
+- 质量分数不能覆盖确认、权限、范围、契约、阻塞缺陷、验证证据和最终用户验收。
+- Scenario Loop Run 只记录已确认任务的运行证据，不替代 `confirmation_state`、验证报告或用户验收；每轮必须可追溯到根因、不同策略、质量/硬门禁、预算和停止原因。
+- 范围、契约、权限、迁移、外部写入、发布、预算临界/耗尽、重复策略或轮次上限必须停止 Loop；重复失败只生成演进候选，禁止静默改写长期规则。
+
 ## Workflow Gates
 
 ### Gate 0：项目认知
@@ -98,6 +108,7 @@ workflow starter 可以升级，但默认不能破坏已经生成的项目工件
 ### Gate 4：方案与实现
 
 - 复杂任务走 `$project-tech-solution`
+- standard / controlled 开发在匹配时走 `$project-workflow-router`，先验证 `.skill-os/workflows/`，最多选择一个主场景 Workflow
 - 实现阶段遵循 `$project-stack-standards` 与 `$project-code-generation`
 
 ### Gate 5：交付收口

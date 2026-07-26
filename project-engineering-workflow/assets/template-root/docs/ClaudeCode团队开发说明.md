@@ -4,7 +4,7 @@
 
 核心规则仍以 `AGENTS.md` 和 `.specify/memory/constitution.md` 为准。Claude Code 可以使用更丰富的 hooks、commands、subagents 或 MCP，但这些能力只能增强执行，不能绕过需求、范围、审查、验证和交付记录。
 
-Claude Code 与 Codex 共用 `fast / standard / controlled` 三档任务通道、版本化确认和影响范围门禁。Hooks 不得把未确认的 controlled 任务自动推进到写入阶段，也不得把旧版本的“可以”解释为对新增范围的批准。
+Claude Code 与 Codex 共用 `fast / standard / controlled` 三档任务通道、版本化确认和影响范围门禁。正式实现前，两个 Harness 都必须遵守 `设计方案 vN -> 任务拆解 vN -> 影响范围 vN -> 验收与自测计划 -> 用户确认`。Hooks 不得把未确认的任务自动推进到写入阶段，也不得把旧版本的“可以”解释为对新增范围的批准。
 
 ## 与 Codex 的共用层
 
@@ -43,6 +43,7 @@ Claude Code 中仍按项目 skills 顺序执行。每次任务先检查 `project
 2. `project-codebase-onboarding`
 3. `project-scope-impact-guard`
 4. `project-tech-solution`
+4.5. `project-workflow-router`，standard / controlled 开发匹配声明 Workflow 时先校验 `.skill-os/workflows/`，最多选择一个主场景或联调 Workflow
 5. `project-superpowers-router`
 6. `project-dev-core`
 7. `project-stack-standards`
@@ -55,6 +56,8 @@ Claude Code 中仍按项目 skills 顺序执行。每次任务先检查 `project
 14. `project-test-and-report`
 15. `project-session-summary`
 16. 重复摩擦进入 `project-skill-upgrade-advisor`
+
+Scenario Loop 只能在已确认范围内修复已验证问题。达到质量阈值也不能跳过阻塞缺陷、验证证据和用户验收；出现范围、契约、权限、迁移或预算变化时停止并回到确认门禁。
 
 ## Hooks 使用边界
 

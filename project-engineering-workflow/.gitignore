@@ -1,2 +1,2 @@
-.npmrc
-workflow-skills-project-engineering-workflow-*.tgz
+node_modules/
+npm-debug.log*

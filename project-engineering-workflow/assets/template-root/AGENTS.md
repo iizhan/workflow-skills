@@ -17,6 +17,21 @@ Investigate discoverable project facts before asking questions. Ask only when am
 
 Reassess the task lane after onboarding and impact analysis. Persist state as `clarification -> requirement_impact_pending -> plan_pending -> executing -> verifying -> awaiting_user_acceptance -> accepted | revision_requested`, skipping only gates marked `not_required`. Fast work skips pre-execution approval gates, not verification or final user acceptance.
 
+## Formal Implementation Confirmation
+
+Before formal implementation of `standard` or `controlled` work, publish one aligned confirmation package:
+
+1. `设计方案 vN`: solution structure, UI/API/data behavior, alternatives, tradeoffs, and non-goals.
+2. `任务拆解 vN`: ordered `TASK-*` items mapped to confirmed `ITEM-*`, dependencies, allowed paths, completion conditions, and verification evidence.
+3. `影响范围 vN`: direct/indirect impact, data, interfaces/config, security/permissions, compatibility, performance, tests, release/rollback, Workflow/Skill assets, and explicit non-impact boundaries.
+4. `验收与自测计划`: acceptance criteria, commands, visible interaction path, evidence format, and rollback trigger.
+
+Do not edit business code, configuration, tests, or Workflow assets until the applicable package version is explicitly confirmed. A `fast` task may use the lightweight path: brief solution, affected files, verification method, and recorded confirmation only when the change is clear, local, reversible, and low risk.
+
+If implementation reveals a material design change, a new impact dimension, an expanded path/module, a changed acceptance criterion, or a new permission/data/migration risk, pause. Publish the changed artifact as `vN+1`, record the scope delta, and obtain confirmation before continuing. Ordinary implementation-detail choices that stay inside the approved package do not require a new gate.
+
+After implementation, run self-test and an impact-scope self-check. Publish `验证报告 vN` and keep the task in `awaiting_user_acceptance` until the user confirms acceptance or requests revision.
+
 1. Use `$project-requirement-gate`.
    Classify the task lane using the fresh Project Profile first, check whether the request is clear, inspect only missing task context, and produce versioned Chinese requirements with `ITEM-*` work items and acceptance criteria.
    For standard or controlled work, present concrete choices: confirm execution, modify items, narrow scope, or add requirements.
@@ -30,7 +45,12 @@ Reassess the task lane after onboarding and impact analysis. Persist state as `c
 
 4. Use `$project-tech-solution` for cross-layer, risky, or unclear tasks.
    Turn confirmed requirements and impact into `TASK-*` child tasks with dependencies, completion conditions, verification evidence, and rollback.
-   Controlled tasks require a second versioned confirmation before editing. Standard tasks need another confirmation only when decomposition changes approved scope or impact.
+   Publish `设计方案 vN` and `任务拆解 vN` before editing. Standard and controlled formal implementation both require explicit confirmation of the aligned design, task, impact, and acceptance package. If decomposition changes scope or impact, publish a new version and reconfirm only the delta.
+
+4.5. Use `$project-workflow-router` after the task lane and Project Profile are known for standard or controlled development that may match a declared role, scenario, or integration Workflow.
+   Validate `.skill-os/workflows/` before recommendation, select at most one primary scenario or integration Workflow, and list foundation/role Templates only as dependencies. A declared Workflow is an execution plan and evidence model, not permission to bypass confirmation, Harness controls, scope, budget, security review, verification, or user acceptance. Use its Loop Policy only after the formal package is confirmed; keep every iteration inside approved scope and stop for a `vN+1` confirmation when scope, contract, permission, migration, external effect, or release impact changes.
+   Conversation is the only execution entry for Scenario Loop Engineering. When the current standard or controlled request matches a loop-enabled primary Workflow, show the selected Workflow and Loop policy as part of the formal confirmation package; after that same package is explicitly confirmed, start the Loop in this conversation and record it in the feature's `workflow-state.yaml`. The desktop workbench may read and display the record, but it never starts Codex, authorizes implementation, or creates a Loop on the user's behalf.
+   A Scenario Loop Run is an operational record linked to the confirmed package and selected Template version, not a second task lifecycle. Each iteration records its root cause, distinct repair strategy, quality dimensions, hard-check evidence, budget state, residual risk, and stop reason. The default ceiling is three iterations and two distinct strategies for one root cause. A score of 90 or more still fails when a required check, evidence, dimension floor, or blocking defect is unresolved. Unknown, critical, or exhausted budget blocks another automatic repair iteration. Repeated root-cause failure creates an evolution candidate; it never silently rewrites a Skill or Workflow.
 
 5. Use `$project-superpowers-router` when a request benefits from enhanced capabilities.
    Route browser automation, asset generation, multi-agent delegation, external tools, GSD long-task orchestration, gstack role review, or recurring work through the confirmed requirement and locked scope.

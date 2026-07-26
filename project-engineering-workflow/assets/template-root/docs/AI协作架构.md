@@ -3,7 +3,7 @@
 本项目的 AI 协作架构可以理解为：
 
 ```text
-spec-kit + Project Profile + Frontend/Backend Role Workflows + Memory Router + Evolution Router + Branch/Release Router + Superpowers + GSD + gstack + project-local skills
+spec-kit + Project Profile + Workflow Template Registry + Frontend/Backend Role Workflows + Scenario Loop Engineering + Memory Router + Evolution Router + Branch/Release Router + Superpowers + GSD + gstack + project-local skills
 ```
 
 更准确地说，这不是五套流程并列运行，而是用 project-local skills 把不同能力接入同一套项目规则。
@@ -21,6 +21,7 @@ flowchart TD
   B --> C["Codebase Onboarding"]
   C --> D["Versioned Scope + Impact Guard"]
   D --> E["Work Items + Child Tasks + Confirmation"]
+  E --> W["Workflow Router + Project-local Templates"]
   E --> T["Frontend / Backend Role Router"]
   E --> F["Superpowers Router"]
   E --> P["Branch / Release Router"]
@@ -31,6 +32,9 @@ flowchart TD
   E --> R["Memory Router"]
   P --> S["feature/* -> release/* -> tag -> merge main"]
   T --> J["Code Generation"]
+  W --> T
+  W --> O["Bounded Scenario Loop"]
+  O --> J
   G --> J
   H --> J
   I --> J
@@ -66,12 +70,13 @@ flowchart TD
 它们保存：
 
 - `spec.md`: 需求和验收标准
+- `design.md`: 设计方案、备选取舍和用户确认版本
 - `plan.md`: 技术方案和取舍
 - `tasks.md`: 可执行任务拆分
 - `quickstart.md`: 验证或使用入口
 - `checklists/delivery.md`: 交付检查
 - `workflow-state.yaml`: 长任务、能力路由、角色评审和恢复状态
-- `workflow-state.yaml`: 同时保存任务通道及变化历史、需求/影响/计划/验证版本、确认门禁与历史、事项、子任务、影响维度和范围变化
+- `workflow-state.yaml`: 同时保存任务通道及变化历史、需求/设计/影响/计划/任务/验证版本、确认门禁与历史、事项、子任务、影响维度和范围变化
 - `memory-policy.md`: 记忆分域、保留期、检索和写入确认规则
 - `delivery-summary.md`: 面向用户的标准中文交付总结
 - `task-reflection.md`: 每次有意义任务结束后的固定复盘输出
@@ -132,6 +137,12 @@ flowchart TD
 - 两条 Workflow 都只加载命中的 reference。全栈任务可以同时进入两个入口，但不能默认读取两个完整角色包。
 - 项目 Profile 优先于通用 reference；角色流程需要记录加载了什么以及为什么。
 
+### 6.5 Workflow Template 与场景 Loop 层
+
+`.skill-os/workflows/` 存放机器可读的基础、角色、场景和联调 Template。`project-workflow-router` 只在 standard / controlled 开发任务中选择一个主场景或联调 Workflow；基础和角色 Workflow 作为依赖，不重复抢路由。
+
+声明流程保持 DAG。Loop Engineering 记录跨迭代的分析、设计、计划、实施、验证、自测和修复，不在图中画无限回边。它只可在已确认范围内运行，达到质量阈值也不能跳过确认、权限、验证、阻塞问题或用户验收。
+
 ### 7. 分支与发布层
 
 `project-branch-release` 负责把 git 分支流和发布动作纳入项目规则。
@@ -162,6 +173,7 @@ flowchart TD
 - `project-backend-standards`: 后端研发角色入口。
 - `project-frontend-standards`: 前端研发角色入口。
 - `project-profile-router`: 项目技术栈、架构摘要、决策记忆和证据新鲜度入口。
+- `project-workflow-router`: Template 校验、候选解释、单主 Workflow 选择和 Loop 边界入口。
 
 这个层的作用是把外部方法变成项目可控的本地流程，而不是让外部方法绕过项目规则。
 
@@ -183,7 +195,7 @@ flowchart TD
 - 涉及功能分支、发布分支、tag、merge 主干时走 `project-branch-release`。
 - 涉及记住、遗忘、偏好、团队知识、会话总结、自我提升时走 `project-memory-router`。
 - 涉及 skill、模板、流程、宪法的持续优化时走 `project-evolution-router`。
-- 所有增强能力结果都必须回收到 spec、plan、tasks、review 或 test report。
+- 所有增强能力结果都必须回收到 spec、design、plan、tasks、review 或 test report。
 - 所有长期记忆更新都必须先展示候选并获得用户确认。
 - 所有长期规则更新都必须先展示提案并通过验证。
 - 任何增强能力都不能绕过需求确认、范围锁定、review 和测试报告。

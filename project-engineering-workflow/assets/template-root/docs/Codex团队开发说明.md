@@ -12,6 +12,8 @@
   - 项目级调度入口
 - `.agents/skills`
   - 项目本地 skills
+- `.skill-os`
+  - 项目本地 Workflow Template、注册策略、版本和绑定来源；不存放任意可执行脚本
 - `.specify`
   - 规格、方案、任务模板与脚本
 - `.specify/memory`
@@ -34,16 +36,17 @@
 先选择任务通道：
 
 - `fast`：目标清楚、风险低、可回滚，简要复述后直接执行并验证。
-- `standard`：确认一版“需求 + 事项 + 验收 + 影响范围”后执行。
-- `controlled`：先确认需求、事项、验收和影响范围，再确认子任务、依赖、验证与回滚。
+- `standard`：先确认一版“需求 + 事项 + 验收 + 影响范围”，再确认设计方案、任务拆解和自测计划后执行。
+- `controlled`：先确认需求、事项、验收和影响范围，再确认设计方案、子任务、依赖、验证与回滚后执行。
 
-确认必须绑定版本。执行中出现超出已确认范围的影响时，暂停并只确认新增差异。
+确认必须绑定版本。正式实现前至少形成 `设计方案 vN`、`任务拆解 vN`、`影响范围 vN` 和 `验收与自测计划`。执行中出现超出已确认范围的影响时，暂停并发布 `vN+1`，只确认新增差异。
 
 0. `project-profile-router`
 1. `project-requirement-gate`
 2. `project-codebase-onboarding`
 3. `project-scope-impact-guard`
 4. `project-tech-solution`
+4.5. `project-workflow-router`，standard / controlled 开发匹配角色、场景或联调 Workflow 时校验 `.skill-os/workflows/`；最多选择一个主 Workflow，基础和角色 Template 只是依赖
 5. `project-superpowers-router`
 6. `project-gsd-router`，仅长任务或多轮任务需要
 7. `project-gstack-router`，仅角色化评审或交付判断需要
@@ -64,7 +67,9 @@
 22. `project-session-summary`
 23. `project-skill-upgrade-advisor`，重复摩擦需要
 
-其中影响范围必须覆盖：直接和间接影响、用户、数据/迁移、接口/配置、安全/权限、兼容、性能、测试、发布/回滚、Workflow/Skill，以及明确不影响项。验证报告必须把每个事项和影响维度映射到证据、失败或未覆盖风险，并等待用户验收。
+Workflow 只在正式方案、任务、影响范围和验收/自测计划确认后进入 Loop。Scenario Loop Run 只是已绑定 Template 版本的运行证据容器，不替代任务状态或用户验收。每轮必须保留问题、不同修复策略、质量维度和硬门禁、验证证据、预算状态、残余风险和停止原因；范围、契约、权限、迁移、外部写入、发布、预算临界/耗尽、重复策略或轮次上限时必须停止并重新确认。连续失败只能生成演进候选，不能自动修改长期 Skill 或 Workflow。
+
+其中影响范围必须覆盖：直接和间接影响、用户、数据/迁移、接口/配置、安全/权限、兼容、性能、测试、发布/回滚、Workflow/Skill，以及明确不影响项。完成后必须进行影响范围自查。验证报告必须把每个事项和影响维度映射到证据、失败或未覆盖风险，并等待用户验收。
 
 ## 首轮接入必做
 

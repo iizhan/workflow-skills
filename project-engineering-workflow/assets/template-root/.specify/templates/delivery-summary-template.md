@@ -6,7 +6,9 @@
 - Date: `[DATE]`
 - Related Request: `[ORIGINAL REQUEST]`
 - Requirement Version: `v1`
+- Design Version: `v1`
 - Impact Version: `v1`
+- Task Breakdown Version: `v1`
 - Plan Version: `v1`
 - Verification Version: `v1`
 - Delivery Status: `awaiting_user_acceptance`
@@ -34,6 +36,7 @@
 - 执行命令:
 - 自动验证结果:
 - 界面/交互验证:
+- 影响范围自查:
 - 截图或 UI 报告:
 - 手动验证路径:
 - 未覆盖项:

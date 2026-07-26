@@ -25,12 +25,18 @@ project_profile:
 
 artifact_versions:
   requirement: null
+  design: null
   impact: null
   plan: null
+  task_breakdown: null
   verification: null
 
 confirmation_gates:
   requirement_impact:
+    required: false
+    status: pending
+    approved_version: null
+  design_plan:
     required: false
     status: pending
     approved_version: null
@@ -114,3 +120,21 @@ validation_status: pending
 verification_evidence: []
 handoff_notes: []
 residual_risks: []
+
+# Conversation-initiated operational Loop records only. They do not replace confirmation_state or user_acceptance.
+# - run_id: "loop-[FEATURE SLUG]-001"
+#   initiation_source: conversation
+#   session_ref: null
+#   primary_workflow: null
+#   template_version: null
+#   formal_package:
+#     requirement: null
+#     design: null
+#     impact: null
+#     task_breakdown: null
+#     verification: null
+#     confirmation_ref: null
+#   status: pending_confirmation # pending_confirmation | running | needs_reconfirmation | verified | blocked | needs_user_decision | evolution_candidate
+#   current_iteration: 0
+#   iterations: []
+scenario_loop_runs: []

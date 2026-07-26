@@ -28,7 +28,7 @@ Validate branch/release readiness before any remote push or publish:
 ```bash
 npx @workflow-skills/project-engineering-workflow release-doctor \
   --output-dir "/absolute/path/to/your-repo" \
-  --release-version "0.6.0" \
+  --release-version "0.7.0" \
   --json \
   --json-out "docs/workflow-release-doctor.json"
 ```
@@ -40,6 +40,15 @@ npx @workflow-skills/project-engineering-workflow memory-index \
   --output-dir "/absolute/path/to/your-repo" \
   --json \
   --json-out "docs/workflow-memory-index.json"
+```
+
+Validate the project-local Workflow Template registry before recommending or activating a scenario:
+
+```bash
+npx @workflow-skills/project-engineering-workflow workflow-validate \
+  --output-dir "/absolute/path/to/your-repo" \
+  --json \
+  --json-out "docs/workflow-manifest-validation.json"
 ```
 
 Upgrade an existing generated project without touching historical `specs/` artifacts:
@@ -72,6 +81,8 @@ If a project has not adopted `.specify/memory-store` yet, upgrade it with `--mod
 `0.4.x` adds adaptive `fast / standard / controlled` task lanes, versioned confirmation gates, full impact analysis, scope-delta handling, and impact-to-evidence user acceptance reports.
 `0.5.x` adds adaptive backend and frontend role workflows. Each role covers the full delivery path but loads architecture, contract, data, runtime, experience, accessibility, performance, and testing references only when the approved change needs them.
 `0.6.x` adds a source-backed project Profile, architecture summary, confirmed decision memory, and evidence fingerprints so later tasks reuse fresh context instead of rereading the whole repository.
+`0.7.x` adds a formal pre-implementation confirmation loop: versioned design, task breakdown, impact scope, acceptance/self-test plan, scope-delta pause, impact self-check, and explicit user acceptance.
+`0.8.x` adds versioned Workflow Templates, project-local declarations, one-primary-workflow routing, bounded Scenario Loop Engineering, and a static Manifest validator. `0.8.1` adds the generic Feature delivery scenario for ordinary features, fixes, and refactors that do not start from a design or API contract. `0.8.2` makes the Codex project conversation the only Loop execution entry: it starts after the confirmed package and writes task evidence locally; the desktop workbench only observes imported evidence. The declared graph stays acyclic and represents repair as bounded iterations rather than arbitrary script retries.
 Remote push and npm publish are still explicit manual steps; the shipped release scripts now refuse extra push/publish flags and keep remote actions outside local release preparation.
 
 The generated workflow combines `AGENTS.md`, project-local skills, spec-kit style artifacts, memory governance, workflow evolution, branch/release governance, Superpowers routing, GSD state, gstack role review, adaptive backend/frontend role workflows, development rules, Codex and Claude Code harness guidance, security review, staged verification, code review, and test reporting.
@@ -89,3 +100,4 @@ For practical old-project migration guides, see [`references/08-upgrade-compatib
 For adaptive confirmation migration, see [`references/08-upgrade-compatibility-pack/v0.3-to-v0.4-upgrade-manual.md`](./references/08-upgrade-compatibility-pack/v0.3-to-v0.4-upgrade-manual.md).
 For adaptive frontend/backend role workflow migration, see [`references/08-upgrade-compatibility-pack/v0.4-to-v0.5-upgrade-manual.md`](./references/08-upgrade-compatibility-pack/v0.4-to-v0.5-upgrade-manual.md).
 For project Profile and decision-memory migration, see [`references/08-upgrade-compatibility-pack/v0.5-to-v0.6-upgrade-manual.md`](./references/08-upgrade-compatibility-pack/v0.5-to-v0.6-upgrade-manual.md).
+For Workflow Template and Loop Engineering migration, see [`references/08-upgrade-compatibility-pack/v0.7-to-v0.8-upgrade-manual.md`](./references/08-upgrade-compatibility-pack/v0.7-to-v0.8-upgrade-manual.md).

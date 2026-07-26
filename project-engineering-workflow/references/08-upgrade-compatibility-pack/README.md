@@ -21,6 +21,8 @@ That is useful for new projects, but it creates a real compatibility question:
 - how a `v0.3.x` project should adopt `v0.4.x` confirmation and impact governance explicitly
 - how a `v0.4.x` project should adopt `v0.5.x` frontend/backend role workflows explicitly
 - how a `v0.5.x` project should adopt `v0.6.x` Profile and decision-memory reuse explicitly
+- how a `v0.6.x` project should adopt `v0.7.x` formal design/task/impact confirmation explicitly
+- how a `v0.7.x` project should adopt `v0.8.x` Workflow Templates and bounded Scenario Loop Engineering explicitly
 
 ## Current Direction
 
@@ -33,6 +35,8 @@ For `v0.2.x`, `v0.3.x`, `v0.4.x`, `v0.5.x`, and `v0.6.x`, the intended compatibi
 - `0.4.x` content contracts should apply only after a project declares that workflow line
 - `0.5.x` role workflow contracts should apply only after a project declares that workflow line
 - `0.6.x` Profile contracts should apply only after a project declares that workflow line
+- `0.7.x` formal confirmation contracts should apply only after a project declares that workflow line
+- `0.8.x` Workflow Template and Manifest contracts should apply only after a project declares that workflow line
 
 ## Files In This Pack
 
@@ -46,5 +50,9 @@ For `v0.2.x`, `v0.3.x`, `v0.4.x`, `v0.5.x`, and `v0.6.x`, the intended compatibi
   A reviewed migration path for adaptive frontend/backend role workflows and progressive role references.
 - `v0.5-to-v0.6-upgrade-manual.md`
   A reviewed migration path for project Profile, architecture summaries, decision memory, and evidence freshness.
+- `v0.6-to-v0.7-upgrade-manual.md`
+  A reviewed migration path for versioned design proposals, task breakdown, impact scope, scope-delta pauses, self-check, and user acceptance.
+- `v0.7-to-v0.8-upgrade-manual.md`
+  A reviewed migration path for Workflow Templates, project-local declarations, Manifest validation, one-primary routing, and bounded Scenario Loops.
 - `upgrade-report-template.md`
   A review template for `upgrade --dry-run --write-report` plans.

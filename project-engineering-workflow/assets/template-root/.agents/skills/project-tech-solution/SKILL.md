@@ -30,8 +30,9 @@ Use this skill when the task is complex enough that coding without a plan would 
    - config or env impact
    - testing strategy
 6. Map affected dimensions to verification evidence and rollback points.
-7. Publish a plan version and require confirmation for controlled work. Standard work may reuse the combined requirement/impact confirmation unless decomposition changes scope.
-8. If the plan changes an approved item or impact, publish a delta and reconfirm only that portion.
+7. Publish `设计方案 vN`, `任务拆解 vN`, and the linked `影响范围 vN` before editing. Include the acceptance/self-test plan and rollback trigger in the same confirmation package.
+8. Require explicit confirmation for formal `standard` and `controlled` implementation. Fast work may use the lightweight path defined by the requirement gate.
+9. If the plan changes an approved item, impact, acceptance criterion, or allowed path, publish a delta as `vN+1` and reconfirm before continuing.
 
 ## Output Format
 
@@ -43,5 +44,6 @@ Use this skill when the task is complex enough that coding without a plan would 
 - `影响文件/目录`
 - `验证证据映射`
 - `风险与回退`
+- `设计方案版本` · `任务拆解版本` · `影响范围版本`
 - `待确认项`
 - `计划版本与确认选项`

@@ -4,15 +4,24 @@
 **功能目录**: `specs/[FEATURE SLUG]`  
 **日期**: [DATE]
 **关联需求版本**: v1
+**设计方案版本**: v1
 **影响版本**: v1
+**任务拆解版本**: v1
 **计划版本**: v1
-**确认状态**: fast: not_required / standard: reuse_requirement_impact | controlled: pending_confirmation
+**确认状态**: fast: not_required / standard|controlled: pending_confirmation
 
 ## 1. 需求摘要
 
 - 本次要解决的问题：
 - 用户可见结果：
 - 范围边界：
+
+## 1.1 设计方案确认
+
+- 设计方案文件：`design.md`
+- 设计方案版本：v1
+- 关键取舍：
+- 用户确认：确认执行 / 修改方案 / 缩小范围 / 补充要求
 
 ## 2. 锁定范围
 
@@ -84,7 +93,10 @@
 
 ## 7. 计划确认
 
-- 需要确认：是 / 否（fast 为否；未改变标准任务范围时可复用需求/影响确认）
+- 需要确认：是 / 否（fast 为否；standard / controlled 正式实现前必须确认）
 - 用户选择：确认执行 / 修改子任务 / 缩小范围 / 补充验证
 - 确认版本：
+- 设计方案版本：
+- 任务拆解版本：
+- 影响范围版本：
 - 范围变化：

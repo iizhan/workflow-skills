@@ -1,11 +1,11 @@
 ---
 name: project-scope-impact-guard
-description: Analyze and lock the smallest safe change scope before implementation. Use when a request may change files, behavior, data, interfaces, security, compatibility, performance, tests, release behavior, or workflow assets and Codex must produce a versioned impact report, assign an impact level, define non-impact boundaries, and stop on scope drift.
+description: Lock the smallest safe change scope, complete impact report, non-impact boundary, and scope-drift stop before implementation.
 ---
 
 # Project Scope Impact Guard
 
-Use this skill after initial project inspection and before approving standard or controlled work.
+Use after initial inspection and before approving standard or controlled work.
 
 ## Impact Levels
 
@@ -16,13 +16,16 @@ Use this skill after initial project inspection and before approving standard or
 
 ## Workflow
 
-1. Lock the smallest scope and level.
-2. Separate direct edits from indirect callers, dependencies, shared assets, and operations.
-3. Assess user; data/history/migration; API/IPC/CLI/config; security/privacy/permission; compatibility; performance/resources; tests; release/rollback; Workflow/Skill.
-4. State features, directories, data, projects, and behavior explicitly unaffected.
-5. Mark uncertainty `confirmed`, `likely`, or `unknown`; investigate unknown high impact before approval.
-6. Map impact to `ITEM-*` and verification evidence; publish `影响范围 vN`.
-7. On unapproved impact, pause, publish a scope delta, and confirm only the addition.
+1. Lock the smallest scope and level; separate direct edits from indirect callers, dependencies, shared assets, and operations.
+2. Assess user behavior; data/history/migration; API/IPC/CLI/config; security/privacy/permission; compatibility; performance; tests; release/rollback; Workflow/Skill.
+3. State explicitly unaffected features, directories, data, projects, and behavior.
+4. Mark uncertainty `confirmed`, `likely`, or `unknown`; investigate unknown high impact before approval.
+5. Map impact to `ITEM-*` and evidence; publish `影响范围 vN`.
+6. Pause on unapproved impact, publish a scope delta, and confirm only the addition.
+
+## Confirmation Boundary
+
+`影响范围 vN` is confirmed with `设计方案 vN`, `任务拆解 vN`, and the acceptance/self-test plan before code or Workflow assets change. A new data path, permission, migration, shared module, performance assumption, release action, or user-visible behavior requires `影响范围 vN+1`.
 
 ## Output Format
 

@@ -40,6 +40,8 @@ This skill combines:
 - For an old-project migration path from `v0.3.x` to `v0.4.x`, read `references/08-upgrade-compatibility-pack/v0.3-to-v0.4-upgrade-manual.md`
 - For an old-project migration path from `v0.4.x` to `v0.5.x`, read `references/08-upgrade-compatibility-pack/v0.4-to-v0.5-upgrade-manual.md`
 - For project Profile, architecture cache, decision reuse, and evidence freshness, read `references/08-upgrade-compatibility-pack/v0.5-to-v0.6-upgrade-manual.md`
+- For versioned design, task, impact confirmation, scope-delta pause, self-check, and user acceptance, read `references/08-upgrade-compatibility-pack/v0.6-to-v0.7-upgrade-manual.md`
+- For Workflow Templates, project bindings, Manifest validation, and bounded Scenario Loop Engineering, read `references/08-upgrade-compatibility-pack/v0.7-to-v0.8-upgrade-manual.md`
 - For the six-lane onboarding map, read the generated `docs/AI能力地图.md` in a bootstrapped project
 - For backend role workflow rules, read the generated `.agents/skills/project-backend-standards/SKILL.md` and only the referenced backend topic required by the changed surface
 - For frontend role workflow rules, read the generated `.agents/skills/project-frontend-standards/SKILL.md` and only the referenced frontend topic required by the changed surface
@@ -66,6 +68,7 @@ This skill combines:
   - GSD router
   - gstack router
   - project Profile and architecture routing
+  - Workflow Template routing and Manifest validation
   - dev core
   - backend standards and progressive backend references
   - frontend standards and progressive frontend references
@@ -152,7 +155,7 @@ If the repository already uses the governed branch/release lane, validate local 
 ```bash
 npx @workflow-skills/project-engineering-workflow release-doctor \
   --output-dir "/absolute/path/to/target-repo" \
-  --release-version "0.6.0" \
+  --release-version "0.7.0" \
   --json \
   --json-out "docs/workflow-release-doctor.json"
 ```
@@ -203,6 +206,8 @@ In the target repository, the recommended sequence is:
    - cover direct/indirect, user, data, contracts, security, compatibility, performance, tests, release, workflow, and explicit non-impact boundaries
 4. `$project-tech-solution`
    - decompose confirmed `ITEM-*` into `TASK-*`; controlled work requires plan confirmation before edits
+4.5. `$project-workflow-router` for standard or controlled development that matches a declared role, scenario, or integration Workflow
+   - validate `.skill-os/workflows`, choose at most one primary scenario, and keep foundation/role flows as dependencies
 5. `$project-superpowers-router` when enhanced capabilities are useful
    - `$project-gsd-router` for long-running or context-heavy work
    - `$project-gstack-router` for role-specific product, design, engineering, QA, ship, or reflection judgment
