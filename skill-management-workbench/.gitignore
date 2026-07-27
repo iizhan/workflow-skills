@@ -2,5 +2,7 @@ node_modules
 dist
 out
 tmp
+resources
+release
 .DS_Store
 *.tsbuildinfo

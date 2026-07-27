@@ -30,6 +30,7 @@ function readPackageVersion(packagePath: string) {
 
 const workflowEntryStart = "<!-- workflow-skills:project-engineering-workflow:start -->";
 const workflowEntryEnd = "<!-- workflow-skills:project-engineering-workflow:end -->";
+const emptyDirectoryManifestFileName = ".skill-os-empty-directory-manifest.json";
 
 function inferStarterContext(projectRoot: string) {
   const projectName = basename(projectRoot) || "Project";
@@ -125,7 +126,7 @@ function collectTemplateEntries(templateRoot: string) {
 
     const entries = readdirSync(current, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.name === ".DS_Store") {
+      if (entry.name === ".DS_Store" || entry.name === emptyDirectoryManifestFileName) {
         continue;
       }
 
@@ -140,9 +141,33 @@ function collectTemplateEntries(templateRoot: string) {
     }
   }
 
+  const emptyDirectoryManifestPath = join(templateRoot, emptyDirectoryManifestFileName);
+  if (existsSync(emptyDirectoryManifestPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(emptyDirectoryManifestPath, "utf8")) as {
+        emptyDirectories?: unknown;
+      };
+      if (Array.isArray(parsed.emptyDirectories)) {
+        for (const entry of parsed.emptyDirectories) {
+          if (typeof entry !== "string") continue;
+          const relativePath = toPosixPath(entry);
+          if (
+            relativePath &&
+            !relativePath.startsWith("/") &&
+            !relativePath.split("/").includes("..")
+          ) {
+            directories.push(relativePath);
+          }
+        }
+      }
+    } catch {
+      // An optional packaging manifest must not block an otherwise valid starter.
+    }
+  }
+
   return {
     files: files.sort((left, right) => left.localeCompare(right)),
-    directories: directories.sort((left, right) => left.localeCompare(right))
+    directories: [...new Set(directories)].sort((left, right) => left.localeCompare(right))
   };
 }
 

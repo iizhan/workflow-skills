@@ -2,12 +2,22 @@
   "name": "skill-management-workbench",
   "version": "0.0.1",
   "private": true,
+  "author": "Skill OS",
   "description": "Local-first skill registry, telemetry, analytics, and optimization workbench.",
   "type": "module",
   "main": "./out/main/index.js",
+  "engines": {
+    "node": ">=20 <24"
+  },
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "sync:workflow-assets": "node scripts/sync-workflow-assets.mjs",
+    "verify:workflow-assets": "node scripts/verify-workflow-assets.mjs",
+    "test:workflow-assets": "npm run sync:workflow-assets && npm run verify:workflow-assets && node scripts/workflow-asset-paths-integration.mjs",
+    "build": "npm run sync:workflow-assets && npm run verify:workflow-assets && electron-vite build",
+    "verify:package:dir": "node scripts/verify-packaged-workflow-assets.mjs --app-dir \"release/mac-arm64/Skill OS.app\"",
+    "package:dir": "npm run build && electron-builder --mac --arm64 --dir && npm run verify:package:dir",
+    "package:mac": "npm run build && electron-builder --mac --arm64",
     "preview": "electron-vite preview",
     "smoke": "node scripts/smoke-check.mjs",
     "test:starter": "node scripts/workflow-starter-integration.mjs",
@@ -37,8 +47,43 @@
     "@vitejs/plugin-react": "^4.4.1",
     "esbuild": "^0.21.5",
     "electron": "^31.7.7",
+    "electron-builder": "^26.0.12",
     "electron-vite": "^2.3.0",
     "typescript": "^5.8.3",
     "vite": "^5.4.19"
+  },
+  "build": {
+    "appId": "com.workflow-skills.skill-os",
+    "productName": "Skill OS",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "resources/project-engineering-workflow",
+        "to": "project-engineering-workflow"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    }
   }
 }

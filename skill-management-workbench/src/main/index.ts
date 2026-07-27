@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
 import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   AuthorizationInput,
@@ -65,6 +65,7 @@ import { TelemetryService } from "./telemetry-service";
 import { TraceService } from "./trace-service";
 import { WorkflowStarterService } from "./workflow-starter-service";
 import { WorkflowRegistryService } from "./workflow-registry-service";
+import { resolveWorkflowAssetPaths } from "./workflow-asset-paths";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -113,19 +114,19 @@ const localToolTelemetryService = new LocalToolTelemetryService(
   storagePaths
 );
 const appRoot = app.getAppPath();
-const workflowTemplateRoot = resolve(
+const workflowAssetPaths = resolveWorkflowAssetPaths({
   appRoot,
-  "../project-engineering-workflow/assets/template-root/.skill-os/workflows"
-);
-const workflowPackagePath = resolve(appRoot, "../project-engineering-workflow/package.json");
+  resourcesPath: process.resourcesPath,
+  isPackaged: app.isPackaged
+});
 const workflowStarterService = new WorkflowStarterService(
-  resolve(appRoot, "../project-engineering-workflow/assets/template-root"),
-  workflowPackagePath
+  workflowAssetPaths.templateRoot,
+  workflowAssetPaths.packagePath
 );
 const workflowRegistryService = new WorkflowRegistryService(
   database,
-  workflowTemplateRoot,
-  workflowPackagePath
+  workflowAssetPaths.templatesRoot,
+  workflowAssetPaths.packagePath
 );
 const scenarioLoopService = new ScenarioLoopService(database, workflowRegistryService);
 const codexAppServerObservationService = new CodexAppServerObservationService(database, traceService);
