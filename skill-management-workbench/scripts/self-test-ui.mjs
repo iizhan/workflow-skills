@@ -5,6 +5,11 @@ import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import {
+  extractProductNavHrefs,
+  findInertButtons,
+  loadRendererSource
+} from "./lib/load-renderer-source.mjs";
 
 const root = new URL("..", import.meta.url).pathname;
 const reportDir = join(root, "tmp", "self-test");
@@ -352,7 +357,7 @@ async function runSourceContractFallback(blockedReason) {
 }
 
 function runSourceInteractionContractChecks() {
-  const app = readProjectFile("src/renderer/src/App.tsx");
+  const app = loadRendererSource();
   const styles = readProjectFile("src/renderer/src/styles.css");
   const packageJson = readProjectFile("package.json");
   const rendererIndex = readProjectFile("out/renderer/index.html");
@@ -360,9 +365,8 @@ function runSourceInteractionContractChecks() {
   contractAssert(packageJson.includes('"self-test:ui"'), "Package exposes self-test:ui script");
   contractAssert(rendererIndex.includes("/assets/") || rendererIndex.includes("./assets/"), "Built renderer artifact references bundled assets");
 
-  const navBlock = app.match(/const productNavHrefs = \[([\s\S]*?)\] as const;/);
-  contractAssert(Boolean(navBlock), "Product navigation href contract exists");
-  const navHrefs = navBlock ? [...navBlock[1].matchAll(/"#([^"]+)"/g)].map((match) => match[1]) : [];
+  const navHrefs = extractProductNavHrefs(app) ?? [];
+  contractAssert(navHrefs.length > 0, "Product navigation href contract exists");
   contractAssert(navHrefs.length >= 12, "Product navigation covers all core modules");
 
   for (const href of navHrefs) {
@@ -395,9 +399,7 @@ function runSourceInteractionContractChecks() {
     );
   }
 
-  const inertButtons = [...app.matchAll(/<button\b[\s\S]*?<\/button>/g)].filter(
-    (match) => !match[0].includes("onClick=") && !match[0].includes('type="submit"')
-  );
+  const inertButtons = findInertButtons(app);
   contractAssert(
     inertButtons.length === 0,
     "Every visible button has explicit click behavior",

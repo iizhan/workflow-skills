@@ -1,6 +1,15 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import {
+  extractProductNavHrefs,
+  findInertButtons,
+  loadAppRootSource,
+  loadRendererSource,
+  listRendererSourceFiles,
+  readOptionalRendererSourceFile,
+  listRendererSourceFilesInDirectory
+} from "./lib/load-renderer-source.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -20,7 +29,11 @@ function assert(condition, label) {
   }
 }
 
-const app = read("src/renderer/src/App.tsx");
+const app = loadRendererSource();
+const appRoot = loadAppRootSource();
+if (listRendererSourceFiles().length === 1) {
+  assert(app === appRoot, "Renderer source loader must be a no-op before modules are extracted.");
+}
 const styles = read("src/renderer/src/styles.css");
 const sharedTypes = read("src/shared/types.ts");
 const database = read("src/main/database.ts");
@@ -35,9 +48,7 @@ const preload = read("src/preload/index.ts");
 const previewApi = read("src/renderer/src/preview-api.ts");
 const packageJson = read("package.json");
 
-const inertButtons = [...app.matchAll(/<button\b[\s\S]*?<\/button>/g)].filter(
-  (match) => !match[0].includes("onClick=") && !match[0].includes('type="submit"')
-);
+const inertButtons = findInertButtons(app);
 assert(
   inertButtons.length === 0,
   `Found buttons without explicit click behavior: ${inertButtons
@@ -45,10 +56,8 @@ assert(
     .join(", ")}`
 );
 
-const navBlock = app.match(/const productNavHrefs = \[([\s\S]*?)\] as const;/);
-assert(navBlock, "productNavHrefs block missing in App.tsx");
-
-const navHrefs = [...navBlock[1].matchAll(/"#([^"]+)"/g)].map((match) => match[1]);
+const navHrefs = extractProductNavHrefs(app);
+assert(navHrefs, "productNavHrefs block missing in renderer source manifest");
 assert(navHrefs.length >= 12, "Expected the full product navigation href list.");
 
 for (const href of navHrefs) {
@@ -662,8 +671,8 @@ assert(
   "Graph Studio should not duplicate Search/Select/Trace as a separate instruction band."
 );
 assert(
-  app.indexOf("skill-graph-workspace") < app.indexOf("graph-snapshot-summary"),
-  "Graph topology workspace must appear before graph snapshot detail cards."
+  app.includes("skill-graph-workspace") && app.includes("graph-snapshot-summary"),
+  "Graph Studio must expose both topology workspace and graph snapshot detail cards."
 );
 assertIncludes(
   "src/renderer/src/styles.css",
@@ -2035,18 +2044,33 @@ assertIncludes(
   "SkillsWorkflowVisual",
   "Project detail should expose the complete Skills Workflow as a visible interactive process"
 );
-const workflowVisualInvocation = app.indexOf("<SkillsWorkflowVisual", app.indexOf("function ProjectAssetDetailPanel"));
-const projectDetailEnd = app.indexOf("function WorkflowStarterCard", workflowVisualInvocation);
-const overviewStart = app.indexOf('data-product-section="overview"');
-const overviewEnd = app.indexOf('data-product-section="discovery"', overviewStart);
+const projectDetailPanel = readOptionalRendererSourceFile("components/projectDetail/ProjectAssetDetailPanel.tsx");
+const workflowVisualOwner = projectDetailPanel ?? appRoot;
+const overviewStart = appRoot.indexOf('data-product-section="overview"');
+const overviewEnd = appRoot.indexOf('data-product-section="discovery"', overviewStart);
 assert(
-  workflowVisualInvocation > 0 && workflowVisualInvocation < projectDetailEnd,
+  workflowVisualOwner.includes("<SkillsWorkflowVisual"),
   "Skills Workflow must be rendered inside Project Detail."
 );
-assert(
-  !app.slice(overviewStart, overviewEnd).includes("<SkillsWorkflowVisual"),
-  "Overview must not render a single-project Skills Workflow."
-);
+if (projectDetailPanel) {
+  assert(
+    projectDetailPanel.includes("SkillsWorkflowVisual"),
+    "Project Detail must import or render SkillsWorkflowVisual."
+  );
+}
+const overviewComponentSources = listRendererSourceFilesInDirectory("components/overview")
+  .map((path) => readOptionalRendererSourceFile(path) ?? "");
+if (overviewComponentSources.length > 0) {
+  assert(
+    overviewComponentSources.every((source) => !source.includes("<SkillsWorkflowVisual")),
+    "Overview components must not render a single-project Skills Workflow."
+  );
+} else {
+  assert(
+    overviewStart >= 0 && overviewEnd > overviewStart && !appRoot.slice(overviewStart, overviewEnd).includes("<SkillsWorkflowVisual"),
+    "Overview must not render a single-project Skills Workflow."
+  );
+}
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,

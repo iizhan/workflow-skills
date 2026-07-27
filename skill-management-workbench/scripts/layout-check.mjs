@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { loadRendererSource } from "./lib/load-renderer-source.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -18,7 +19,7 @@ function assertIncludes(file, content, expected, label) {
   assert(content.includes(expected), `${label} missing in ${file}: ${expected}`);
 }
 
-const app = read("src/renderer/src/App.tsx");
+const app = loadRendererSource();
 const styles = read("src/renderer/src/styles.css");
 const status = read("../specs/skill-management-workbench/implementation-status.md");
 
