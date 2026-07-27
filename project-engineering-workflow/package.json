@@ -22,7 +22,7 @@
     "scripts"
   ],
   "scripts": {
-    "doctor": "node ./bin/project-engineering-workflow.mjs doctor --output-dir ./assets/template-root",
+    "doctor": "bash ./scripts/doctor.sh ./assets/template-root",
     "smoke": "node ./bin/project-engineering-workflow.mjs init --project-name Smoke --project-slug smoke --stack-name \"React + Node.js\" --app-path apps/web --test-command \"pnpm test\" --output-dir /private/tmp/project-engineering-workflow-smoke",
     "sync:formal-confirmation": "node ./scripts/sync-formal-confirmation.mjs",
     "validate:workflows": "node ./scripts/workflow-manifest-validator.mjs --workflow-root ./assets/template-root/.skill-os/workflows --skills-dir ./assets/template-root/.agents/skills",

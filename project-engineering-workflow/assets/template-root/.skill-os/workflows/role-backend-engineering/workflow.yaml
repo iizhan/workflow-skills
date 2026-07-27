@@ -1,0 +1,73 @@
+schema_version: "1.1.0"
+template_id: "role.backend-engineering"
+template_version: "1.0.0"
+name: "Backend engineering role"
+kind: "role"
+status: "approved"
+entrypoints:
+  task_types: [development, refactor, bugfix]
+  required_inputs: [request, backend_surface]
+  profile_conditions:
+    surfaces: [backend]
+inputs:
+  - name: request
+    required: true
+  - name: backend_surface
+    required: true
+outputs:
+  - name: api_delivery
+  - name: backend_verification
+composition:
+  requires:
+    - template_id: foundation.engineering-governance
+      version: "^1.0.0"
+skills:
+  - skill_ref: project-backend-standards
+  - skill_ref: project-code-generation
+  - skill_ref: project-code-review
+  - skill_ref: project-test-and-report
+nodes:
+  - id: backend-standards
+    kind: skill
+    skill_ref: project-backend-standards
+  - id: contract-plan
+    kind: checkpoint
+  - id: implementation
+    kind: skill
+    skill_ref: project-code-generation
+  - id: review
+    kind: skill
+    skill_ref: project-code-review
+  - id: report
+    kind: skill
+    skill_ref: project-test-and-report
+edges:
+  - id: standards-to-contract-plan
+    from: backend-standards
+    to: contract-plan
+  - id: contract-plan-to-implementation
+    from: contract-plan
+    to: implementation
+  - id: implementation-to-review
+    from: implementation
+    to: review
+  - id: review-to-report
+    from: review
+    to: report
+quality_gate:
+  score_policy_ref: "quality.backend-engineering.v1"
+  pass_score: 90
+  dimension_floors:
+    coverage: 75
+    correctness: 75
+    verification: 75
+  required_checks:
+    - evidence_for_all_confirmed_acceptance
+    - no_blocking_issue
+loop_policy:
+  enabled: false
+permissions:
+  capabilities: [read_project, read_api_contract, write_project_after_confirmation]
+compatibility:
+  core: ">=0.8.0 <1.0.0"
+  manifest_schema: ">=1.1.0 <2.0.0"

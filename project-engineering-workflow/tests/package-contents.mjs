@@ -38,7 +38,14 @@ assert(
     "Store them under a name npm keeps and restore the real name in bin/project-engineering-workflow.mjs (templateSourceRenames)."
 );
 
-const pack = spawnSync("npm", ["pack", "--dry-run", "--json", "--package-lock=false"], {
+const pack = spawnSync("npm", [
+  "pack",
+  "--dry-run",
+  "--json",
+  "--package-lock=false",
+  "--cache",
+  "/private/tmp/npm-cache-workflow-skills"
+], {
   cwd: packageRoot,
   encoding: "utf8"
 });

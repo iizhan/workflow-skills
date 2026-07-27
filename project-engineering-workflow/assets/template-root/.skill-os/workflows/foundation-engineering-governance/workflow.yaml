@@ -1,0 +1,79 @@
+schema_version: "1.1.0"
+template_id: "foundation.engineering-governance"
+template_version: "1.0.0"
+name: "Engineering governance"
+kind: "foundation"
+status: "approved"
+entrypoints:
+  task_types: [development, refactor, bugfix]
+  required_inputs: [request]
+  profile_conditions: {}
+inputs:
+  - name: request
+    required: true
+outputs:
+  - name: confirmed_delivery_package
+  - name: verification_report
+composition:
+  requires: []
+skills:
+  - skill_ref: project-profile-router
+  - skill_ref: project-requirement-gate
+  - skill_ref: project-scope-impact-guard
+  - skill_ref: project-tech-solution
+  - skill_ref: project-verification-loop
+  - skill_ref: project-test-and-report
+nodes:
+  - id: profile
+    kind: skill
+    skill_ref: project-profile-router
+  - id: requirement-confirmation
+    kind: approval_gate
+  - id: impact
+    kind: skill
+    skill_ref: project-scope-impact-guard
+  - id: design-plan
+    kind: skill
+    skill_ref: project-tech-solution
+  - id: implementation-approval
+    kind: approval_gate
+  - id: verification
+    kind: skill
+    skill_ref: project-verification-loop
+  - id: user-acceptance
+    kind: approval_gate
+edges:
+  - id: profile-to-requirement
+    from: profile
+    to: requirement-confirmation
+  - id: requirement-to-impact
+    from: requirement-confirmation
+    to: impact
+  - id: impact-to-design
+    from: impact
+    to: design-plan
+  - id: design-to-implementation-approval
+    from: design-plan
+    to: implementation-approval
+  - id: implementation-approval-to-verification
+    from: implementation-approval
+    to: verification
+  - id: verification-to-user-acceptance
+    from: verification
+    to: user-acceptance
+quality_gate:
+  score_policy_ref: "quality.engineering-governance.v1"
+  pass_score: 90
+  dimension_floors:
+    coverage: 75
+    verification: 75
+  required_checks:
+    - evidence_for_all_confirmed_acceptance
+    - no_blocking_issue
+loop_policy:
+  enabled: false
+permissions:
+  capabilities: [read_project]
+compatibility:
+  core: ">=0.8.0 <1.0.0"
+  manifest_schema: ">=1.1.0 <2.0.0"

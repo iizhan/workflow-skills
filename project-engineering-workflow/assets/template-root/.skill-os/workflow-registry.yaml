@@ -1,0 +1,13 @@
+schema_version: "1.1.0"
+registry_id: "project.workflow-registry"
+mode: "project_local"
+default_selection: "recommend_only"
+upgrade_policy:
+  activation: "preview_confirm_apply_verify"
+  legacy_declarations: "read_only"
+  project_overrides: "restrict_only"
+loop_defaults:
+  max_iterations: 3
+  max_same_root_cause_strategies: 2
+  on_scope_change: "require_reconfirmation"
+  on_budget_exhausted: "needs_user_decision"

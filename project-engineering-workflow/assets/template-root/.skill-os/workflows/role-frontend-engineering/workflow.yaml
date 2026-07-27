@@ -1,0 +1,73 @@
+schema_version: "1.1.0"
+template_id: "role.frontend-engineering"
+template_version: "1.0.0"
+name: "Frontend engineering role"
+kind: "role"
+status: "approved"
+entrypoints:
+  task_types: [development, refactor, bugfix]
+  required_inputs: [request, frontend_surface]
+  profile_conditions:
+    surfaces: [frontend]
+inputs:
+  - name: request
+    required: true
+  - name: frontend_surface
+    required: true
+outputs:
+  - name: frontend_delivery
+  - name: frontend_verification
+composition:
+  requires:
+    - template_id: foundation.engineering-governance
+      version: "^1.0.0"
+skills:
+  - skill_ref: project-frontend-standards
+  - skill_ref: project-code-generation
+  - skill_ref: project-code-review
+  - skill_ref: project-test-and-report
+nodes:
+  - id: frontend-standards
+    kind: skill
+    skill_ref: project-frontend-standards
+  - id: experience-plan
+    kind: checkpoint
+  - id: implementation
+    kind: skill
+    skill_ref: project-code-generation
+  - id: review
+    kind: skill
+    skill_ref: project-code-review
+  - id: report
+    kind: skill
+    skill_ref: project-test-and-report
+edges:
+  - id: standards-to-plan
+    from: frontend-standards
+    to: experience-plan
+  - id: plan-to-implementation
+    from: experience-plan
+    to: implementation
+  - id: implementation-to-review
+    from: implementation
+    to: review
+  - id: review-to-report
+    from: review
+    to: report
+quality_gate:
+  score_policy_ref: "quality.frontend-engineering.v1"
+  pass_score: 90
+  dimension_floors:
+    coverage: 75
+    correctness: 75
+    verification: 75
+  required_checks:
+    - evidence_for_all_confirmed_acceptance
+    - no_blocking_issue
+loop_policy:
+  enabled: false
+permissions:
+  capabilities: [read_project, read_design_assets, write_project_after_confirmation]
+compatibility:
+  core: ">=0.8.0 <1.0.0"
+  manifest_schema: ">=1.1.0 <2.0.0"

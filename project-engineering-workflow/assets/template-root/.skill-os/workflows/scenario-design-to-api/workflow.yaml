@@ -1,0 +1,91 @@
+schema_version: "1.1.0"
+template_id: "scenario.design-to-api"
+template_version: "1.0.0"
+name: "Design to API"
+kind: "scenario"
+status: "approved"
+entrypoints:
+  task_types: [development]
+  required_inputs: [request, prototype_or_design]
+  profile_conditions:
+    surfaces: [backend]
+inputs:
+  - name: request
+    required: true
+  - name: prototype_or_design
+    required: true
+outputs:
+  - name: api_contract
+  - name: api_delivery
+  - name: verification_report
+composition:
+  requires:
+    - template_id: foundation.engineering-governance
+      version: "^1.0.0"
+    - template_id: role.backend-engineering
+      version: "^1.0.0"
+skills:
+  - skill_ref: project-profile-router
+  - skill_ref: project-tech-solution
+  - skill_ref: project-backend-standards
+  - skill_ref: project-code-generation
+  - skill_ref: project-verification-loop
+  - skill_ref: project-test-and-report
+nodes:
+  - id: analyze-domain-input
+    kind: skill
+    skill_ref: project-profile-router
+  - id: api-design
+    kind: skill
+    skill_ref: project-tech-solution
+  - id: backend-standards
+    kind: skill
+    skill_ref: project-backend-standards
+  - id: implementation
+    kind: skill
+    skill_ref: project-code-generation
+  - id: verification
+    kind: skill
+    skill_ref: project-verification-loop
+  - id: self-test-report
+    kind: skill
+    skill_ref: project-test-and-report
+edges:
+  - id: analyze-to-api-design
+    from: analyze-domain-input
+    to: api-design
+  - id: api-design-to-backend-standards
+    from: api-design
+    to: backend-standards
+  - id: backend-standards-to-implementation
+    from: backend-standards
+    to: implementation
+  - id: implementation-to-verification
+    from: implementation
+    to: verification
+  - id: verification-to-self-test-report
+    from: verification
+    to: self-test-report
+quality_gate:
+  score_policy_ref: "quality.api-delivery.v1"
+  pass_score: 90
+  dimension_floors:
+    coverage: 75
+    correctness: 75
+    contract: 75
+    verification: 75
+  required_checks:
+    - no_blocking_issue
+    - evidence_for_all_confirmed_acceptance
+    - api_contract_evidence
+loop_policy:
+  enabled: true
+  max_iterations: 3
+  max_same_root_cause_strategies: 2
+  on_scope_change: "require_reconfirmation"
+  on_budget_exhausted: "needs_user_decision"
+permissions:
+  capabilities: [read_project, read_design_assets, read_api_contract, write_project_after_confirmation]
+compatibility:
+  core: ">=0.8.0 <1.0.0"
+  manifest_schema: ">=1.1.0 <2.0.0"
