@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type {
@@ -245,28 +246,30 @@ interface RegistryScanInput {
   policyId: string;
   rootPaths: string[];
   exclusions: string[];
-  triggerType: "manual" | "targeted_project";
-  scanScope: ScanResult["scanScope"];
+  triggerType: "targeted_project";
+  scanScope: "project";
 }
 
-function walkSkillFiles(
+async function walkSkillFiles(
   root: string,
   found: string[],
   exclusions: string[],
-  stats: { skippedEntryCount: number }
-) {
+  stats: { skippedEntryCount: number; errorCount: number }
+): Promise<void> {
   const queue = [resolve(root)];
+  let cursor = 0;
 
-  while (queue.length > 0) {
-    const current = queue.shift();
+  while (cursor < queue.length) {
+    const current = queue[cursor++];
     if (!current) {
       continue;
     }
 
     let entries;
     try {
-      entries = readdirSync(current, { withFileTypes: true });
+      entries = await readdir(current, { withFileTypes: true });
     } catch {
+      stats.errorCount += 1;
       continue;
     }
 
@@ -501,33 +504,25 @@ export class RegistryService {
     return row?.finished_at ? String(row.finished_at) : null;
   }
 
-  scanApprovedRoots(): ScanResult {
-    const policy = this.authorizationService.getActivePolicy();
-    if (!policy) {
-      throw new Error("No active authorization policy. Grant authorization first.");
-    }
-
-    const roots = this.authorizationService.listRoots(policy.id);
-    if (roots.length === 0) {
-      throw new Error("No enabled scan roots are configured.");
-    }
-    const exclusions = this.authorizationService.listExclusions(policy.id).map((entry) => entry.path);
-
-    return this.scanRoots({
-      policyId: policy.id,
-      rootPaths: roots.map((root) => root.path),
-      exclusions,
-      triggerType: "manual",
-      scanScope: "approved_roots"
-    });
-  }
-
-  scanProjectRoot(projectRoot: string): ScanResult {
+  async scanProjectRoot(projectRoot: string): Promise<ScanResult> {
     const trimmedProjectRoot = projectRoot.trim();
     if (!trimmedProjectRoot) {
       throw new Error("Choose a project folder before running a targeted scan.");
     }
     const resolvedProjectRoot = resolve(trimmedProjectRoot);
+    if (!existsSync(resolvedProjectRoot)) {
+      throw new Error(`Project folder does not exist: ${resolvedProjectRoot}`);
+    }
+    try {
+      if (!statSync(resolvedProjectRoot).isDirectory()) {
+        throw new Error(`Project path is not a directory: ${resolvedProjectRoot}`);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Project path is not a directory")) {
+        throw error;
+      }
+      throw new Error(`Project folder cannot be read: ${resolvedProjectRoot}`);
+    }
 
     let policy = this.authorizationService.getActivePolicy();
     const projectAlreadyAuthorized = policy
@@ -564,7 +559,7 @@ export class RegistryService {
     });
   }
 
-  private scanRoots(input: RegistryScanInput): ScanResult {
+  private async scanRoots(input: RegistryScanInput): Promise<ScanResult> {
     const rootPaths = Array.from(
       new Set(input.rootPaths.map((rootPath) => resolve(rootPath.trim())).filter(Boolean))
     );
@@ -601,20 +596,22 @@ export class RegistryService {
     let errorCount = 0;
     let skippedEntryCount = 0;
 
-    const upsertTransaction = this.database.db.transaction(() => {
-      const allSkillFiles: string[] = [];
-      const walkStats = { skippedEntryCount: 0 };
-      for (const rootPath of rootPaths) {
-        if (isExcludedPath(rootPath, input.exclusions)) {
-          walkStats.skippedEntryCount += 1;
-          continue;
-        }
-        walkSkillFiles(rootPath, allSkillFiles, input.exclusions, walkStats);
+    const allSkillFiles: string[] = [];
+    const walkStats = { skippedEntryCount: 0, errorCount: 0 };
+    for (const rootPath of rootPaths) {
+      if (isExcludedPath(rootPath, input.exclusions)) {
+        walkStats.skippedEntryCount += 1;
+        continue;
       }
+      await walkSkillFiles(rootPath, allSkillFiles, input.exclusions, walkStats);
+    }
 
-      skippedEntryCount = walkStats.skippedEntryCount;
-      const uniqueSkillFiles = Array.from(new Set(allSkillFiles));
-      filesSeen = uniqueSkillFiles.length;
+    skippedEntryCount = walkStats.skippedEntryCount;
+    errorCount = walkStats.errorCount;
+    const uniqueSkillFiles = Array.from(new Set(allSkillFiles));
+    filesSeen = uniqueSkillFiles.length;
+
+    const upsertTransaction = this.database.db.transaction(() => {
 
       const selectSkill = this.database.db.prepare(
         `SELECT id FROM skills WHERE source_path_hash = ? LIMIT 1`
@@ -651,11 +648,6 @@ export class RegistryService {
          WHERE is_active = 1
            AND (source_path = ? OR source_path LIKE ?)`
       );
-
-      for (const rootPath of rootPaths) {
-        const normalizedRoot = resolve(rootPath);
-        deactivateActiveSkillsUnderRoot.run(normalizedRoot, `${normalizedRoot}/%`);
-      }
 
       for (const filePath of uniqueSkillFiles) {
         try {
@@ -719,6 +711,14 @@ export class RegistryService {
           skillsFound += 1;
         } catch {
           errorCount += 1;
+        }
+      }
+
+      // Do not hide the previous index when a folder or Skill file was unreadable.
+      if (errorCount === 0) {
+        for (const rootPath of rootPaths) {
+          const normalizedRoot = resolve(rootPath);
+          deactivateActiveSkillsUnderRoot.run(normalizedRoot, `${normalizedRoot}/%`);
         }
       }
     });

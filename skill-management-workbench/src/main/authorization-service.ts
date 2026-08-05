@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
   AuthorizationInput,
+  AuthorizationPreferenceInput,
   AuthorizationPolicy,
   LocalAuditEvent,
   ScanExclusion,
@@ -24,6 +25,7 @@ function toPolicy(row: Record<string, unknown>): AuthorizationPolicy {
     status: row.status === "revoked" ? "revoked" : "active",
     telemetryMode: row.telemetry_mode === "precise" ? "precise" : row.telemetry_mode === "disabled" ? "disabled" : "estimated",
     allowRawContent: Number(row.allow_raw_content) === 1,
+    allowMessageSummary: Number(row.allow_message_summary) === 1,
     allowBackgroundWatch: Number(row.allow_background_watch) === 1,
     storageRoot: String(row.storage_root),
     createdAt: String(row.created_at),
@@ -83,6 +85,31 @@ function toAuditEvent(row: Record<string, unknown>): LocalAuditEvent {
 
 export class AuthorizationService {
   constructor(private readonly database: WorkbenchDatabase) {}
+
+  recordAuditEvent(input: {
+    eventType: string;
+    eventSummary: string;
+    metadata?: Record<string, unknown>;
+    actorType?: "system" | "user";
+    policyId?: string | null;
+  }): void {
+    const policyId = input.policyId === undefined ? this.getActivePolicy()?.id ?? null : input.policyId;
+    this.database.db
+      .prepare(
+        `INSERT INTO authorization_events (
+           id, policy_id, event_type, event_summary, actor_type, created_at, metadata_json
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        randomUUID(),
+        policyId,
+        input.eventType,
+        input.eventSummary,
+        input.actorType ?? "system",
+        nowIso(),
+        JSON.stringify(input.metadata ?? {})
+      );
+  }
 
   getActivePolicy(): AuthorizationPolicy | null {
     const row = this.database.db
@@ -213,16 +240,17 @@ export class AuthorizationService {
       this.database.db
         .prepare(
           `INSERT INTO authorization_policies (
-             id, name, status, telemetry_mode, allow_raw_content,
+             id, name, status, telemetry_mode, allow_raw_content, allow_message_summary,
              allow_background_watch, storage_root, created_at, updated_at,
              activated_at, revoked_at
-           ) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, NULL)`
+           ) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
         )
         .run(
           policyId,
           input.name.trim(),
           telemetryMode,
           allowRawContent ? 1 : 0,
+          currentPolicy?.allowMessageSummary ? 1 : 0,
           allowBackgroundWatch ? 1 : 0,
           this.database.paths.root,
           timestamp,
@@ -284,6 +312,50 @@ export class AuthorizationService {
       throw new Error("Failed to activate authorization policy.");
     }
 
+    return nextPolicy;
+  }
+
+  updateActivePreferences(input: AuthorizationPreferenceInput): AuthorizationPolicy {
+    const currentPolicy = this.getActivePolicy();
+    if (!currentPolicy) {
+      throw new Error("Grant authorization before changing local evidence preferences.");
+    }
+
+    const timestamp = nowIso();
+    const transaction = this.database.db.transaction(() => {
+      this.database.db
+        .prepare(
+          `UPDATE authorization_policies
+           SET allow_message_summary = ?, updated_at = ?
+           WHERE id = ? AND status = 'active'`
+        )
+        .run(input.allowMessageSummary ? 1 : 0, timestamp, currentPolicy.id);
+      this.database.db
+        .prepare(
+          `INSERT INTO authorization_events (
+             id, policy_id, event_type, event_summary, actor_type, created_at, metadata_json
+           ) VALUES (?, ?, 'authorization.preferences_updated', ?, 'user', ?, ?)`
+        )
+        .run(
+          randomUUID(),
+          currentPolicy.id,
+          input.allowMessageSummary
+            ? "Enabled local storage of sanitized user-message summaries."
+            : "Disabled local storage of sanitized user-message summaries.",
+          timestamp,
+          JSON.stringify({
+            previousAllowMessageSummary: currentPolicy.allowMessageSummary,
+            allowMessageSummary: input.allowMessageSummary,
+            rawContentStored: false
+          })
+        );
+    });
+    transaction();
+
+    const nextPolicy = this.getActivePolicy();
+    if (!nextPolicy) {
+      throw new Error("Failed to update local evidence preferences.");
+    }
     return nextPolicy;
   }
 }

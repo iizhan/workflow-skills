@@ -6,15 +6,22 @@ import type {
   SessionTraceDetail,
   SessionTraceListItem,
   SessionTraceQuery,
+  EvidencePurgePreview,
+  EvidencePurgePreviewInput,
+  EvidencePurgeInput,
+  EvidencePurgeResult,
+  EvidenceStorageStats,
   SkillHitState,
   TraceCaptureMode,
   TraceEventSummary,
   TraceSkillHitSummary,
   TraceSkillQuickDetail,
   TraceSpanSummary,
-  TraceSpanType
+  TraceSpanType,
+  TraceWorkflowBindingEvidence
 } from "../shared/types";
 import type { WorkbenchDatabase } from "./database";
+import type { AuthorizationService } from "./authorization-service";
 import type { RegistryService } from "./registry-service";
 
 type JsonRecord = Record<string, unknown>;
@@ -51,6 +58,16 @@ interface SkillLookupRow {
   display_name: string;
   source_path: string;
   version_id: string | null;
+}
+
+interface WorkflowBindingResolver {
+  listProjectBindings(projectRoot: string): Array<{
+    bindingId: string;
+    templateId: string;
+    templateVersion: string;
+    manifestFingerprint: string | null;
+    readOnly: boolean;
+  }>;
 }
 
 const scoringVersion = "trace-hit-v1";
@@ -143,6 +160,34 @@ function normalizeTimestamp(value: string | null) {
   }
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+function normalizeProjectRoot(value: string) {
+  const normalized = resolve(value.trim());
+  return normalized === "/" ? normalized : normalized.replace(/\/+$/, "");
+}
+
+function parseWorkflowBinding(value: unknown): TraceWorkflowBindingEvidence | null {
+  if (!isRecord(value)) return null;
+  const state = value.state;
+  if (
+    state !== "current_binding_match" &&
+    state !== "binding_version_mismatch" &&
+    state !== "no_current_binding" &&
+    state !== "resolver_unavailable"
+  ) {
+    return null;
+  }
+  const workflowId = typeof value.workflowId === "string" ? value.workflowId : null;
+  if (!workflowId) return null;
+  return {
+    state,
+    workflowId,
+    observedVersion: typeof value.observedVersion === "string" ? value.observedVersion : null,
+    bindingId: typeof value.bindingId === "string" ? value.bindingId : null,
+    bindingVersion: typeof value.bindingVersion === "string" ? value.bindingVersion : null,
+    manifestFingerprint: typeof value.manifestFingerprint === "string" ? value.manifestFingerprint : null
+  };
 }
 
 function normalizeCaptureMode(value: string | null): TraceCaptureMode {
@@ -242,6 +287,7 @@ function parseEvidence(value: unknown): TraceSkillHitSummary["evidence"] {
 }
 
 function toSpan(row: Record<string, unknown>): TraceSpanSummary {
+  const metadata = safeJson(row.metadata_json ? String(row.metadata_json) : null);
   return {
     id: String(row.id),
     traceId: String(row.trace_id),
@@ -261,17 +307,236 @@ function toSpan(row: Record<string, unknown>): TraceSpanSummary {
     skillVersionId: row.skill_version_id ? String(row.skill_version_id) : null,
     workflowId: row.workflow_id ? String(row.workflow_id) : null,
     workflowNodeId: row.workflow_node_id ? String(row.workflow_node_id) : null,
+    workflowBinding: parseWorkflowBinding(metadata.workflowBinding),
     tokenCount: Number(row.token_count ?? 0),
     toolCallCount: Number(row.tool_call_count ?? 0),
-    metadata: safeJson(row.metadata_json ? String(row.metadata_json) : null)
+    metadata
   };
 }
 
 export class TraceService {
+  private workflowBindingResolver: WorkflowBindingResolver | null = null;
+
   constructor(
     private readonly database: WorkbenchDatabase,
-    private readonly registryService: RegistryService
+    private readonly registryService: RegistryService,
+    private readonly authorizationService?: AuthorizationService
   ) {}
+
+  setWorkflowBindingResolver(resolver: WorkflowBindingResolver) {
+    this.workflowBindingResolver = resolver;
+  }
+
+  repairLegacyEstimatedLocalTelemetry() {
+    const migrationId = "2026-07-local-telemetry-synthetic-evidence-v3";
+    const applied = this.database.db
+      .prepare(`SELECT id FROM maintenance_migrations WHERE id = ?`)
+      .get(migrationId) as { id: string } | undefined;
+    if (applied) {
+      return null;
+    }
+
+    let deletedTraceSessions = 0;
+    let deletedTraceTurns = 0;
+    let deletedTraceSpans = 0;
+    let deletedTraceEvents = 0;
+    let deletedSkillHitEvidence = 0;
+    let deletedSkillRuns = 0;
+    let rebuiltMetricSkills = 0;
+    const appliedAt = new Date().toISOString();
+    const transaction = this.database.db.transaction(() => {
+      this.database.db.exec(`
+        CREATE TEMP TABLE IF NOT EXISTS legacy_local_trace_targets (
+          trace_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL
+        );
+        CREATE TEMP TABLE IF NOT EXISTS legacy_local_skill_targets (
+          run_id TEXT PRIMARY KEY,
+          skill_id TEXT NOT NULL
+        );
+        DELETE FROM legacy_local_trace_targets;
+        DELETE FROM legacy_local_skill_targets;
+
+        INSERT OR IGNORE INTO legacy_local_trace_targets (trace_id, session_id)
+        SELECT DISTINCT tt.trace_id, tt.session_id
+        FROM trace_turns tt
+        WHERE tt.capture_mode = 'estimated'
+          AND EXISTS (
+            SELECT 1
+            FROM trace_events te
+            WHERE te.trace_id = tt.trace_id
+              AND te.source_type IN ('codex_local_log', 'claude_code_local_log')
+          );
+
+        INSERT OR IGNORE INTO legacy_local_skill_targets (run_id, skill_id)
+        SELECT id, skill_id
+        FROM skill_runs
+        WHERE capture_mode = 'estimated'
+          AND source_type IN ('codex_local_log', 'claude_code_local_log');
+      `);
+      rebuiltMetricSkills = Number(
+        (this.database.db
+          .prepare(`SELECT COUNT(DISTINCT skill_id) AS count FROM legacy_local_skill_targets`)
+          .get() as { count: number }).count ?? 0
+      );
+      deletedSkillHitEvidence = Number(this.database.db.prepare(
+        `DELETE FROM skill_hit_evidence
+         WHERE trace_id IN (SELECT trace_id FROM legacy_local_trace_targets)`
+      ).run().changes);
+      deletedTraceSpans = Number(this.database.db.prepare(
+        `DELETE FROM trace_spans
+         WHERE trace_id IN (SELECT trace_id FROM legacy_local_trace_targets)`
+      ).run().changes);
+      deletedTraceEvents = Number(this.database.db.prepare(
+        `DELETE FROM trace_events
+         WHERE trace_id IN (SELECT trace_id FROM legacy_local_trace_targets)`
+      ).run().changes);
+      deletedTraceTurns = Number(this.database.db.prepare(
+        `DELETE FROM trace_turns
+         WHERE trace_id IN (SELECT trace_id FROM legacy_local_trace_targets)`
+      ).run().changes);
+      deletedTraceSessions = Number(this.database.db.prepare(
+        `DELETE FROM trace_sessions
+         WHERE id IN (SELECT session_id FROM legacy_local_trace_targets)
+           AND NOT EXISTS (
+             SELECT 1 FROM trace_turns WHERE trace_turns.session_id = trace_sessions.id
+           )`
+      ).run().changes);
+      deletedSkillRuns = Number(this.database.db.prepare(
+        `DELETE FROM skill_runs
+         WHERE id IN (SELECT run_id FROM legacy_local_skill_targets)`
+      ).run().changes);
+
+      if (rebuiltMetricSkills > 0) {
+        this.database.db.prepare(
+          `DELETE FROM daily_skill_metrics
+           WHERE skill_id IN (SELECT DISTINCT skill_id FROM legacy_local_skill_targets)`
+        ).run();
+        this.database.db.prepare(
+          `INSERT INTO daily_skill_metrics (
+             id, metric_date, skill_id, runs_count, success_count, failure_count, avg_duration_ms,
+             max_duration_ms, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd,
+             tool_call_count, updated_at
+           )
+           SELECT
+             'metric:' || skill_id || ':' || date(started_at, 'localtime'),
+             date(started_at, 'localtime'),
+             skill_id,
+             COUNT(*),
+             SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END),
+             SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
+             CAST(AVG(duration_ms) AS INTEGER),
+             MAX(duration_ms),
+             COALESCE(SUM(prompt_tokens), 0),
+             COALESCE(SUM(completion_tokens), 0),
+             COALESCE(SUM(total_tokens), 0),
+             COALESCE(SUM(estimated_cost_usd), 0),
+             COALESCE(SUM(tool_call_count), 0),
+             ?
+           FROM skill_runs
+           WHERE skill_id IN (SELECT DISTINCT skill_id FROM legacy_local_skill_targets)
+           GROUP BY skill_id, date(started_at, 'localtime')`
+        ).run(appliedAt);
+      }
+
+      const summary = {
+        deletedTraceSessions,
+        deletedTraceTurns,
+        deletedTraceSpans,
+        deletedTraceEvents,
+        deletedSkillHitEvidence,
+        deletedSkillRuns,
+        rebuiltMetricSkills
+      };
+      this.database.db.prepare(
+        `INSERT INTO maintenance_migrations (id, applied_at, summary_json) VALUES (?, ?, ?)`
+      ).run(migrationId, appliedAt, JSON.stringify(summary));
+    });
+
+    try {
+      transaction();
+    } finally {
+      this.database.db.exec(`
+        DROP TABLE IF EXISTS legacy_local_trace_targets;
+        DROP TABLE IF EXISTS legacy_local_skill_targets;
+      `);
+    }
+    const result = {
+      migrationId,
+      appliedAt,
+      deletedTraceSessions,
+      deletedTraceTurns,
+      deletedTraceSpans,
+      deletedTraceEvents,
+      deletedSkillHitEvidence,
+      deletedSkillRuns,
+      rebuiltMetricSkills
+    };
+    this.authorizationService?.recordAuditEvent({
+      eventType: "telemetry_legacy_evidence_repaired",
+      eventSummary: "已清理旧版本地日志推断产生的系统合成证据，并重新计算技能指标。",
+      actorType: "system",
+      metadata: result
+    });
+    return result;
+  }
+
+  compactRepairedLegacyTelemetryStorage() {
+    const migrationId = "2026-07-local-telemetry-storage-compaction-v3";
+    const applied = this.database.db
+      .prepare(`SELECT id FROM maintenance_migrations WHERE id = ?`)
+      .get(migrationId) as { id: string } | undefined;
+    if (applied) {
+      return null;
+    }
+    const repairRow = this.database.db.prepare(
+      `SELECT summary_json FROM maintenance_migrations
+       WHERE id = '2026-07-local-telemetry-synthetic-evidence-v3'`
+    ).get() as { summary_json: string } | undefined;
+    if (!repairRow) {
+      return null;
+    }
+    const repairSummary = safeJson(repairRow.summary_json);
+    const deletedRows = [
+      repairSummary.deletedTraceEvents,
+      repairSummary.deletedTraceSpans,
+      repairSummary.deletedSkillRuns
+    ].reduce<number>((total, value) => total + (typeof value === "number" ? value : 0), 0);
+    const appliedAt = new Date().toISOString();
+    const databaseBytesBefore = this.getEvidenceDatabaseBytes();
+    let compacted = false;
+    if (deletedRows > 0) {
+      try {
+        this.database.db.pragma("wal_checkpoint(TRUNCATE)");
+        this.database.db.exec("VACUUM");
+        this.database.db.pragma("wal_checkpoint(TRUNCATE)");
+        compacted = true;
+      } catch (error) {
+        console.warn("[workbench] legacy telemetry storage compaction deferred", error);
+        return null;
+      }
+    }
+    const databaseBytesAfter = this.getEvidenceDatabaseBytes();
+    const result = {
+      migrationId,
+      appliedAt,
+      compacted,
+      deletedRows,
+      databaseBytesBefore,
+      databaseBytesAfter,
+      reclaimedBytes: Math.max(0, databaseBytesBefore - databaseBytesAfter)
+    };
+    this.database.db.prepare(
+      `INSERT INTO maintenance_migrations (id, applied_at, summary_json) VALUES (?, ?, ?)`
+    ).run(migrationId, appliedAt, JSON.stringify(result));
+    this.authorizationService?.recordAuditEvent({
+      eventType: "telemetry_storage_compacted",
+      eventSummary: "已压缩旧推断证据释放的 SQLite 空闲空间。",
+      actorType: "system",
+      metadata: result
+    });
+    return result;
+  }
 
   backfillLegacyRuns() {
     this.resetOutdatedLegacyProjection();
@@ -510,6 +775,19 @@ export class TraceService {
       conditions.push("trace_sessions.project_id = ?");
       parameters.push(query.projectId);
     }
+    if (query.projectRoot) {
+      const projectRoot = normalizeProjectRoot(query.projectRoot);
+      conditions.push(
+        `(trace_sessions.workspace_ref = ?
+          OR trace_sessions.workspace_ref LIKE ?
+          OR EXISTS (
+            SELECT 1 FROM managed_projects scoped_project
+            WHERE scoped_project.id = trace_sessions.project_id
+              AND scoped_project.path = ?
+          ))`
+      );
+      parameters.push(projectRoot, `${projectRoot}/%`, projectRoot);
+    }
     if (query.harnessId) {
       conditions.push("trace_sessions.harness_id = ?");
       parameters.push(query.harnessId);
@@ -555,6 +833,13 @@ export class TraceService {
       const searchValue = `%${normalizedQuery}%`;
       parameters.push(searchValue, searchValue, searchValue, searchValue, searchValue, searchValue, searchValue);
     }
+    if (query.cursor) {
+      conditions.push(
+        `(trace_turns.received_at < ?
+          OR (trace_turns.received_at = ? AND trace_turns.trace_id < ?))`
+      );
+      parameters.push(query.cursor.receivedAt, query.cursor.receivedAt, query.cursor.traceId);
+    }
     const safeLimit = Math.max(1, Math.min(query.limit ?? 100, 200));
     parameters.push(safeLimit);
     const rows = this.database.db.prepare(
@@ -569,11 +854,352 @@ export class TraceService {
        JOIN trace_sessions ON trace_sessions.id = trace_turns.session_id
        LEFT JOIN managed_projects ON managed_projects.id = trace_sessions.project_id
        ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
-       ORDER BY trace_turns.received_at DESC
+       ORDER BY trace_turns.received_at DESC, trace_turns.trace_id DESC
        LIMIT ?`
     ).all(...parameters) as Array<Record<string, unknown>>;
     const hitsByTrace = this.listHitsForTraces(rows.map((row) => String(row.trace_id)));
     return rows.map((row) => this.toListItem(row, hitsByTrace.get(String(row.trace_id)) ?? []));
+  }
+
+  getEvidenceStorageStats(): EvidenceStorageStats {
+    const count = (table: string) => {
+      const row = this.database.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
+      return Number(row.count ?? 0);
+    };
+    const ranges = [
+      ["trace_events", "occurred_at"],
+      ["trace_turns", "received_at"],
+      ["skill_runs", "started_at"]
+    ].map(([table, column]) => this.database.db.prepare(
+      `SELECT MIN(${column}) AS oldest, MAX(${column}) AS newest FROM ${table}`
+    ).get() as { oldest: string | null; newest: string | null });
+    const observedAt = ranges.flatMap((range) => [range.oldest, range.newest]).filter(
+      (value): value is string => Boolean(value)
+    );
+    return {
+      databasePath: this.database.paths.databasePath,
+      databaseBytes: this.getEvidenceDatabaseBytes(),
+      traceSessions: count("trace_sessions"),
+      traceTurns: count("trace_turns"),
+      traceSpans: count("trace_spans"),
+      traceEvents: count("trace_events"),
+      skillHitEvidence: count("skill_hit_evidence"),
+      skillRuns: count("skill_runs"),
+      oldestEvidenceAt: observedAt.length > 0 ? observedAt.reduce((oldest, value) => value < oldest ? value : oldest) : null,
+      newestEvidenceAt: observedAt.length > 0 ? observedAt.reduce((newest, value) => value > newest ? value : newest) : null
+    };
+  }
+
+  private getEvidenceDatabaseBytes() {
+    return [
+      this.database.paths.databasePath,
+      `${this.database.paths.databasePath}-wal`,
+      `${this.database.paths.databasePath}-shm`
+    ].reduce((total, path) => {
+      try {
+        return total + statSync(path).size;
+      } catch {
+        return total;
+      }
+    }, 0);
+  }
+
+  private normalizeEvidencePurgeInput(input: EvidencePurgePreviewInput) {
+    const beforeDate = new Date(input.before);
+    if (Number.isNaN(beforeDate.getTime())) {
+      throw new Error("Evidence cleanup requires a valid ISO timestamp.");
+    }
+    if (beforeDate.getTime() > Date.now()) {
+      throw new Error("Evidence cleanup cannot target a future timestamp.");
+    }
+    const resolvedProjectRoot = input.projectRoot?.trim()
+      ? resolve(input.projectRoot.trim())
+      : null;
+    return {
+      before: beforeDate.toISOString(),
+      projectRoot:
+        resolvedProjectRoot === null || resolvedProjectRoot === "/"
+          ? resolvedProjectRoot
+          : resolvedProjectRoot.replace(/\/+$/, ""),
+      includeSkillRuns: input.includeSkillRuns !== false
+    };
+  }
+
+  private buildTracePurgeFilter(projectRoot: string | null) {
+    const conditions = ["tt.received_at < ?"];
+    const parameters: string[] = [];
+    if (projectRoot) {
+      const project = this.database.db
+        .prepare(`SELECT id FROM managed_projects WHERE path = ? LIMIT 1`)
+        .get(projectRoot) as { id: string } | undefined;
+      conditions.push(
+        "(ts.project_id = ? OR ts.workspace_ref = ? OR ts.workspace_ref LIKE ?)"
+      );
+      parameters.push(project?.id ?? "", projectRoot, `${projectRoot}/%`);
+    }
+    return {
+      where: conditions.join(" AND "),
+      parameters
+    };
+  }
+
+  private buildSkillRunPurgeFilter(projectRoot: string | null) {
+    const conditions = ["sr.started_at < ?"];
+    const parameters: string[] = [];
+    if (projectRoot) {
+      conditions.push("(sr.workspace_ref = ? OR sr.workspace_ref LIKE ?)");
+      parameters.push(projectRoot, `${projectRoot}/%`);
+    }
+    return {
+      where: conditions.join(" AND "),
+      parameters
+    };
+  }
+
+  getEvidencePurgePreview(input: EvidencePurgePreviewInput): EvidencePurgePreview {
+    const normalized = this.normalizeEvidencePurgeInput(input);
+    const traceFilter = this.buildTracePurgeFilter(normalized.projectRoot);
+    const traceFilterParameters = [normalized.before, ...traceFilter.parameters];
+    const traceIdsQuery = `
+      SELECT DISTINCT tt.trace_id
+      FROM trace_turns tt
+      INNER JOIN trace_sessions ts ON ts.id = tt.session_id
+      WHERE ${traceFilter.where}`;
+    const sessionIdsQuery = `
+      SELECT DISTINCT tt.session_id
+      FROM trace_turns tt
+      INNER JOIN trace_sessions ts ON ts.id = tt.session_id
+      WHERE ${traceFilter.where}`;
+    const count = (query: string, parameters: string[]) =>
+      Number((this.database.db.prepare(query).get(...parameters) as { count: number }).count ?? 0);
+    const skillFilter = this.buildSkillRunPurgeFilter(normalized.projectRoot);
+    const skillFilterParameters = [normalized.before, ...skillFilter.parameters];
+    const skillCounts = normalized.includeSkillRuns
+      ? (this.database.db
+          .prepare(
+            `SELECT COUNT(*) AS count, COUNT(DISTINCT sr.skill_id) AS affected_skill_count
+             FROM skill_runs sr
+             WHERE ${skillFilter.where}`
+          )
+          .get(...skillFilterParameters) as { count: number; affected_skill_count: number })
+      : { count: 0, affected_skill_count: 0 };
+
+    return {
+      projectRoot: normalized.projectRoot,
+      before: normalized.before,
+      traceSessions: count(
+        `SELECT COUNT(*) AS count FROM (${sessionIdsQuery}) target_sessions`,
+        traceFilterParameters
+      ),
+      traceTurns: count(
+        `SELECT COUNT(*) AS count FROM trace_turns WHERE trace_id IN (${traceIdsQuery})`,
+        traceFilterParameters
+      ),
+      traceSpans: count(
+        `SELECT COUNT(*) AS count FROM trace_spans WHERE trace_id IN (${traceIdsQuery})`,
+        traceFilterParameters
+      ),
+      traceEvents: count(
+        `SELECT COUNT(*) AS count FROM trace_events WHERE trace_id IN (${traceIdsQuery})`,
+        traceFilterParameters
+      ),
+      skillHitEvidence: count(
+        `SELECT COUNT(*) AS count FROM skill_hit_evidence WHERE trace_id IN (${traceIdsQuery})`,
+        traceFilterParameters
+      ),
+      skillRuns: Number(skillCounts.count ?? 0),
+      affectedSkillCount: Number(skillCounts.affected_skill_count ?? 0)
+    };
+  }
+
+  purgeEvidence(input: EvidencePurgeInput): EvidencePurgeResult {
+    if (!input.confirm) {
+      throw new Error("Evidence cleanup requires explicit confirmation.");
+    }
+    const normalized = this.normalizeEvidencePurgeInput(input);
+    const traceFilter = this.buildTracePurgeFilter(normalized.projectRoot);
+    const traceFilterParameters = [normalized.before, ...traceFilter.parameters];
+    const skillFilter = this.buildSkillRunPurgeFilter(normalized.projectRoot);
+    const skillFilterParameters = [normalized.before, ...skillFilter.parameters];
+    let deletedTraceSessions = 0;
+    let deletedTraceTurns = 0;
+    let deletedTraceSpans = 0;
+    let deletedTraceEvents = 0;
+    let deletedSkillHitEvidence = 0;
+    let deletedSkillRuns = 0;
+    let rebuiltMetricSkills = 0;
+
+    const transaction = this.database.db.transaction(() => {
+      this.database.db.exec(`
+        CREATE TEMP TABLE IF NOT EXISTS purge_trace_targets (
+          trace_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL
+        );
+        CREATE TEMP TABLE IF NOT EXISTS purge_skill_targets (
+          run_id TEXT PRIMARY KEY,
+          skill_id TEXT NOT NULL
+        );
+        DELETE FROM purge_trace_targets;
+        DELETE FROM purge_skill_targets;
+      `);
+      this.database.db
+        .prepare(
+          `INSERT OR IGNORE INTO purge_trace_targets (trace_id, session_id)
+           SELECT DISTINCT tt.trace_id, tt.session_id
+           FROM trace_turns tt
+           INNER JOIN trace_sessions ts ON ts.id = tt.session_id
+           WHERE ${traceFilter.where}`
+        )
+        .run(...traceFilterParameters);
+      this.database.db
+        .prepare(
+          `INSERT OR IGNORE INTO purge_skill_targets (run_id, skill_id)
+           SELECT sr.id, sr.skill_id
+           FROM skill_runs sr
+           WHERE ${normalized.includeSkillRuns ? skillFilter.where : "1 = 0"}`
+        )
+        .run(...(normalized.includeSkillRuns ? skillFilterParameters : []));
+      rebuiltMetricSkills = Number(
+        (
+          this.database.db
+            .prepare(`SELECT COUNT(DISTINCT skill_id) AS count FROM purge_skill_targets`)
+            .get() as { count: number }
+        ).count ?? 0
+      );
+
+      deletedSkillHitEvidence = Number(
+        this.database.db
+          .prepare(
+            `DELETE FROM skill_hit_evidence
+             WHERE trace_id IN (SELECT trace_id FROM purge_trace_targets)`
+          )
+          .run().changes
+      );
+      deletedTraceSpans = Number(
+        this.database.db
+          .prepare(
+            `DELETE FROM trace_spans
+             WHERE trace_id IN (SELECT trace_id FROM purge_trace_targets)`
+          )
+          .run().changes
+      );
+      deletedTraceEvents = Number(
+        this.database.db
+          .prepare(
+            `DELETE FROM trace_events
+             WHERE trace_id IN (SELECT trace_id FROM purge_trace_targets)`
+          )
+          .run().changes
+      );
+      deletedTraceTurns = Number(
+        this.database.db
+          .prepare(
+            `DELETE FROM trace_turns
+             WHERE trace_id IN (SELECT trace_id FROM purge_trace_targets)`
+          )
+          .run().changes
+      );
+      deletedTraceSessions = Number(
+        this.database.db
+          .prepare(
+            `DELETE FROM trace_sessions
+             WHERE id IN (SELECT session_id FROM purge_trace_targets)
+               AND NOT EXISTS (
+                 SELECT 1 FROM trace_turns
+                 WHERE trace_turns.session_id = trace_sessions.id
+               )`
+          )
+          .run().changes
+      );
+      deletedSkillRuns = Number(
+        this.database.db
+          .prepare(
+            `DELETE FROM skill_runs
+             WHERE id IN (SELECT run_id FROM purge_skill_targets)`
+          )
+          .run().changes
+      );
+      if (normalized.includeSkillRuns && rebuiltMetricSkills > 0) {
+        this.database.db
+          .prepare(
+            `DELETE FROM daily_skill_metrics
+             WHERE skill_id IN (SELECT DISTINCT skill_id FROM purge_skill_targets)`
+          )
+          .run();
+        this.database.db.prepare(
+          `INSERT INTO daily_skill_metrics (
+             id, metric_date, skill_id, runs_count, success_count, failure_count, avg_duration_ms,
+             max_duration_ms, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd,
+             tool_call_count, updated_at
+           )
+           SELECT
+             'metric:' || skill_id || ':' || date(started_at, 'localtime'),
+             date(started_at, 'localtime'),
+             skill_id,
+             COUNT(*),
+             SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END),
+             SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
+             CAST(AVG(duration_ms) AS INTEGER),
+             MAX(duration_ms),
+             COALESCE(SUM(prompt_tokens), 0),
+             COALESCE(SUM(completion_tokens), 0),
+             COALESCE(SUM(total_tokens), 0),
+             COALESCE(SUM(estimated_cost_usd), 0),
+           COALESCE(SUM(tool_call_count), 0),
+           ?
+           FROM skill_runs
+           WHERE skill_id IN (SELECT DISTINCT skill_id FROM purge_skill_targets)
+           GROUP BY skill_id, date(started_at, 'localtime')`
+        ).run(new Date().toISOString());
+      }
+    });
+    try {
+      transaction();
+    } finally {
+      this.database.db.exec(`
+        DROP TABLE IF EXISTS purge_trace_targets;
+        DROP TABLE IF EXISTS purge_skill_targets;
+      `);
+    }
+    try {
+      this.database.db.pragma("wal_checkpoint(TRUNCATE)");
+    } catch {
+      // A concurrent reader can keep the WAL alive; the cleanup itself is already committed.
+    }
+    const result: EvidencePurgeResult = {
+      projectRoot: normalized.projectRoot,
+      before: normalized.before,
+      completedAt: new Date().toISOString(),
+      deletedTraceSessions,
+      deletedTraceTurns,
+      deletedTraceSpans,
+      deletedTraceEvents,
+      deletedSkillHitEvidence,
+      deletedSkillRuns,
+      rebuiltMetricSkills,
+      databaseBytes: this.getEvidenceDatabaseBytes()
+    };
+    try {
+      this.authorizationService?.recordAuditEvent({
+        eventType: "evidence.purged",
+        eventSummary: `Purged local evidence before ${result.before}.`,
+        actorType: "user",
+        metadata: {
+          projectRoot: result.projectRoot,
+          before: result.before,
+          deletedTraceSessions: result.deletedTraceSessions,
+          deletedTraceTurns: result.deletedTraceTurns,
+          deletedTraceSpans: result.deletedTraceSpans,
+          deletedTraceEvents: result.deletedTraceEvents,
+          deletedSkillHitEvidence: result.deletedSkillHitEvidence,
+          deletedSkillRuns: result.deletedSkillRuns,
+          rebuiltMetricSkills: result.rebuiltMetricSkills
+        }
+      });
+    } catch {
+      // Cleanup must remain successful even if the local audit row cannot be written.
+    }
+    return result;
   }
 
   getSessionTrace(traceId: string): SessionTraceDetail | null {
@@ -907,7 +1533,7 @@ export class TraceService {
         evidenceKind: isLegacyAggregate ? "legacy_aggregate" : "message_turn"
       })
     );
-    this.rebuildTraceSpans(first.traceId, first.turnId, storedEvents, skills, project?.id ?? null);
+    this.rebuildTraceSpans(first.traceId, first.turnId, storedEvents, skills, project?.id ?? null, project?.path ?? null);
   }
 
   private rebuildTraceSpans(
@@ -915,7 +1541,8 @@ export class TraceService {
     turnId: string,
     events: Array<Record<string, unknown>>,
     skills: SkillLookupRow[],
-    projectId: string | null
+    projectId: string | null,
+    projectRoot: string | null
   ) {
     this.database.db.prepare(`DELETE FROM trace_spans WHERE trace_id = ?`).run(traceId);
     this.database.db.prepare(`DELETE FROM skill_hit_evidence WHERE trace_id = ?`).run(traceId);
@@ -1003,24 +1630,68 @@ export class TraceService {
       tokenCount: Number(turn.total_tokens ?? 0),
       metadata: { rawContentStored: false, evidenceKind: isLegacyAggregate ? "legacy_aggregate" : "message_turn" }
     });
+    const allEventPayloads = events.map((event) => safeJson(String(event.payload_json)));
+    const allWorkflowSignals = Array.from(new Set(allEventPayloads.flatMap((payload) =>
+      Array.isArray(payload.workflowSignals)
+        ? payload.workflowSignals.filter((entry): entry is string => typeof entry === "string")
+        : []
+    )));
+    const routeEvents = events.filter((event) =>
+      ["workflow.routed", "skill.routed"].includes(String(event.event_type))
+    );
+    const preciseRouteEvents = routeEvents.filter(
+      (event) => String(event.capture_mode) === "precise"
+    );
+    const routePayloads = routeEvents.map((event) => safeJson(String(event.payload_json)));
+    const routeEvidencePayloads = routePayloads.length > 0 ? routePayloads : allEventPayloads;
+    const routeWorkflowTargets = Array.from(new Set(routeEvidencePayloads.flatMap((payload) =>
+      typeof payload.workflowId === "string" ? [payload.workflowId] : []
+    )));
+    const routeWorkflowNodes = Array.from(new Set(routeEvidencePayloads.flatMap((payload) =>
+      typeof payload.workflowNodeId === "string" ? [payload.workflowNodeId] : []
+    )));
+    const routeSkillTargets = Array.from(new Set(routeEvidencePayloads.flatMap((payload) => {
+      if (typeof payload.skillName === "string") return [payload.skillName];
+      if (typeof payload.skillId === "string") return [payload.skillId];
+      return [];
+    })));
+    const routeCaptureMode: TraceCaptureMode = preciseRouteEvents.length > 0
+      ? "precise"
+      : routeEvents.length > 0
+        ? "estimated"
+        : "inferred";
     const routeSpanId = addSpan({
       id: hashId("span", `${traceId}:route`),
       parentSpanId: rootSpanId,
       spanType: "system_route",
       phase: "route",
       name: "系统路由",
-      captureMode: "inferred",
-      confidence: 0.55,
-      metadata: { evidenceBoundary: "由会话中的 Skill、Tool 与项目路径信号补全，非 Harness 精确路由事件。" }
+      startedAt: routeEvents.length > 0
+        ? earliestTimestamp(routeEvents.map((event) => String(event.occurred_at)))
+        : startedAt,
+      endedAt: routeEvents.length > 0
+        ? latestTimestamp(routeEvents.map((event) => String(event.occurred_at)))
+        : endedAt,
+      captureMode: routeCaptureMode,
+      confidence: preciseRouteEvents.length > 0 ? 1 : routeEvents.length > 0 ? 0.75 : 0.55,
+      metadata: {
+        workflowTargets: routeWorkflowTargets,
+        workflowNodeTargets: routeWorkflowNodes,
+        skillTargets: routeSkillTargets,
+        signals: allWorkflowSignals,
+        sourceEventTypes: Array.from(new Set(routeEvents.map((event) => String(event.event_type)))),
+        evidenceBoundary: preciseRouteEvents.length > 0
+          ? "explicit_event"
+          : routeEvents.length > 0
+            ? "unverified_structured_event"
+            : "log_inference"
+      }
     });
 
     const updateEventSpan = this.database.db.prepare(`UPDATE trace_events SET span_id = ? WHERE id = ?`);
-    const allWorkflowSignals = Array.from(new Set(events.flatMap((event) => {
-      const payload = safeJson(String(event.payload_json));
-      return Array.isArray(payload.workflowSignals)
-        ? payload.workflowSignals.filter((entry): entry is string => typeof entry === "string")
-        : [];
-    })));
+    for (const event of routeEvents) {
+      updateEventSpan.run(routeSpanId, String(event.id));
+    }
     const workflowEvents = events.filter((event) => {
       const payload = safeJson(String(event.payload_json));
       return typeof payload.workflowId === "string" && Boolean(payload.workflowId);
@@ -1040,6 +1711,11 @@ export class TraceService {
         const payload = safeJson(String(event.payload_json));
         return typeof payload.workflowNodeId === "string" ? payload.workflowNodeId : null;
       }).filter((value): value is string => Boolean(value))));
+      const workflowBinding = this.resolveWorkflowBinding(
+        projectRoot,
+        workflowIds[0] ?? null,
+        workflowVersions.length === 1 ? workflowVersions[0] : null
+      );
       workflowSpanId = addSpan({
         id: hashId("span", `${traceId}:workflow`),
         parentSpanId: routeSpanId,
@@ -1055,6 +1731,7 @@ export class TraceService {
           versions: workflowVersions,
           workflowNodeIds,
           signals: allWorkflowSignals,
+          workflowBinding,
           evidenceBoundary: exactWorkflowEvents.length > 0 ? "explicit_event" : "log_inference"
         }
       });
@@ -1296,6 +1973,58 @@ export class TraceService {
       `SELECT id, path FROM managed_projects ORDER BY length(path) DESC`
     ).all() as Array<{ id: string; path: string }>;
     return projects.find((project) => workspace === resolve(project.path) || workspace.startsWith(`${resolve(project.path)}/`)) ?? null;
+  }
+
+  private resolveWorkflowBinding(
+    projectRoot: string | null,
+    workflowId: string | null,
+    observedVersion: string | null
+  ): TraceWorkflowBindingEvidence | null {
+    if (!workflowId) return null;
+    if (!projectRoot || !this.workflowBindingResolver) {
+      return {
+        state: "resolver_unavailable",
+        workflowId,
+        observedVersion,
+        bindingId: null,
+        bindingVersion: null,
+        manifestFingerprint: null
+      };
+    }
+    try {
+      const bindings = this.workflowBindingResolver
+        .listProjectBindings(projectRoot)
+        .filter((binding) => !binding.readOnly && binding.templateId === workflowId);
+      const exact = bindings.find((binding) => binding.templateVersion === observedVersion) ?? null;
+      if (exact) {
+        return {
+          state: "current_binding_match",
+          workflowId,
+          observedVersion,
+          bindingId: exact.bindingId,
+          bindingVersion: exact.templateVersion,
+          manifestFingerprint: exact.manifestFingerprint
+        };
+      }
+      const current = bindings[0] ?? null;
+      return {
+        state: current ? "binding_version_mismatch" : "no_current_binding",
+        workflowId,
+        observedVersion,
+        bindingId: current?.bindingId ?? null,
+        bindingVersion: current?.templateVersion ?? null,
+        manifestFingerprint: current?.manifestFingerprint ?? null
+      };
+    } catch {
+      return {
+        state: "resolver_unavailable",
+        workflowId,
+        observedVersion,
+        bindingId: null,
+        bindingVersion: null,
+        manifestFingerprint: null
+      };
+    }
   }
 
   private listHits(traceId: string): TraceSkillHitSummary[] {

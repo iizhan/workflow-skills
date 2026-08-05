@@ -6,6 +6,7 @@ export interface AuthorizationPolicy {
   status: "active" | "revoked";
   telemetryMode: TelemetryMode;
   allowRawContent: boolean;
+  allowMessageSummary: boolean;
   allowBackgroundWatch: boolean;
   storageRoot: string;
   createdAt: string;
@@ -243,7 +244,7 @@ export interface SkillHealthScorePolicyInput {
   preset: SkillHealthScorePolicyPreset;
 }
 
-export type ModelEvaluatorSecretStorage = "system_secure" | "unavailable";
+export type ModelEvaluatorSecretStorage = "unchecked" | "system_secure" | "unavailable";
 export type ModelEvaluationConnectionStatus = "not_tested" | "ready" | "failed";
 export type ModelEvaluationTargetType = "skill" | "workflow";
 
@@ -415,9 +416,13 @@ export interface AuthorizationInput {
   allowBackgroundWatch: boolean;
 }
 
+export interface AuthorizationPreferenceInput {
+  allowMessageSummary: boolean;
+}
+
 export interface ScanResult {
   scanRunId: string;
-  scanScope: "approved_roots" | "project";
+  scanScope: "project";
   rootPaths: string[];
   filesSeen: number;
   skillsFound: number;
@@ -758,6 +763,11 @@ export interface ScenarioLoopRunSummary {
   id: string;
   projectRoot: string;
   bindingId: string;
+  /** Conversation files remain authoritative; the desktop may also store observed-only runs. */
+  evidenceSource: "conversation_state" | "desktop_observation";
+  sourceRef: string | null;
+  sessionRef: string | null;
+  externalRunId: string | null;
   template: ScenarioLoopTemplateDefinition;
   formalPackage: ScenarioLoopFormalPackage;
   status: ScenarioLoopRunStatus;
@@ -769,6 +779,27 @@ export interface ScenarioLoopRunSummary {
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
+}
+
+/** Read-only project workflow-state evidence. It covers both standard and loop-enabled conversations. */
+export interface ProjectWorkflowEvidenceSummary {
+  projectRoot: string;
+  sourceRefs: string[];
+  updatedAt: string | null;
+  artifactVersions: {
+    requirementVersion: string | null;
+    designVersion: string | null;
+    impactVersion: string | null;
+    taskBreakdownVersion: string | null;
+    verificationPlanVersion: string | null;
+  };
+  confirmation: {
+    confirmedAt: string;
+    confirmationRef: string;
+  } | null;
+  verificationStatus: string | null;
+  verificationEvidenceRefs: string[];
+  userAcceptanceRecorded: boolean;
 }
 
 export interface ScenarioLoopRunCreateInput {
@@ -1137,6 +1168,58 @@ export interface ProjectRuntimeSummary {
   latestRunAt: string | null;
 }
 
+export interface EvidenceStorageStats {
+  databasePath: string;
+  databaseBytes: number;
+  traceSessions: number;
+  traceTurns: number;
+  traceSpans: number;
+  traceEvents: number;
+  skillHitEvidence: number;
+  skillRuns: number;
+  oldestEvidenceAt: string | null;
+  newestEvidenceAt: string | null;
+}
+
+export interface EvidencePurgePreviewInput {
+  before: string;
+  projectRoot?: string;
+  includeSkillRuns?: boolean;
+}
+
+export interface EvidencePurgePreview {
+  projectRoot: string | null;
+  before: string;
+  traceSessions: number;
+  traceTurns: number;
+  traceSpans: number;
+  traceEvents: number;
+  skillHitEvidence: number;
+  skillRuns: number;
+  affectedSkillCount: number;
+}
+
+export interface EvidencePurgeInput {
+  before: string;
+  projectRoot?: string;
+  includeSkillRuns?: boolean;
+  confirm: boolean;
+}
+
+export interface EvidencePurgeResult {
+  projectRoot: string | null;
+  before: string;
+  completedAt: string;
+  deletedTraceSessions: number;
+  deletedTraceTurns: number;
+  deletedTraceSpans: number;
+  deletedTraceEvents: number;
+  deletedSkillHitEvidence: number;
+  deletedSkillRuns: number;
+  rebuiltMetricSkills: number;
+  databaseBytes: number;
+}
+
 export type TraceCaptureMode = "precise" | "estimated" | "inferred" | "unknown";
 
 export type TraceSpanType =
@@ -1213,12 +1296,26 @@ export interface SessionTraceListItem {
 
 export interface SessionTraceQuery {
   projectId?: string;
+  projectRoot?: string;
   harnessId?: string;
   skillId?: string;
   status?: "all" | "running" | "completed" | "failed";
   captureMode?: "all" | "precise" | "estimated" | "inferred";
   query?: string;
   limit?: number;
+  cursor?: {
+    receivedAt: string;
+    traceId: string;
+  };
+}
+
+export interface TraceWorkflowBindingEvidence {
+  state: "current_binding_match" | "binding_version_mismatch" | "no_current_binding" | "resolver_unavailable";
+  workflowId: string;
+  observedVersion: string | null;
+  bindingId: string | null;
+  bindingVersion: string | null;
+  manifestFingerprint: string | null;
 }
 
 export interface TraceSpanSummary {
@@ -1240,6 +1337,7 @@ export interface TraceSpanSummary {
   skillVersionId: string | null;
   workflowId: string | null;
   workflowNodeId: string | null;
+  workflowBinding: TraceWorkflowBindingEvidence | null;
   tokenCount: number;
   toolCallCount: number;
   metadata: Record<string, unknown>;
@@ -1793,12 +1891,14 @@ export interface WorkbenchApi {
   pickBackupManifest: () => Promise<string | null>;
   pickBundleManifest: () => Promise<string | null>;
   grantAuthorization: (input: AuthorizationInput) => Promise<BootstrapState>;
+  updateAuthorizationPreferences: (
+    input: AuthorizationPreferenceInput
+  ) => Promise<BootstrapState>;
   listAuditEvents: (limit?: number) => Promise<LocalAuditEvent[]>;
   createBackup: () => Promise<LocalBackupSummary>;
   listBackups: (limit?: number) => Promise<LocalBackupSummary[]>;
   validateBackupManifest: (manifestPath: string) => Promise<LocalBackupValidationResult>;
   previewBackupRestoreImpact: (manifestPath: string) => Promise<LocalBackupRestoreImpactResult>;
-  scanSkills: () => Promise<ScanResult>;
   scanProjectSkills: (projectRoot: string) => Promise<ScanResult>;
   previewRecommendedWorkflowStarter: (projectRoot: string) => Promise<WorkflowStarterPreview>;
   applyRecommendedWorkflowStarter: (projectRoot: string) => Promise<WorkflowStarterApplyResult>;
@@ -1818,6 +1918,7 @@ export interface WorkbenchApi {
   ) => Promise<ProjectWorkflowBindingApplyResult>;
   doctorProjectWorkflow: (projectRoot: string) => Promise<ProjectWorkflowDoctorResult>;
   listProjectScenarioLoopRuns: (projectRoot: string) => Promise<ScenarioLoopRunSummary[]>;
+  getProjectWorkflowEvidence: (projectRoot: string) => Promise<ProjectWorkflowEvidenceSummary>;
   getScenarioLoopRun: (runId: string) => Promise<ScenarioLoopRunSummary | null>;
   listSkills: () => Promise<SkillSummary[]>;
   generateSkillAnalysis: (skillId: string) => Promise<SkillIntelligenceAnalysis>;
@@ -1858,6 +1959,9 @@ export interface WorkbenchApi {
   runProjectControlledVerification: (projectRoot: string) => Promise<ProjectControlledSessionVerification>;
   listRecentRuns: (limit?: number) => Promise<SkillRunSummary[]>;
   listProjectRuntimeSummaries: (projectPaths: string[]) => Promise<ProjectRuntimeSummary[]>;
+  getEvidenceStorageStats: () => Promise<EvidenceStorageStats>;
+  previewEvidencePurge: (input: EvidencePurgePreviewInput) => Promise<EvidencePurgePreview>;
+  purgeEvidence: (input: EvidencePurgeInput) => Promise<EvidencePurgeResult>;
   listSkillRuns: (skillId: string, limit?: number) => Promise<SkillRunSummary[]>;
   listSessionTraces: (query?: SessionTraceQuery) => Promise<SessionTraceListItem[]>;
   getSessionTrace: (traceId: string) => Promise<SessionTraceDetail | null>;

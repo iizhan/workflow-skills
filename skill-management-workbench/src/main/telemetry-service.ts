@@ -878,8 +878,8 @@ export class TelemetryService {
     const selectSummary = this.database.db.prepare(
       `SELECT
          COUNT(*) AS total_runs,
-         SUM(CASE WHEN confidence_score > 0.68 THEN 1 ELSE 0 END) AS explicit_skill_runs,
-         SUM(CASE WHEN confidence_score >= 0.68 THEN 1 ELSE 0 END) AS qualified_skill_runs,
+         SUM(CASE WHEN capture_mode = 'precise' THEN 1 ELSE 0 END) AS explicit_skill_runs,
+         SUM(CASE WHEN capture_mode IN ('precise', 'estimated', 'inferred') AND confidence_score >= 0.68 THEN 1 ELSE 0 END) AS qualified_skill_runs,
          COALESCE(SUM(total_tokens), 0) AS total_tokens,
          MAX(started_at) AS latest_run_at
        FROM skill_runs

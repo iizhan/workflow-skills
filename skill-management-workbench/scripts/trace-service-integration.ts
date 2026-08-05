@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AuthorizationService } from "../src/main/authorization-service";
 import type { RegistryService } from "../src/main/registry-service";
 import { WorkbenchDatabase } from "../src/main/database";
 import { ensureStorage } from "../src/main/storage";
@@ -15,7 +16,8 @@ function assert(condition: unknown, message: string): asserts condition {
 const root = mkdtempSync(join(tmpdir(), "skill-os-trace-test-"));
 const database = new WorkbenchDatabase(ensureStorage(root));
 const registryStub = { listSkills: () => [] } as unknown as RegistryService;
-const service = new TraceService(database, registryStub);
+const authorizationService = new AuthorizationService(database);
+const service = new TraceService(database, registryStub, authorizationService);
 const now = "2026-07-15T01:00:00.000Z";
 
 function seedSkill(id: string, name: string, path: string) {
@@ -41,6 +43,17 @@ database.db.prepare(
      monitoring_enabled, monitoring_interval_ms, updated_at
    ) VALUES ('project-a', 'Project A', '/tmp/project', ?, ?, 1, 0, 60000, ?)`
 ).run(now, now, now);
+service.setWorkflowBindingResolver({
+  listProjectBindings: (projectRoot) => projectRoot === "/tmp/project"
+    ? [{
+        bindingId: "binding-project-a",
+        templateId: "scenario.design-to-frontend",
+        templateVersion: "1.0.0",
+        manifestFingerprint: "fixture-fingerprint",
+        readOnly: false
+      }]
+    : []
+});
 
 function event(
   lineNumber: number,
@@ -208,9 +221,9 @@ assert(eventCountAfterRepeat === eventCountBeforeRepeat, "Repeated imports must 
 const insertLegacyRun = database.db.prepare(
   `INSERT INTO skill_runs (
      id, skill_id, skill_version_id, capture_mode, confidence_score, source_type,
-     started_at, finished_at, duration_ms, total_tokens, estimated_cost_usd,
+     workspace_ref, started_at, finished_at, duration_ms, total_tokens, estimated_cost_usd,
      tool_call_count, status, summary_json
-   ) VALUES (?, ?, ?, 'estimated', 0.68, 'codex_local_log', ?, ?, 1000, 200, 0, 1, 'completed', ?)`
+   ) VALUES (?, ?, ?, 'estimated', 0.68, 'codex_local_log', '/tmp/project', ?, ?, 1000, 200, 0, 1, 'completed', ?)`
 );
 const legacySummary = JSON.stringify({
   sessionRef: "legacy-session",
@@ -374,6 +387,21 @@ const adapterDetail = service.getSessionTrace(adapterTurn.traceId);
 const adapterWorkflowSpan = adapterDetail?.spans.find((span) => span.workflowId === "scenario.design-to-frontend");
 assert(adapterWorkflowSpan?.captureMode === "precise", "Explicit Workflow event must create a precise Workflow Span.");
 assert(adapterWorkflowSpan?.workflowNodeId === "implement", "Explicit Workflow node must remain attached to its Workflow Span.");
+assert(adapterWorkflowSpan?.workflowBinding?.state === "current_binding_match", "Workflow traces must expose current binding correlation without claiming execution causality.");
+assert(adapterWorkflowSpan?.workflowBinding?.bindingVersion === "1.0.0", "Workflow binding correlation must retain the current binding version.");
+
+const projectScopedFirstPage = service.listSessionTraces({ projectRoot: "/tmp/project", limit: 2 });
+assert(projectScopedFirstPage.length === 2, "Project-scoped Trace query must enforce its own server-side limit.");
+assert(projectScopedFirstPage.every((entry) => entry.workspaceRef === "/tmp/project"), "Project-scoped Trace query must not rely on client filtering.");
+const projectScopedSecondPage = service.listSessionTraces({
+  projectRoot: "/tmp/project",
+  limit: 2,
+  cursor: {
+    receivedAt: projectScopedFirstPage[projectScopedFirstPage.length - 1].receivedAt,
+    traceId: projectScopedFirstPage[projectScopedFirstPage.length - 1].traceId
+  }
+});
+assert(projectScopedSecondPage.every((entry) => !projectScopedFirstPage.some((first) => first.traceId === entry.traceId)), "Trace cursor pagination must not repeat the previous project page.");
 
 const traceCountBeforeRejectedEnvelope = Number(
   (database.db.prepare(`SELECT COUNT(*) AS count FROM trace_events`).get() as { count: number }).count
@@ -401,6 +429,52 @@ const traceCountAfterRejectedEnvelope = Number(
 );
 assert(traceCountAfterRejectedEnvelope === traceCountBeforeRejectedEnvelope, "Raw-content Adapter event must be rejected before Trace persistence.");
 
+database.db.prepare(
+  `INSERT INTO trace_sessions (
+     id, project_id, harness_id, adapter_id, workspace_ref, source_ref,
+     started_at, last_observed_at, ended_at, status, capture_mode, confidence, summary_json
+   ) VALUES ('unrelated-orphan-session', NULL, 'codex', 'test', '/tmp/unrelated', NULL, ?, ?, NULL, 'completed', 'estimated', 0.5, '{}')`
+).run(now, now);
+
+const evidenceStatsBeforePurge = service.getEvidenceStorageStats();
+assert(evidenceStatsBeforePurge.traceEvents > 0, "Evidence stats must report persisted Trace events.");
+assert(evidenceStatsBeforePurge.oldestEvidenceAt !== null, "Evidence stats must report the oldest stored timestamp.");
+assert(evidenceStatsBeforePurge.newestEvidenceAt !== null, "Evidence stats must report the newest stored timestamp.");
+assert(
+  evidenceStatsBeforePurge.oldestEvidenceAt <= evidenceStatsBeforePurge.newestEvidenceAt,
+  "Evidence timestamp range must be ordered."
+);
+const evidencePreview = service.getEvidencePurgePreview({
+  before: "2026-07-16T00:00:00.000Z",
+  projectRoot: "/tmp/project",
+  includeSkillRuns: true
+});
+assert(evidencePreview.traceEvents > 0, "Evidence cleanup preview must report matching Trace events.");
+assert(evidencePreview.skillRuns > 0, "Evidence cleanup preview must report matching Skill runs.");
+let confirmationRequired = false;
+try {
+  service.purgeEvidence({ before: "2026-07-16T00:00:00.000Z", projectRoot: "/tmp/project", confirm: false });
+} catch {
+  confirmationRequired = true;
+}
+assert(confirmationRequired, "Evidence cleanup must require explicit confirmation.");
+const purgeResult = service.purgeEvidence({
+  before: "2026-07-16T00:00:00.000Z",
+  projectRoot: "/tmp/project",
+  includeSkillRuns: true,
+  confirm: true
+});
+assert(purgeResult.deletedTraceEvents > 0, "Confirmed project evidence cleanup must delete old Trace events.");
+assert(service.getEvidenceStorageStats().traceEvents === 0, "Purged project Trace events must no longer be counted.");
+const unrelatedOrphanSessionCount = Number(
+  (database.db.prepare(`SELECT COUNT(*) AS count FROM trace_sessions WHERE id = 'unrelated-orphan-session'`).get() as { count: number }).count
+);
+assert(unrelatedOrphanSessionCount === 1, "Project cleanup must not delete unrelated orphan Trace sessions.");
+const cleanupAuditCount = Number(
+  (database.db.prepare(`SELECT COUNT(*) AS count FROM authorization_events WHERE event_type = 'evidence.purged'`).get() as { count: number }).count
+);
+assert(cleanupAuditCount === 1, "Confirmed evidence cleanup must write a local audit event.");
+
 database.close();
 rmSync(root, { recursive: true, force: true });
-console.log("Trace Service integration passed: Turn evidence isolation, shared Tool attribution, idempotency, filters, legacy grouping, session normalization, Adapter envelopes, and privacy rejection.");
+console.log("Trace Service integration passed: Turn evidence isolation, shared Tool attribution, idempotency, filters, legacy grouping, session normalization, Adapter envelopes, privacy rejection, and confirmed retention cleanup.");

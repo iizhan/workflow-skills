@@ -17,6 +17,7 @@ export interface SecretProtector {
   isAvailable(): boolean;
   encrypt(value: string): Buffer;
   decrypt(value: Buffer): string;
+  availabilityState?(): ModelEvaluationConfig["secretStorage"];
 }
 
 type FetchLike = typeof fetch;
@@ -331,7 +332,7 @@ export class ModelEvaluationService {
       modelName: stringValue(row?.model_name, ""),
       enabled: booleanValue(row?.enabled),
       hasApiKey: Boolean(toBuffer(row?.encrypted_api_key)),
-      secretStorage: this.secretProtector.isAvailable() ? "system_secure" : "unavailable",
+      secretStorage: this.secretProtector.availabilityState?.() ?? "unchecked",
       allowSourceUpload: booleanValue(row?.allow_source_upload),
       updatedAt: nullableString(row?.updated_at),
       lastTestedAt: nullableString(row?.last_tested_at),

@@ -11,10 +11,17 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
+let availabilityChecks = 0;
+let availabilityState: "unchecked" | "system_secure" | "unavailable" = "unchecked";
 const protector: SecretProtector = {
-  isAvailable: () => true,
+  isAvailable: () => {
+    availabilityChecks += 1;
+    availabilityState = "system_secure";
+    return true;
+  },
   encrypt: (value) => Buffer.from(`encrypted:${value}`, "utf8"),
-  decrypt: (value) => value.toString("utf8").replace(/^encrypted:/, "")
+  decrypt: (value) => value.toString("utf8").replace(/^encrypted:/, ""),
+  availabilityState: () => availabilityState
 };
 
 const fixtureCases = JSON.stringify({
@@ -56,6 +63,8 @@ const service = new ModelEvaluationService(database, protector, fetchMock as typ
 try {
   const initial = service.getConfig();
   assert(!initial.hasApiKey && initial.lastTestStatus === "not_tested", "Default model configuration must be inert.");
+  assert(initial.secretStorage === "unchecked", "Secure storage must remain unchecked until a key action requires it.");
+  assert(availabilityChecks === 0, "Reading model settings must not synchronously query the system Keychain.");
 
   let rejectedInsecureEndpoint = false;
   try {
@@ -80,6 +89,7 @@ try {
     apiKey: "fixture-secret"
   });
   assert(saved.enabled && saved.hasApiKey, "Enabled model configuration must report a saved key without returning it.");
+  assert(saved.secretStorage === "system_secure" && availabilityChecks === 1, "Saving a key must check secure storage exactly when needed.");
   assert(!("apiKey" in saved), "Configuration response must never return the API key.");
 
   const encryptedRow = database.db

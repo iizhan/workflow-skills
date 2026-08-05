@@ -48,6 +48,19 @@ const preload = read("src/preload/index.ts");
 const previewApi = read("src/renderer/src/preview-api.ts");
 const packageJson = read("package.json");
 
+assertIncludes(
+  "src/main/index.ts",
+  main,
+  "!mainWindow || mainWindow.isDestroyed()",
+  "A second launch recreates a closed main window"
+);
+assertIncludes(
+  "src/main/index.ts",
+  main,
+  'window.on("closed"',
+  "Closed main windows release their stale BrowserWindow reference"
+);
+
 const inertButtons = findInertButtons(app);
 assert(
   inertButtons.length === 0,
@@ -118,6 +131,24 @@ assertIncludes(
   "Session Trace UI exposes searchable session IDs"
 );
 assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "[selectedSessionTraceId, sessionTraceDetailRevision]",
+  "Session Trace detail reloads when the selected record is refreshed"
+);
+assertIncludes(
+  "scripts/self-test-ui.mjs",
+  read("scripts/self-test-ui.mjs"),
+  "await runChromeDebugSelfTest();",
+  "UI click tests fall back to Chrome when the local Electron runtime is unavailable"
+);
+assertIncludes(
+  "src/main/model-evaluation-service.ts",
+  read("src/main/model-evaluation-service.ts"),
+  'availabilityState?.() ?? "unchecked"',
+  "Reading model settings does not synchronously query the system Keychain"
+);
+assertIncludes(
   "src/main/local-tool-telemetry-service.ts",
   localToolTelemetryService,
   "const turnRef = this.readExplicitTurnRef(record) ?? turnOverride;",
@@ -141,6 +172,12 @@ assertIncludes(
   styles,
   ".trace-workspace",
   "Session Trace stable split workspace styling"
+);
+assertIncludes(
+  "src/renderer/src/styles.css",
+  styles,
+  "grid-template-rows: auto auto auto minmax(0, 1fr);",
+  "Session Trace reserves separate rows for the message, metrics, and scrollable execution chain"
 );
 
 for (const section of requiredProductSections) {
@@ -2029,8 +2066,14 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  "refreshProjectRuntimeEvidence(nextProject, { silent: true })",
+  "refreshProjectRuntimeEvidence(next.project, { silent: true })",
   "Background monitoring should import runtime evidence instead of only checking the Codex directory"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "scheduleNextMonitor",
+  "Background monitoring should schedule only the next due project instead of polling every project"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",
@@ -2043,6 +2086,12 @@ assertIncludes(
   app,
   "SkillsWorkflowVisual",
   "Project detail should expose the complete Skills Workflow as a visible interactive process"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  "getProjectWorkflowEvidence(projectPath)",
+  "Workflow visual should read standard workflow-state evidence instead of inferring formal gates from runtime counts"
 );
 const projectDetailPanel = readOptionalRendererSourceFile("components/projectDetail/ProjectAssetDetailPanel.tsx");
 const workflowVisualOwner = projectDetailPanel ?? appRoot;
@@ -2074,8 +2123,8 @@ if (overviewComponentSources.length > 0) {
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  'mode: options.silent ? "incremental" : "full"',
-  "Background monitoring should use bounded incremental session reads"
+  'mode: options.mode ?? "incremental"',
+  "Interactive and background monitoring should use bounded incremental session reads"
 );
 assertIncludes(
   "src/main/local-tool-telemetry-service.ts",
@@ -2110,7 +2159,7 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  "projectManagementRefreshIntervalMs = 15_000",
+  "projectManagementRefreshIntervalMs = 30_000",
   "Project management should refresh its runtime snapshot on a bounded countdown"
 );
 assertIncludes(
@@ -2170,8 +2219,14 @@ assertIncludes(
 assertIncludes(
   "src/renderer/src/App.tsx",
   app,
-  "checkProjectConnectionHeartbeat(repairedProject)",
-  "Project repair should use the fast Codex directory check instead of importing full runtime history"
+  "refreshProjectRuntimeEvidence(repairedProject, {",
+  "Project repair should import runtime evidence instead of only checking the Codex directory"
+);
+assertIncludes(
+  "src/renderer/src/App.tsx",
+  app,
+  'mode: "full"',
+  "Project repair should allow a bounded full refresh to recover existing session evidence"
 );
 assertIncludes(
   "src/renderer/src/App.tsx",

@@ -12,9 +12,11 @@ import type {
   ScenarioLoopRunStatus,
   ScenarioLoopRunSummary,
   ScenarioLoopStopReason,
-  ScenarioLoopTemplateDefinition
+  ScenarioLoopTemplateDefinition,
+  ProjectWorkflowEvidenceSummary
 } from "../shared/types";
 import type { WorkbenchDatabase } from "./database";
+import { ConversationLoopEvidenceService } from "./conversation-loop-evidence-service";
 import type { WorkflowRegistryService } from "./workflow-registry-service";
 
 const terminalStatuses = new Set<ScenarioLoopRunStatus>([
@@ -236,10 +238,14 @@ function qualityPasses(policy: ScenarioLoopPolicy, quality: ScenarioLoopQualityE
 }
 
 export class ScenarioLoopService {
+  private readonly conversationEvidence: ConversationLoopEvidenceService;
+
   constructor(
     private readonly database: WorkbenchDatabase,
     private readonly workflowRegistryService: WorkflowRegistryService
-  ) {}
+  ) {
+    this.conversationEvidence = new ConversationLoopEvidenceService(workflowRegistryService);
+  }
 
   createRun(input: ScenarioLoopRunCreateInput): ScenarioLoopRunSummary {
     validateFormalPackage(input.formalPackage);
@@ -405,7 +411,14 @@ export class ScenarioLoopService {
     const rows = this.database.db
       .prepare(`SELECT * FROM scenario_loop_runs WHERE project_root = ? ORDER BY updated_at DESC`)
       .all(projectRoot) as Array<Record<string, unknown>>;
-    return rows.map((row) => this.toRunSummary(row));
+    return [
+      ...this.conversationEvidence.listProjectRuns(projectRoot),
+      ...rows.map((row) => this.toRunSummary(row))
+    ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  getProjectWorkflowEvidence(projectRoot: string): ProjectWorkflowEvidenceSummary {
+    return this.conversationEvidence.getProjectWorkflowEvidence(projectRoot);
   }
 
   private decideIteration(input: {
@@ -525,6 +538,10 @@ export class ScenarioLoopService {
       id: String(row.id),
       projectRoot: String(row.project_root),
       bindingId: String(row.binding_id),
+      evidenceSource: "desktop_observation",
+      sourceRef: null,
+      sessionRef: null,
+      externalRunId: null,
       template,
       formalPackage: normalizeFormalPackage(parseJson(row.formal_package_json)),
       status: String(row.status) as ScenarioLoopRunStatus,

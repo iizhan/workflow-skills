@@ -1,12 +1,15 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
 import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   AuthorizationInput,
+  AuthorizationPreferenceInput,
+  EvidencePurgeInput,
   ManagedProjectRecord,
   ModelEvaluationCaseGenerationInput,
+  ModelEvaluationConfig,
   ModelEvaluationConfigInput,
   ProjectAdapterReadiness,
   BootstrapState,
@@ -79,7 +82,11 @@ if (!singleInstanceLockAcquired) {
 let mainWindow: BrowserWindow | null = null;
 
 app.on("second-instance", () => {
-  if (!mainWindow) {
+  if (!app.isReady()) {
+    return;
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
     return;
   }
   if (mainWindow.isMinimized()) {
@@ -94,7 +101,15 @@ const database = new WorkbenchDatabase(storagePaths);
 const authorizationService = new AuthorizationService(database);
 const healthScorePolicyService = new HealthScorePolicyService(database);
 const registryService = new RegistryService(database, authorizationService, healthScorePolicyService);
-const traceService = new TraceService(database, registryService);
+const traceService = new TraceService(database, registryService, authorizationService);
+const legacyTelemetryRepair = traceService.repairLegacyEstimatedLocalTelemetry();
+if (legacyTelemetryRepair) {
+  console.info("[workbench] repaired legacy estimated local telemetry", legacyTelemetryRepair);
+}
+const legacyTelemetryCompaction = traceService.compactRepairedLegacyTelemetryStorage();
+if (legacyTelemetryCompaction) {
+  console.info("[workbench] compacted repaired telemetry storage", legacyTelemetryCompaction);
+}
 traceService.backfillLegacyRuns();
 const telemetryService = new TelemetryService(database, authorizationService, traceService);
 const optimizationService = new OptimizationService(database, authorizationService);
@@ -128,6 +143,7 @@ const workflowRegistryService = new WorkflowRegistryService(
   workflowAssetPaths.templatesRoot,
   workflowAssetPaths.packagePath
 );
+traceService.setWorkflowBindingResolver(workflowRegistryService);
 const scenarioLoopService = new ScenarioLoopService(database, workflowRegistryService);
 const codexAppServerObservationService = new CodexAppServerObservationService(database, traceService);
 const adapterReadinessService = new AdapterReadinessService(
@@ -136,10 +152,16 @@ const adapterReadinessService = new AdapterReadinessService(
   traceService,
   codexAppServerObservationService
 );
+let modelSecretStorageState: ModelEvaluationConfig["secretStorage"] = "unchecked";
 const modelEvaluationService = new ModelEvaluationService(database, {
-  isAvailable: () => safeStorage.isEncryptionAvailable(),
+  isAvailable: () => {
+    const available = safeStorage.isEncryptionAvailable();
+    modelSecretStorageState = available ? "system_secure" : "unavailable";
+    return available;
+  },
   encrypt: (value) => safeStorage.encryptString(value),
-  decrypt: (value) => safeStorage.decryptString(value)
+  decrypt: (value) => safeStorage.decryptString(value),
+  availabilityState: () => modelSecretStorageState
 });
 
 function resolveModelEvaluationTarget(input: ModelEvaluationCaseGenerationInput) {
@@ -190,7 +212,7 @@ function buildBootstrapState(): BootstrapState {
 }
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1120,
     height: 740,
     minWidth: 960,
@@ -200,17 +222,49 @@ function createWindow() {
     trafficLightPosition: { x: 14, y: 14 },
     backgroundColor: "#050814",
     webPreferences: {
-      preload: join(__dirname, "../preload/index.mjs"),
+      preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
-      sandbox: false,
+      sandbox: true,
       nodeIntegration: false
     }
   });
+  mainWindow = window;
+
+  window.on("closed", () => {
+    if (mainWindow === window) {
+      mainWindow = null;
+    }
+  });
+
+  const allowedRendererOrigin = process.env.ELECTRON_RENDERER_URL
+    ? new URL(process.env.ELECTRON_RENDERER_URL).origin
+    : null;
+  const packagedRendererRoot = resolve(join(__dirname, "../renderer"));
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.on("will-navigate", (event, url) => {
+    let isLocalFile = false;
+    if (url.startsWith("file://")) {
+      try {
+        const localPath = resolve(fileURLToPath(new URL(url)));
+        isLocalFile = localPath === packagedRendererRoot || localPath.startsWith(`${packagedRendererRoot}/`);
+      } catch {
+        isLocalFile = false;
+      }
+    }
+    const isDevelopmentRenderer = Boolean(allowedRendererOrigin && url.startsWith(`${allowedRendererOrigin}/`));
+    if (!isLocalFile && !isDevelopmentRenderer) {
+      event.preventDefault();
+    }
+  });
+  window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false);
+  });
+  window.webContents.session.setPermissionCheckHandler(() => false);
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+    void window.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    void window.loadFile(join(__dirname, "../renderer/index.html"));
   }
 }
 
@@ -321,10 +375,18 @@ function registerIpcHandlers() {
   ipcMain.handle("workbench:grant-authorization", async (_event, input: AuthorizationInput) => {
     authorizationService.grantAuthorization(input);
     if (input.scanRoots[0]) {
-      registryService.scanProjectRoot(input.scanRoots[0]);
+      await registryService.scanProjectRoot(input.scanRoots[0]);
     }
     return buildBootstrapState();
   });
+
+  ipcMain.handle(
+    "workbench:update-authorization-preferences",
+    async (_event, input: AuthorizationPreferenceInput) => {
+      authorizationService.updateActivePreferences(input);
+      return buildBootstrapState();
+    }
+  );
 
   ipcMain.handle("workbench:list-audit-events", async (_event, limit?: number) =>
     authorizationService.listAuditEvents(limit)
@@ -349,8 +411,6 @@ function registerIpcHandlers() {
     async (_event, manifestPath: string): Promise<LocalBackupRestoreImpactResult> =>
       backupService.previewBackupRestoreImpact(manifestPath)
   );
-
-  ipcMain.handle("workbench:scan-skills", async () => registryService.scanApprovedRoots());
 
   ipcMain.handle("workbench:scan-project-skills", async (_event, projectRoot: string) =>
     registryService.scanProjectRoot(projectRoot)
@@ -415,6 +475,11 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "workbench:list-project-scenario-loop-runs",
     async (_event, projectRoot: string) => scenarioLoopService.listProjectRuns(projectRoot)
+  );
+
+  ipcMain.handle(
+    "workbench:get-project-workflow-evidence",
+    async (_event, projectRoot: string) => scenarioLoopService.getProjectWorkflowEvidence(projectRoot)
   );
 
   ipcMain.handle(
@@ -578,6 +643,15 @@ function registerIpcHandlers() {
     "workbench:list-project-runtime-summaries",
     async (_event, projectPaths: string[]): Promise<ProjectRuntimeSummary[]> =>
       telemetryService.listProjectRuntimeSummaries(projectPaths)
+  );
+  ipcMain.handle("workbench:get-evidence-storage-stats", async () => traceService.getEvidenceStorageStats());
+  ipcMain.handle(
+    "workbench:preview-evidence-purge",
+    async (_event, input) => traceService.getEvidencePurgePreview(input)
+  );
+  ipcMain.handle(
+    "workbench:purge-evidence",
+    async (_event, input: EvidencePurgeInput) => traceService.purgeEvidence(input)
   );
 
   ipcMain.handle("workbench:list-skill-runs", async (_event, skillId: string, limit?: number) =>

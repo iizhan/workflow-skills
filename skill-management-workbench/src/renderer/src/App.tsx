@@ -16,6 +16,7 @@ import type {
   BootstrapState,
   BundleValidationSeverity,
   DailyMetricsSummary,
+  EvidenceStorageStats,
   GraphEdgeSummary,
   GraphNeighborhood,
   GraphNodeSummary,
@@ -43,6 +44,7 @@ import type {
   ProjectControlledSessionVerification,
   ProjectRuntimeEvidenceRefreshResult,
   ProjectRuntimeSummary,
+  ProjectWorkflowEvidenceSummary,
   ProjectWorkflowBindingApplyResult,
   ProjectWorkflowBindingPreview,
   ProjectWorkflowBindingSummary,
@@ -91,6 +93,21 @@ type LanguageMode = "en" | "zh";
 type ProductMode = "guided" | "builder";
 type ProjectDetailView = "overview" | "skills" | "monitoring";
 type GraphPresentationMode = "flow" | "mindmap";
+type WorkflowConsoleTab = "runtime" | "map" | "binding" | "doctor";
+
+type WorkflowConsoleInitialAction =
+  | { kind: "binding"; templateKey: string }
+  | { kind: "migration"; bindingId: string }
+  | { kind: "rollback"; bindingId: string }
+  | null;
+
+type WorkflowConsoleContext = {
+  projectRoot: string;
+  projectName: string;
+  initialTab: WorkflowConsoleTab;
+  initialTemplateKey: string | null;
+  initialAction: WorkflowConsoleInitialAction;
+};
 
 type InteractionNoticeTone = "default" | "success" | "warning" | "info";
 
@@ -153,7 +170,10 @@ const projectOnboardingLogsStorageKey = "skill-os-project-onboarding-logs-v1";
 const maxProjectHeartbeatEntries = 48;
 const maxProjectOnboardingLogEntries = 120;
 const runtimeRunFetchLimit = 300;
-const projectManagementRefreshIntervalMs = 15_000;
+const projectManagementRefreshIntervalMs = 30_000;
+const projectManagementCountdownTickMs = 5_000;
+const minimumBackgroundMonitorDelayMs = 15_000;
+const maximumBackgroundMonitorDelayMs = 5 * 60_000;
 const skillRunDetailLimit = 200;
 const inferredSkillEvidenceThreshold = 0.68;
 
@@ -3711,10 +3731,12 @@ function ProjectLibraryPanel({
                 const projectRuntimeLogCount = runtimeSummary?.totalRuns ?? matchingWorkspaceRuns.length;
                 const hasExplicitSkillRun = runtimeSummary
                   ? runtimeSummary.explicitSkillRuns > 0
-                  : matchingWorkspaceRuns.some((run) => run.confidenceScore > inferredSkillEvidenceThreshold);
+                  : matchingWorkspaceRuns.some((run) => run.captureMode === "precise");
                 const hasInferredSkillRun = runtimeSummary
-                  ? runtimeSummary.qualifiedSkillRuns > 0
-                  : matchingWorkspaceRuns.some((run) => run.confidenceScore >= inferredSkillEvidenceThreshold);
+                  ? runtimeSummary.qualifiedSkillRuns > runtimeSummary.explicitSkillRuns
+                  : matchingWorkspaceRuns.some(
+                      (run) => ["estimated", "inferred"].includes(run.captureMode) && run.confidenceScore >= inferredSkillEvidenceThreshold
+                    );
                 const latestMatchingWorkspaceRef = matchingWorkspaceRuns
                   .slice()
                   .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0]?.workspaceRef;
@@ -3769,7 +3791,7 @@ function ProjectLibraryPanel({
                         : onboardingStatus === "needs-authorization"
                           ? tx("Needs authorization", "需要授权")
                         : onboardingStatus === "connected-awaiting-skill"
-                          ? tx("Connected, awaiting Skill", "已连接待触发")
+                          ? tx("Directory connected; Skill evidence not observed", "目录已连接，尚未观测到技能证据")
                         : onboardingStatus === "inferred-skill"
                           ? tx("Inferred Skill run", "推断触发")
                         : onboardingStatus === "healthy"
@@ -3793,8 +3815,8 @@ function ProjectLibraryPanel({
                           )
                       : onboardingStatus === "connected-awaiting-skill"
                         ? tx(
-                            `Codex directory matches ${project.path}, but no explicit Skill invocation has been detected yet.`,
-                            `Codex 目录已匹配 ${project.path}，但尚未检测到明确的技能调用。`
+                            `Codex directory matches ${project.path}, but no Skill evidence has been observed in the available sources.`,
+                            `Codex 目录已匹配 ${project.path}，但当前可用来源中尚未观测到技能证据。`
                           )
                       : onboardingStatus === "inferred-skill"
                         ? tx(
@@ -3861,7 +3883,7 @@ function ProjectLibraryPanel({
                         ) : null}
                         {onboardingStatus === "connected-awaiting-skill" ? (
                           <small className="project-connection-workspace is-matched" title={statusDetail}>
-                            {tx("Codex directory matched; Skill not triggered", "Codex 目录已匹配，技能待触发")}
+                            {tx("Codex directory matched; no Skill evidence observed", "Codex 目录已匹配，尚未观测到技能证据")}
                           </small>
                         ) : null}
                         {onboardingStatus === "inferred-skill" ? (
@@ -4573,6 +4595,7 @@ function ProjectRuntimeLogModal({
 }
 
 type SkillsWorkflowVisualStageState = "done" | "active" | "next" | "pending";
+type SkillsWorkflowEvidenceState = "verified" | "recorded" | "observed" | "unverified";
 
 function SkillsWorkflowVisual({
   projectName,
@@ -4583,6 +4606,8 @@ function SkillsWorkflowVisual({
   runtimeCount,
   reportsReady,
   proposalCount,
+  loopRuns,
+  workflowEvidence,
   onNavigate
 }: {
   projectName: string;
@@ -4593,83 +4618,156 @@ function SkillsWorkflowVisual({
   runtimeCount: number;
   reportsReady: boolean;
   proposalCount: number;
+  loopRuns: ScenarioLoopRunSummary[];
+  workflowEvidence: ProjectWorkflowEvidenceSummary | null;
   onNavigate: (href: "#discovery" | "#session-trace" | "#analysis" | "#evaluate" | "#proposals") => void;
 }) {
   const { tx } = useLanguage();
   const requestObserved = traceCount > 0;
   const executionObserved = runtimeCount > 0;
+  const latestFormalRun = loopRuns.find((run) => run.formalPackage.confirmationRef !== "未记录") ?? loopRuns[0] ?? null;
+  const formalPackage = latestFormalRun?.formalPackage ?? null;
+  const artifactVersions = workflowEvidence?.artifactVersions ?? {
+    requirementVersion: formalPackage?.requirementVersion ?? null,
+    designVersion: formalPackage?.designVersion ?? null,
+    impactVersion: formalPackage?.impactVersion ?? null,
+    taskBreakdownVersion: formalPackage?.taskBreakdownVersion ?? null,
+    verificationPlanVersion: formalPackage?.verificationPlanVersion ?? null
+  };
+  const confirmation = workflowEvidence?.confirmation ?? (
+    formalPackage && !Number.isNaN(Date.parse(formalPackage.confirmedAt)) && formalPackage.confirmationRef !== "未记录"
+      ? { confirmedAt: formalPackage.confirmedAt, confirmationRef: formalPackage.confirmationRef }
+      : null
+  );
+  const hasRecordedVersion = (value: string | null | undefined) => Boolean(value && value.trim() && value !== "未记录");
+  const hasConfirmedFormalPackage = Boolean(
+    [
+      artifactVersions.requirementVersion,
+      artifactVersions.designVersion,
+      artifactVersions.impactVersion,
+      artifactVersions.taskBreakdownVersion,
+      artifactVersions.verificationPlanVersion,
+      confirmation?.confirmationRef
+    ].every(hasRecordedVersion) &&
+    confirmation && !Number.isNaN(Date.parse(confirmation.confirmedAt))
+  );
+  const verifiedLoopRun = loopRuns.find((run) => {
+    const quality = run.latestQuality;
+    const hasQualityEvidence = Boolean(
+      quality &&
+      (quality.evidenceRefs.length > 0 || quality.checks.some((check) => check.evidenceRefs.length > 0))
+    );
+    return ["verified", "verified_with_risk"].includes(run.status) && hasQualityEvidence;
+  }) ?? null;
+  const verifiedWorkflowState = Boolean(
+    workflowEvidence &&
+    ["verified", "passed", "complete", "completed"].includes((workflowEvidence.verificationStatus ?? "").toLowerCase()) &&
+    workflowEvidence.verificationEvidenceRefs.length > 0
+  );
   const stages = [
     {
       id: "context",
       label: tx("Project context", "项目上下文"),
       compact: tx("Bind + scan", "绑定 + 扫描"),
       detail: tx("The selected project directory is the boundary. Skills Workflow reads this project context before acting.", "先确定项目目录边界。工作流会先读取项目上下文，再开始工作。"),
-      evidence: projectPath || tx("No project selected", "尚未选择项目"),
+      evidence: projectReady
+        ? tx("Project scan recorded for this directory", "该目录已有项目扫描记录")
+        : projectPath || tx("No project selected", "尚未选择项目"),
       href: "#discovery" as const,
-      ready: projectReady
+      ready: projectReady,
+      evidenceState: projectReady ? "observed" : "unverified" as SkillsWorkflowEvidenceState
     },
     {
       id: "understand",
       label: tx("Understand request", "理解需求"),
       compact: tx("Route", "需求路由"),
-      detail: tx("The outer router identifies the request type, complexity, and the project context that should receive it.", "最外层路由会识别需求类型、复杂度，以及这条需求应该进入哪个项目上下文。"),
-      evidence: requestObserved ? `${traceCount} ${tx("trace records", "条链路记录")}` : tx("Waiting for the first request", "等待第一条需求"),
+      detail: tx("The outer router identifies the request type, complexity, and the project context that should receive it. An observed trace alone does not prove that requirements were confirmed.", "最外层路由会识别需求类型、复杂度，以及这条需求应该进入哪个项目上下文；仅有链路记录不代表需求已确认。"),
+      evidence: requestObserved ? `${traceCount} ${tx("observed trace records; clarification is separate", "条已观测链路记录；澄清确认需单独留证")}` : tx("Waiting for the first request", "等待第一条需求"),
       href: "#session-trace" as const,
-      ready: requestObserved
+      ready: requestObserved,
+      evidenceState: requestObserved ? "observed" : "unverified" as SkillsWorkflowEvidenceState
     },
     {
       id: "impact",
       label: tx("Map impact", "分析影响范围"),
       compact: tx("Impact", "影响范围"),
       detail: tx("The workflow makes affected modules, files, and project boundaries visible before implementation begins.", "执行前先把受影响模块、文件和项目边界显式列出来。"),
-      evidence: requestObserved ? tx("Impact gate is available in the trace", "链路中已有影响范围门禁") : tx("Appears after request routing", "需求路由后出现"),
+      evidence: hasRecordedVersion(artifactVersions.impactVersion)
+        ? `${tx("Impact", "影响范围")} ${artifactVersions.impactVersion}`
+        : tx("No versioned impact artifact recorded", "尚未记录版本化影响范围工件"),
       href: "#session-trace" as const,
-      ready: requestObserved
+      ready: hasRecordedVersion(artifactVersions.impactVersion),
+      evidenceState: hasRecordedVersion(artifactVersions.impactVersion) ? "recorded" : "unverified" as SkillsWorkflowEvidenceState
     },
     {
       id: "plan",
       label: tx("Break into tasks", "拆解事项"),
       compact: tx("Plan", "计划"),
       detail: tx("A complex request becomes an item list and smaller executable subtasks. The list is the shared checkpoint.", "复杂需求会拆成事项清单和可执行子任务，清单是用户和系统共同确认的检查点。"),
-      evidence: workflowReady ? tx("Project workflow is ready", "项目工作流已就绪") : tx("Uses the recommended workflow", "使用推荐工作流"),
+      evidence:
+        hasRecordedVersion(artifactVersions.designVersion) && hasRecordedVersion(artifactVersions.taskBreakdownVersion)
+          ? `${tx("Design", "设计")} ${artifactVersions.designVersion} · ${tx("Tasks", "任务")} ${artifactVersions.taskBreakdownVersion}`
+          : workflowReady
+            ? tx("Workflow is bound, but no versioned design and task breakdown is recorded", "工作流已绑定，但尚未记录版本化设计和任务拆解")
+            : tx("No versioned design and task breakdown recorded", "尚未记录版本化设计和任务拆解"),
       href: "#session-trace" as const,
-      ready: workflowReady && requestObserved
+      ready: hasRecordedVersion(artifactVersions.designVersion) && hasRecordedVersion(artifactVersions.taskBreakdownVersion),
+      evidenceState:
+        hasRecordedVersion(artifactVersions.designVersion) && hasRecordedVersion(artifactVersions.taskBreakdownVersion)
+          ? "recorded"
+          : "unverified" as SkillsWorkflowEvidenceState
     },
     {
       id: "confirm",
       label: tx("User confirmation", "用户确认"),
       compact: tx("Gate", "确认门禁"),
       detail: tx("The system pauses before meaningful writes or execution when the request, task list, or impact is not confirmed.", "需求、任务清单或影响范围没有确认时，系统会在真正写入或执行前暂停。"),
-      evidence: executionObserved ? tx("Confirmation gate passed for observed runs", "已观测运行已通过确认门禁") : tx("No execution is hidden behind this gate", "执行不会绕过这个门禁"),
+      evidence: hasConfirmedFormalPackage
+        ? `${tx("Confirmed", "已确认")} ${confirmation?.confirmedAt} · ${confirmation?.confirmationRef}`
+        : tx("No complete, timestamped confirmation package recorded", "尚未记录完整且带时间的确认包"),
       href: "#session-trace" as const,
-      ready: executionObserved
+      ready: hasConfirmedFormalPackage,
+      evidenceState: hasConfirmedFormalPackage ? "verified" : "unverified" as SkillsWorkflowEvidenceState
     },
     {
       id: "execute",
       label: tx("Run Skill chain", "执行技能链"),
       compact: tx("Execute", "执行"),
       detail: tx("The selected Skills run in sequence, with each hit, tool call, and token signal captured locally.", "选中的技能按链路执行，每次命中、工具调用和 Token 信号都会在本地记录。"),
-      evidence: executionObserved ? `${runtimeCount} ${tx("runtime events", "条运行事件")}` : tx("No runtime evidence yet", "还没有运行证据"),
+      evidence: executionObserved ? `${runtimeCount} ${tx("runtime records; their capture mode is shown in the call chain", "条运行记录；采集模式请在调用链查看")}` : tx("No runtime evidence yet", "还没有运行证据"),
       href: "#analysis" as const,
-      ready: executionObserved
+      ready: executionObserved,
+      evidenceState: executionObserved ? "observed" : "unverified" as SkillsWorkflowEvidenceState
     },
     {
       id: "verify",
       label: tx("Self-check", "自我审查"),
       compact: tx("Verify", "验证"),
       detail: tx("The workflow checks implementation results, tests, quality signals, and the evidence behind the result.", "工作流会检查实现结果、测试、质量指标，以及结果背后的证据。"),
-      evidence: reportsReady ? tx("Evaluation evidence is available", "评测证据已生成") : tx("Waiting for an evaluation report", "等待评测报告"),
+      evidence: verifiedWorkflowState
+        ? `${tx("Workflow-state verification", "工作流状态验证")} · ${workflowEvidence?.verificationEvidenceRefs.length} ${tx("evidence references", "条证据引用")}`
+        : verifiedLoopRun
+        ? `${tx("Loop quality", "Loop 质量")} ${verifiedLoopRun.latestQuality?.score ?? "n/a"} · ${verifiedLoopRun.evidenceSource === "conversation_state" ? tx("conversation state", "会话状态") : tx("local observation", "本地观察")}`
+        : reportsReady
+          ? tx("Evaluation data exists, but no verified Loop evidence is linked to this project", "已有评测数据，但未关联到该项目的已验证 Loop 证据")
+          : tx("No verification report with evidence is recorded", "尚未记录带证据的验证报告"),
       href: "#evaluate" as const,
-      ready: reportsReady
+      ready: verifiedWorkflowState || Boolean(verifiedLoopRun),
+      evidenceState: verifiedWorkflowState || verifiedLoopRun ? "verified" : "unverified" as SkillsWorkflowEvidenceState
     },
     {
       id: "learn",
       label: tx("Confirm and learn", "确认并沉淀"),
       compact: tx("Improve", "沉淀"),
       detail: tx("Confirmed feedback becomes local memory, proposals, and reusable workflow improvements instead of disappearing after one chat.", "确认后的反馈会沉淀为本地记忆、建议和可复用的工作流改进，不会在一次会话后消失。"),
-      evidence: proposalCount > 0 ? `${proposalCount} ${tx("open proposals", "条待处理建议")}` : tx("No open improvement proposal", "暂无待处理改进建议"),
+      evidence: workflowEvidence?.userAcceptanceRecorded
+        ? tx("User acceptance is recorded in workflow-state; inspect memory and proposals separately.", "workflow-state 已记录用户验收；记忆与改进建议需单独查看。")
+        : proposalCount > 0
+          ? `${proposalCount} ${tx("open improvement proposals; acceptance is still not recorded", "条待处理改进建议；尚未记录用户验收")}`
+          : tx("No user acceptance and reflection evidence recorded", "尚未记录用户验收与复盘证据"),
       href: "#proposals" as const,
-      ready: reportsReady && proposalCount === 0
+      ready: Boolean(workflowEvidence?.userAcceptanceRecorded),
+      evidenceState: workflowEvidence?.userAcceptanceRecorded ? "recorded" : "unverified" as SkillsWorkflowEvidenceState
     }
   ];
   const firstIncompleteIndex = stages.findIndex((stage) => !stage.ready);
@@ -4689,9 +4787,13 @@ function SkillsWorkflowVisual({
   };
   const selectedStage = stages[selectedStageIndex] ?? stages[activeStageIndex];
   const selectedStageState = getStageState(selectedStageIndex);
-  const statusLabel = (state: SkillsWorkflowVisualStageState) =>
+  const statusLabel = (state: SkillsWorkflowVisualStageState, evidenceState: SkillsWorkflowEvidenceState) =>
     state === "done"
-      ? tx("Observed", "已观测")
+      ? evidenceState === "verified"
+        ? tx("Verified", "已验证")
+        : evidenceState === "recorded"
+          ? tx("Recorded", "已记录")
+          : tx("Observed", "已观测")
       : state === "active"
         ? tx("Current", "当前")
         : state === "next"
@@ -4781,7 +4883,7 @@ function SkillsWorkflowVisual({
                       <strong>{stage.label}</strong>
                       <small>{stage.compact}</small>
                     </span>
-                    <span className="skills-workflow-stage-state">{statusLabel(state)}</span>
+                    <span className="skills-workflow-stage-state">{statusLabel(state, stage.evidenceState)}</span>
                   </button>
                   {index < stages.length - 1 ? <span className="skills-workflow-connector" aria-hidden="true">→</span> : null}
                 </Fragment>
@@ -4820,7 +4922,7 @@ function SkillsWorkflowVisual({
                       >
                         <span>{String(index + 1).padStart(2, "0")}</span>
                         <strong>{stage.label}</strong>
-                        <small>{statusLabel(state)}</small>
+                        <small>{statusLabel(state, stage.evidenceState)}</small>
                       </button>
                     );
                   })}
@@ -4836,7 +4938,7 @@ function SkillsWorkflowVisual({
               <span className="os-module-kicker">{tx("Current checkpoint", "当前检查点")}</span>
               <strong>{selectedStage.label}</strong>
             </div>
-            <span>{statusLabel(selectedStageState)}</span>
+            <span>{statusLabel(selectedStageState, selectedStage.evidenceState)}</span>
           </div>
           <p>{selectedStage.detail}</p>
           <div className="skills-workflow-evidence">
@@ -4850,7 +4952,7 @@ function SkillsWorkflowVisual({
       </div>
 
       <div className="skills-workflow-visual-foot">
-        <span><i className="workflow-dot workflow-dot-done" />{tx("Observed evidence", "已观测证据")}</span>
+        <span><i className="workflow-dot workflow-dot-done" />{tx("Recorded or observed evidence", "已记录或已观测证据")}</span>
         <span><i className="workflow-dot workflow-dot-active" />{tx("Current gate", "当前门禁")}</span>
         <span><i className="workflow-dot workflow-dot-pending" />{tx("Future stage", "后续阶段")}</span>
         <button type="button" onClick={() => onNavigate("#session-trace")}>
@@ -5199,6 +5301,7 @@ function ProjectAssetDetailPanel({
   onRenameProject,
   onNavigate,
   onOpenTelemetryIntake,
+  onOpenWorkflowConsole,
   onClose
 }: {
   project: ManagedProject | null;
@@ -5230,13 +5333,43 @@ function ProjectAssetDetailPanel({
   onRenameProject: (project: ManagedProject, name: string) => void;
   onNavigate: (href: "#discovery" | "#session-trace" | "#analysis" | "#evaluate" | "#proposals") => void;
   onOpenTelemetryIntake: () => void;
+  onOpenWorkflowConsole: (project: ManagedProject) => void;
   onClose?: () => void;
 }) {
   const { tx } = useLanguage();
   const [activeView, setActiveView] = useState<ProjectDetailView>(initialView);
   const [projectNameDraft, setProjectNameDraft] = useState(project?.name ?? "");
   const [lastHeartbeatAt, setLastHeartbeatAt] = useState<string | null>(project?.lastScanAt ?? null);
+  const [projectLoopRuns, setProjectLoopRuns] = useState<ScenarioLoopRunSummary[]>([]);
+  const [projectWorkflowEvidence, setProjectWorkflowEvidence] = useState<ProjectWorkflowEvidenceSummary | null>(null);
   const projectPath = normalizeProjectPath(project?.path ?? "");
+  useEffect(() => {
+    let active = true;
+    if (!projectPath) {
+      setProjectLoopRuns([]);
+      setProjectWorkflowEvidence(null);
+      return () => {
+        active = false;
+      };
+    }
+    void Promise.all([
+      window.workbench.listProjectScenarioLoopRuns(projectPath),
+      window.workbench.getProjectWorkflowEvidence(projectPath)
+    ])
+      .then(([runs, evidence]) => {
+        if (!active) return;
+        setProjectLoopRuns(runs);
+        setProjectWorkflowEvidence(evidence);
+      })
+      .catch(() => {
+        if (!active) return;
+        setProjectLoopRuns([]);
+        setProjectWorkflowEvidence(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectPath]);
   const visibleSkills = projectPath
     ? localSkills.filter((skill) => isPathInsideProject(skill.sourcePath, projectPath))
     : [];
@@ -5366,8 +5499,8 @@ function ProjectAssetDetailPanel({
           tone: "info",
           title: tx("Codex directory connected", "Codex 目录已连接"),
           detail: tx(
-            "A Codex session matches this project. No project Skill invocation has been detected yet.",
-            "已检测到该项目的 Codex 会话，但尚未检测到项目技能调用。"
+            "A Codex session matches this project, but the available source does not expose a Skill invocation event.",
+            "已检测到该项目的 Codex 会话，但当前来源没有暴露明确的技能调用事件。"
           )
         }
       ];
@@ -5640,6 +5773,16 @@ function ProjectAssetDetailPanel({
 
           {activeView === "skills" ? (
             <>
+          <div className="project-workflow-console-entry">
+            <div>
+              <span className="os-module-kicker">{tx("Project workflow", "项目工作流")}</span>
+              <strong>{tx("One project, one execution context", "一个项目，一个执行上下文")}</strong>
+              <small>{tx("View the binding, the observed call chain, and local health checks together.", "在同一个视图中查看绑定、已观测调用链和本地体检。")}</small>
+            </div>
+            <button type="button" className="primary" onClick={() => onOpenWorkflowConsole(project)}>
+              {tx("Open workflow console", "打开工作流控制台")}
+            </button>
+          </div>
           <SkillsWorkflowVisual
             projectName={project.name}
             projectPath={project.path}
@@ -5649,6 +5792,8 @@ function ProjectAssetDetailPanel({
             runtimeCount={projectRuns.length}
             reportsReady={hasEvaluationEvidence}
             proposalCount={openProposalCount}
+            loopRuns={projectLoopRuns}
+            workflowEvidence={projectWorkflowEvidence}
             onNavigate={onNavigate}
           />
 
@@ -10458,6 +10603,129 @@ function traceSpanDepth(span: TraceSpanSummary, spans: TraceSpanSummary[]) {
   return depth;
 }
 
+function traceMetadataList(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
+    : [];
+}
+
+function traceEvidenceBoundaryLabel(
+  value: unknown,
+  tx: (en: string, zh: string) => string
+) {
+  if (value === "explicit_event") return tx("Verified Harness event", "Harness 精确事件");
+  if (value === "unverified_structured_event") return tx("Unverified structured event", "未校验结构化事件");
+  if (value === "log_inference") return tx("Inferred from local logs", "本地日志推断");
+  return typeof value === "string" && value.trim() ? value : tx("No evidence note", "暂无证据说明");
+}
+
+function TraceSpanEvidenceModal({
+  span,
+  turn,
+  onClose
+}: {
+  span: TraceSpanSummary;
+  turn: SessionTraceListItem;
+  onClose: () => void;
+}) {
+  const { mode, tx } = useLanguage();
+  const workflowTargets = traceMetadataList(span.metadata, "workflowTargets");
+  const workflowNodeTargets = traceMetadataList(span.metadata, "workflowNodeTargets");
+  const skillTargets = traceMetadataList(span.metadata, "skillTargets");
+  const workflowIds = traceMetadataList(span.metadata, "workflowIds");
+  const workflowVersions = traceMetadataList(span.metadata, "versions");
+  const workflowNodeIds = traceMetadataList(span.metadata, "workflowNodeIds");
+  const workflowSignals = traceMetadataList(span.metadata, "signals");
+  const sourceEventTypes = traceMetadataList(span.metadata, "sourceEventTypes");
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const evidenceGroups = ([
+    [tx("Workflow target", "工作流命中"), workflowTargets.length > 0 ? workflowTargets : workflowIds],
+    [tx("Workflow node", "工作流节点"), workflowNodeTargets.length > 0 ? workflowNodeTargets : workflowNodeIds],
+    [tx("Skill target", "Skill 命中"), skillTargets],
+    [tx("Inference signal", "推断信号"), workflowSignals],
+    [tx("Source event", "来源事件"), sourceEventTypes]
+  ] satisfies Array<[string, string[]]>).filter((entry) => entry[1].length > 0);
+
+  return (
+    <div
+      className="trace-span-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section className="trace-span-modal" role="dialog" aria-modal="true" aria-labelledby="trace-span-modal-title">
+        <div className="trace-span-modal-head">
+          <div>
+            <span className={`trace-entity-badge type-${span.spanType}`}>{traceSpanTypeLabel(span.spanType, mode)}</span>
+            <h2 id="trace-span-modal-title">{span.name}</h2>
+            <p>{tx("Read-only local evidence", "只读本地证据")}</p>
+          </div>
+          <button type="button" className="trace-drawer-close" onClick={onClose} title={tx("Close", "关闭")} aria-label={tx("Close", "关闭")}>×</button>
+        </div>
+        <div className="trace-span-modal-body">
+          {span.spanType === "turn" ? (
+            <article className="trace-modal-message">
+              <span>{tx("User message", "用户消息")}</span>
+              <p>{turn.messageSummary}</p>
+              <small>{tx("Only the authorized sanitized summary is shown; full raw content is not stored here.", "这里只显示已授权的脱敏摘要，不保存完整消息原文。")}</small>
+            </article>
+          ) : null}
+          <dl className="trace-span-facts">
+            <div><dt>{tx("Evidence", "证据类型")}</dt><dd><span className={`trace-capture-pill capture-${span.captureMode}`}>{traceCaptureLabel(span.captureMode, mode)}</span></dd></div>
+            <div><dt>{tx("Confidence", "置信度")}</dt><dd>{Math.round(span.confidence * 100)}%</dd></div>
+            <div><dt>{tx("Started", "开始时间")}</dt><dd>{formatDateTime(span.startedAt)}</dd></div>
+            <div><dt>{tx("Duration", "耗时")}</dt><dd>{formatDuration(span.durationMs)}</dd></div>
+            <div><dt>{tx("Status", "状态")}</dt><dd>{traceStatusLabel(span.status, mode)}</dd></div>
+            <div><dt>{tx("Evidence basis", "判定依据")}</dt><dd>{traceEvidenceBoundaryLabel(span.metadata.evidenceBoundary, tx)}</dd></div>
+          </dl>
+          {span.workflowId || workflowIds.length > 0 ? (
+            <article className="trace-modal-workflow">
+              <span>{tx("Workflow identity", "工作流身份")}</span>
+              <dl>
+                <div><dt>ID</dt><dd>{span.workflowId ?? workflowIds.join(", ")}</dd></div>
+                <div><dt>{tx("Version", "版本")}</dt><dd>{workflowVersions.join(", ") || "n/a"}</dd></div>
+                <div><dt>{tx("Node", "节点")}</dt><dd>{span.workflowNodeId ?? (workflowNodeIds.join(", ") || "n/a")}</dd></div>
+              </dl>
+            </article>
+          ) : null}
+          {span.workflowBinding ? (
+            <article className="trace-modal-binding">
+              <span>{tx("Project binding", "项目绑定")}</span>
+              <strong>{span.workflowBinding.state}</strong>
+              <small>{span.workflowBinding.bindingId ?? tx("No binding ID", "无绑定 ID")} · {span.workflowBinding.bindingVersion ?? "n/a"}</small>
+              {span.workflowBinding.manifestFingerprint ? <code>{span.workflowBinding.manifestFingerprint}</code> : null}
+            </article>
+          ) : null}
+          {evidenceGroups.length > 0 ? (
+            <div className="trace-modal-evidence-groups">
+              {evidenceGroups.map(([label, values]) => (
+                <article key={label}>
+                  <span>{label}</span>
+                  <div>{values.map((value) => <code key={value}>{value}</code>)}</div>
+                </article>
+              ))}
+            </div>
+          ) : null}
+          <details className="trace-structured-evidence">
+            <summary>{tx("Structured metadata", "结构化元数据")}</summary>
+            <pre>{JSON.stringify(span.metadata, null, 2)}</pre>
+          </details>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SessionTraceExplorer({
   traces,
   selectedTraceId,
@@ -10467,7 +10735,10 @@ function SessionTraceExplorer({
   onRefresh,
   onSelectTrace,
   onOpenSkill,
-  onOpenMonitoring
+  onOpenMonitoring,
+  messageSummaryEnabled,
+  preferenceUpdating,
+  onToggleMessageSummary
 }: {
   traces: SessionTraceListItem[];
   selectedTraceId: string | null;
@@ -10478,6 +10749,9 @@ function SessionTraceExplorer({
   onSelectTrace: (traceId: string) => void;
   onOpenSkill: (traceId: string, skillId: string, trigger: HTMLButtonElement) => void;
   onOpenMonitoring: () => void;
+  messageSummaryEnabled: boolean;
+  preferenceUpdating: boolean;
+  onToggleMessageSummary: (enabled: boolean) => void;
 }) {
   const { mode, tx } = useLanguage();
   const [query, setQuery] = useState("");
@@ -10486,6 +10760,8 @@ function SessionTraceExplorer({
   const [statusFilter, setStatusFilter] = useState("all");
   const [captureFilter, setCaptureFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"timeline" | "tree">("timeline");
+  const [selectedSpan, setSelectedSpan] = useState<TraceSpanSummary | null>(null);
+  useEffect(() => setSelectedSpan(null), [detail?.turn.traceId]);
   const projectOptions = Array.from(
     new Map(
       traces
@@ -10546,7 +10822,19 @@ function SessionTraceExplorer({
           </p>
         </div>
         <div className="trace-head-actions">
-          <span className="trace-privacy-note">{tx("Raw messages off", "不保存消息原文")}</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={messageSummaryEnabled}
+            className="switch-control compact trace-message-summary-switch"
+            disabled={preferenceUpdating}
+            onClick={() => onToggleMessageSummary(!messageSummaryEnabled)}
+            title={tx("Store sanitized user-message summaries locally", "在本机保存脱敏后的用户消息摘要")}
+          >
+            <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+            <span>{tx("Message summary", "消息摘要")}</span>
+            <strong>{messageSummaryEnabled ? tx("On", "已开") : tx("Off", "已关")}</strong>
+          </button>
           <button type="button" className="trace-icon-button" onClick={onRefresh} title={tx("Refresh traces", "刷新链路")} aria-label={tx("Refresh traces", "刷新链路")}>
             ↻
           </button>
@@ -10612,6 +10900,7 @@ function SessionTraceExplorer({
                 type="button"
                 className={`trace-turn-row${selectedTraceId === trace.traceId ? " selected" : ""}`}
                 key={trace.traceId}
+                data-trace-id={trace.traceId}
                 aria-label={tx(
                   `Open ${trace.projectName ?? "session"} trace record`,
                   `${trace.projectName ?? "会话"}：打开链路记录`
@@ -10660,7 +10949,7 @@ function SessionTraceExplorer({
               <div className="trace-detail-head">
                 <div>
                   <span className="os-module-kicker">{detail.turn.harnessId} · {detail.turn.adapterId} · {formatDateTime(detail.turn.receivedAt)}</span>
-                  <h3>{detail.turn.messageSummary}</h3>
+                  <h3>{detail.turn.projectName ?? tx("Session record", "会话记录")}</h3>
                   <p>{detail.turn.workspaceRef ?? tx("No workspace path", "无工作区路径")}</p>
                   <span className="trace-session-reference" title={detail.turn.sourceRef ?? detail.turn.sessionRef ?? detail.turn.sessionId}>
                     {tx("Session ID", "会话 ID")} <code>{detail.turn.sessionRef || detail.turn.sessionId}</code>
@@ -10679,7 +10968,14 @@ function SessionTraceExplorer({
                   <button type="button" className={viewMode === "tree" ? "active" : ""} onClick={() => setViewMode("tree")} role="tab" aria-selected={viewMode === "tree"}>{tx("Tree", "链路树")}</button>
                 </div>
               </div>
-              <div className="trace-detail-metrics">
+              <div className={`trace-user-message-card${messageSummaryEnabled ? " enabled" : " disabled"}`}>
+                <div>
+                  <span>{tx("User message", "用户消息")}</span>
+                  <small>{messageSummaryEnabled ? tx("Sanitized local summary", "本地脱敏摘要") : tx("Summary storage is off", "摘要保存未开启")}</small>
+                </div>
+                <p>{detail.turn.messageSummary}</p>
+              </div>
+              <div className="trace-detail-metrics" data-trace-total-tokens={detail.turn.totalTokens}>
                 <span><b>{traceStatusLabel(detail.turn.status, mode)}</b>{tx("Status", "状态")}</span>
                 <span><b>{formatDuration(detail.turn.durationMs)}</b>{tx("Duration", "耗时")}</span>
                 <span><b>{formatCount(detail.turn.totalTokens)}</b>Token</span>
@@ -10725,9 +11021,22 @@ function SessionTraceExplorer({
                           {span.tokenCount > 0 ? <span>{formatCount(span.tokenCount)} Token</span> : null}
                           {span.toolCallCount > 0 ? <span>{span.toolCallCount} {tx("tools", "工具")}</span> : null}
                         </div>
-                        {typeof span.metadata.evidenceBoundary === "string" ? <small>{span.metadata.evidenceBoundary}</small> : null}
+                        {typeof span.metadata.evidenceBoundary === "string" ? (
+                          <small>{traceEvidenceBoundaryLabel(span.metadata.evidenceBoundary, tx)}</small>
+                        ) : null}
                       </div>
-                      <span className={`trace-span-status status-${span.status}`}>{traceStatusLabel(span.status, mode)}</span>
+                      <div className="trace-span-actions">
+                        <button
+                          type="button"
+                          className="trace-span-detail-button"
+                          onClick={() => setSelectedSpan(span)}
+                          title={tx("Inspect evidence details", "查看证据详情")}
+                          aria-label={tx(`Inspect ${span.name} evidence`, `查看 ${span.name} 证据详情`)}
+                        >
+                          i
+                        </button>
+                        <span className={`trace-span-status status-${span.status}`}>{traceStatusLabel(span.status, mode)}</span>
+                      </div>
                     </div>
                   );
                 })}
@@ -10741,6 +11050,9 @@ function SessionTraceExplorer({
           )}
         </div>
       </div>
+      {selectedSpan && detail ? (
+        <TraceSpanEvidenceModal span={selectedSpan} turn={detail.turn} onClose={() => setSelectedSpan(null)} />
+      ) : null}
     </section>
   );
 }
@@ -10968,15 +11280,9 @@ function WorkflowLibraryModule({
   bindings,
   loopRuns,
   doctor,
-  preview,
-  applyResult,
   loading,
   onSelectTemplate,
-  onPreviewBinding,
-  onPreviewMigration,
-  onPreviewRollback,
-  onApplyPreview,
-  onRefreshProject
+  onOpenProjectConsole
 }: {
   templates: WorkflowTemplateSummary[];
   selectedTemplateId: string | null;
@@ -10984,15 +11290,13 @@ function WorkflowLibraryModule({
   bindings: ProjectWorkflowBindingSummary[];
   loopRuns: ScenarioLoopRunSummary[];
   doctor: ProjectWorkflowDoctorResult | null;
-  preview: ProjectWorkflowBindingPreview | null;
-  applyResult: ProjectWorkflowBindingApplyResult | null;
   loading: boolean;
   onSelectTemplate: (templateId: string) => void;
-  onPreviewBinding: (template: WorkflowTemplateSummary) => void;
-  onPreviewMigration: (binding: ProjectWorkflowBindingSummary) => void;
-  onPreviewRollback: (binding: ProjectWorkflowBindingSummary) => void;
-  onApplyPreview: () => void;
-  onRefreshProject: () => void;
+  onOpenProjectConsole: (
+    template?: WorkflowTemplateSummary,
+    tab?: WorkflowConsoleTab,
+    initialAction?: WorkflowConsoleInitialAction
+  ) => void;
 }) {
   const { tx } = useLanguage();
   const [presentation, setPresentation] = useState<"flow" | "mindmap">("flow");
@@ -11047,13 +11351,13 @@ function WorkflowLibraryModule({
           <span className="mini-pill">{bindings.length} {tx("bindings", "个绑定")}</span>
           <button
             type="button"
-            className="icon-button"
-            title={tx("Refresh project Workflow evidence", "刷新项目工作流证据")}
-            aria-label={tx("Refresh project Workflow evidence", "刷新项目工作流证据")}
+            className="ghost-button"
+            title={tx("Open the current project in a focused Workflow console", "在聚焦工作流控制台中打开当前项目")}
+            aria-label={tx("Open the current project in a focused Workflow console", "在聚焦工作流控制台中打开当前项目")}
             disabled={!projectRoot || loading}
-            onClick={onRefreshProject}
+            onClick={() => onOpenProjectConsole()}
           >
-            ↻
+            {tx("Open project console", "打开项目控制台")}
           </button>
         </div>
       </div>
@@ -11099,10 +11403,10 @@ function WorkflowLibraryModule({
                     <button
                       type="button"
                       className="icon-button"
-                      title={tx("Preview project binding", "预览项目绑定")}
-                      aria-label={tx("Preview project binding", "预览项目绑定")}
+                      title={tx("Open this template in the project Workflow console", "在项目工作流控制台中打开此模板")}
+                      aria-label={tx("Open this template in the project Workflow console", "在项目工作流控制台中打开此模板")}
                       disabled={!projectRoot || loading || !template.validation.valid}
-                      onClick={() => onPreviewBinding(template)}
+                      onClick={() => onOpenProjectConsole(template, "binding", { kind: "binding", templateKey: templateKey(template) })}
                     >
                       ⇥
                     </button>
@@ -11189,12 +11493,9 @@ function WorkflowLibraryModule({
                   <td><span className={`workflow-status-pill status-${binding.compatibility.readyForBinding ? "ready" : "blocked"}`}>{workflowStatusLabel(binding.status, tx)}</span></td>
                   <td>{formatDateTime(binding.updatedAt)}</td>
                   <td><div className="workflow-row-actions">
-                    {binding.readOnly ? <button type="button" className="icon-button" title={tx("Preview shadow migration", "预览影子迁移")} aria-label={tx("Preview shadow migration", "预览影子迁移")} disabled={loading} onClick={() => onPreviewMigration(binding)}>⇥</button> : null}
-                    {!binding.readOnly && binding.status === "needs_upgrade" ? <button type="button" className="icon-button" title={tx("Preview upgrade", "预览升级")} aria-label={tx("Preview upgrade", "预览升级")} disabled={loading} onClick={() => {
-                      const template = templates.find((item) => item.templateId === binding.templateId);
-                      if (template) onPreviewBinding(template);
-                    }}>↑</button> : null}
-                    {!binding.readOnly && binding.rollback ? <button type="button" className="icon-button" title={tx("Preview rollback", "预览回退")} aria-label={tx("Preview rollback", "预览回退")} disabled={loading} onClick={() => onPreviewRollback(binding)}>↶</button> : null}
+                    {binding.readOnly ? <button type="button" className="icon-button" title={tx("Open migration preview in the project console", "在项目控制台中打开迁移预览")} aria-label={tx("Open migration preview in the project console", "在项目控制台中打开迁移预览")} disabled={loading} onClick={() => onOpenProjectConsole(undefined, "binding", { kind: "migration", bindingId: binding.bindingId })}>⇥</button> : null}
+                    {!binding.readOnly && binding.status === "needs_upgrade" ? <button type="button" className="icon-button" title={tx("Open upgrade preview in the project console", "在项目控制台中打开升级预览")} aria-label={tx("Open upgrade preview in the project console", "在项目控制台中打开升级预览")} disabled={loading} onClick={() => { const template = templates.find((item) => item.templateId === binding.templateId); if (template) onOpenProjectConsole(template, "binding", { kind: "binding", templateKey: templateKey(template) }); }}>↑</button> : null}
+                    {!binding.readOnly && binding.rollback ? <button type="button" className="icon-button" title={tx("Open rollback preview in the project console", "在项目控制台中打开回退预览")} aria-label={tx("Open rollback preview in the project console", "在项目控制台中打开回退预览")} disabled={loading} onClick={() => onOpenProjectConsole(undefined, "binding", { kind: "rollback", bindingId: binding.bindingId })}>↶</button> : null}
                   </div></td>
                 </tr>
               ))}
@@ -11203,32 +11504,19 @@ function WorkflowLibraryModule({
           </table>
         </div>
 
-        {preview ? (
-          <article className="workflow-binding-preview" aria-live="polite">
-            <div><span className="os-module-kicker">{tx("Preview before write", "写入前预览")}</span><h4>{workflowStatusLabel(preview.changeType, tx)}</h4></div>
-            <p>{preview.existingBinding ? <><code>{preview.existingBinding.templateVersion}</code> → <code>{preview.template.templateVersion}</code></> : <><code>{preview.template.templateId}@{preview.template.templateVersion}</code></>}</p>
-            <p className="inline-code">{preview.bindingFilePath}</p>
-            {preview.warnings.length ? <ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
-            <div className="workflow-preview-actions">
-              <span>{preview.readyForConfirmation ? tx("Ready for confirmation", "已就绪，等待确认") : tx("Blocked by compatibility", "兼容性阻塞")}</span>
-              <button type="button" className="primary" disabled={!preview.readyForConfirmation || loading} onClick={onApplyPreview}>{tx("Confirm and apply", "确认并应用")}</button>
-            </div>
-          </article>
-        ) : null}
-        {applyResult ? <div className="workflow-apply-result" aria-live="polite">{applyResult.verified ? tx("Binding write was verified by reading the local file back.", "绑定写入已通过本地回读验证。") : tx("Binding write requires review.", "绑定写入需要复核。")}</div> : null}
-
         <div className="workflow-loop-section">
-          <div className="workflow-loop-section-head"><div><span className="os-module-kicker">{tx("Scenario Loop", "场景 Loop")}</span><h4>{tx("Conversation-observed quality convergence", "会话发起的质量收敛记录")}</h4></div><span className="mini-pill">{loopRuns.length} {tx("runs", "次运行")}</span></div>
+          <div className="workflow-loop-section-head"><div><span className="os-module-kicker">{tx("Scenario Loop", "场景 Loop")}</span><h4>{tx("Conversation and local observation", "会话状态与本地观察记录")}</h4></div><span className="mini-pill">{loopRuns.length} {tx("runs", "次运行")}</span></div>
           <div className="workflow-loop-run-list">
             {loopRuns.map((run) => (
               <button type="button" className={selectedRun?.id === run.id ? "is-selected" : ""} key={run.id} onClick={() => setSelectedRunId(run.id)}>
-                <span>{workflowStatusLabel(run.status, tx)}</span><strong>{workflowTemplateLabel(run.template.templateId, run.template.templateName, tx)}</strong><small>{tx("Iteration", "第")} {run.currentIteration} · {run.latestQuality?.score ?? "n/a"}</small>
+                <span>{run.evidenceSource === "conversation_state" ? tx("Conversation state", "会话状态") : tx("Local observation", "本地观察")}</span><strong>{workflowTemplateLabel(run.template.templateId, run.template.templateName, tx)}</strong><small>{workflowStatusLabel(run.status, tx)} · {tx("Iteration", "第")} {run.currentIteration} · {run.latestQuality?.score ?? "n/a"}</small>
               </button>
             ))}
-            {projectRoot && loopRuns.length === 0 ? <div className="workflow-empty-state">{tx("No conversation-observed Scenario Loop evidence has been imported for this project.", "该项目尚未导入由会话产生的场景 Loop 证据。")}</div> : null}
+            {projectRoot && loopRuns.length === 0 ? <div className="workflow-empty-state">{tx("No Scenario Loop record was found in this project's workflow-state files or local observations.", "在该项目的 workflow-state 文件和本地观察记录中均未发现场景 Loop。")}</div> : null}
           </div>
           {selectedRun ? <div className="workflow-loop-detail">
             <div className="workflow-loop-quality"><div><span>{tx("Quality score", "质量分")}</span><strong>{selectedRun.latestQuality?.score ?? "n/a"}</strong></div><div><span>{tx("Budget", "预算")}</span><strong>{selectedRun.latestBudget?.state ? workflowStatusLabel(selectedRun.latestBudget.state, tx) : "n/a"}</strong></div><div><span>{tx("Stop reason", "停止原因")}</span><strong>{selectedRun.stopReason ? workflowStatusLabel(selectedRun.stopReason, tx) : tx("Open", "未结束")}</strong></div></div>
+            <div className="workflow-loop-provenance"><span>{selectedRun.evidenceSource === "conversation_state" ? tx("Conversation source", "会话来源") : tx("Observation source", "观察来源")}</span><code>{selectedRun.sourceRef ?? tx("Desktop local evidence", "桌面端本地证据")}</code>{selectedRun.sessionRef ? <small>{tx("Session", "会话")} {selectedRun.sessionRef}</small> : null}</div>
             <div className="workflow-iteration-timeline">{selectedRun.iterations.map((iteration) => <article key={iteration.id}><span>{tx("Round", "第")} {iteration.iteration}</span><strong>{workflowStatusLabel(iteration.status, tx)}</strong><p>{iteration.rootCauseKey ?? tx("No root cause recorded", "未记录根因")}</p><small>{iteration.quality.score ?? "n/a"} · {formatDateTime(iteration.completedAt)}</small></article>)}</div>
             <div className="workflow-evidence-list"><span>{tx("Evidence references", "证据引用")}</span><div>{workflowEvidence.map((ref) => <button type="button" key={ref} onClick={() => setSelectedEvidenceRef(ref)}>{ref}</button>)}{workflowEvidence.length === 0 ? <small>{tx("No evidence reference recorded.", "尚未记录证据引用。")}</small> : null}</div></div>
             {selectedEvidenceRef ? <article className="workflow-evidence-detail"><span>{tx("Evidence reference", "证据引用")}</span><code>{selectedEvidenceRef}</code><p>{tx("This is a local reference captured by the Loop record. Open Session Trace or the linked report when the reference is available there.", "这是 Loop 记录捕获的本地引用；若会话链路或报告中存在该引用，可在对应模块继续下探。")}</p></article> : null}
@@ -11236,6 +11524,214 @@ function WorkflowLibraryModule({
         </div>
       </div>
     </section>
+  );
+}
+
+function ProjectWorkflowConsoleModal({
+  context,
+  templates,
+  bindings,
+  loopRuns,
+  doctor,
+  preview,
+  applyResult,
+  traces,
+  tracesHasMore,
+  tracesLoadingMore,
+  traceDetail,
+  traceLoading,
+  loading,
+  error,
+  onClose,
+  onRefresh,
+  onLoadMoreTraces,
+  onSelectTrace,
+  onOpenSkill,
+  onPreviewBinding,
+  onPreviewMigration,
+  onPreviewRollback,
+  onApplyPreview
+}: {
+  context: WorkflowConsoleContext;
+  templates: WorkflowTemplateSummary[];
+  bindings: ProjectWorkflowBindingSummary[];
+  loopRuns: ScenarioLoopRunSummary[];
+  doctor: ProjectWorkflowDoctorResult | null;
+  preview: ProjectWorkflowBindingPreview | null;
+  applyResult: ProjectWorkflowBindingApplyResult | null;
+  traces: SessionTraceListItem[];
+  tracesHasMore: boolean;
+  tracesLoadingMore: boolean;
+  traceDetail: SessionTraceDetail | null;
+  traceLoading: boolean;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onRefresh: () => void;
+  onLoadMoreTraces: () => void;
+  onSelectTrace: (traceId: string) => void;
+  onOpenSkill: (traceId: string, skillId: string, trigger: HTMLButtonElement) => void;
+  onPreviewBinding: (template: WorkflowTemplateSummary) => void;
+  onPreviewMigration: (binding: ProjectWorkflowBindingSummary) => void;
+  onPreviewRollback: (binding: ProjectWorkflowBindingSummary) => void;
+  onApplyPreview: () => void;
+}) {
+  const { mode, tx } = useLanguage();
+  const [activeTab, setActiveTab] = useState<WorkflowConsoleTab>(context.initialTab);
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string | null>(context.initialTemplateKey);
+  const [presentation, setPresentation] = useState<GraphPresentationMode>("flow");
+  const templateKey = (template: WorkflowTemplateSummary) => `${template.templateId}@${template.templateVersion}`;
+  const selectedTemplate =
+    templates.find((template) => templateKey(template) === selectedTemplateKey) ?? templates[0] ?? null;
+  const selectedBinding = selectedTemplate
+    ? bindings.find(
+        (binding) =>
+          binding.templateId === selectedTemplate.templateId &&
+          binding.templateVersion === selectedTemplate.templateVersion
+      ) ?? null
+    : null;
+
+  useEffect(() => {
+    setActiveTab(context.initialTab);
+    setSelectedTemplateKey(context.initialTemplateKey);
+  }, [context.initialTab, context.initialTemplateKey, context.projectRoot]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="workflow-console-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="workflow-console-modal" role="dialog" aria-modal="true" aria-labelledby="workflow-console-title">
+        <header className="workflow-console-head">
+          <div>
+            <span className="os-module-kicker">{tx("Project Workflow Console", "项目工作流控制台")}</span>
+            <h2 id="workflow-console-title">{context.projectName}</h2>
+            <code title={context.projectRoot}>{context.projectRoot}</code>
+          </div>
+          <div className="workflow-console-actions">
+            <button type="button" className="icon-button" onClick={onRefresh} disabled={loading} title={tx("Refresh local Workflow state and call-chain records", "刷新本地工作流状态和调用链记录")} aria-label={tx("Refresh local Workflow state and call-chain records", "刷新本地工作流状态和调用链记录")}>↻</button>
+            <button type="button" className="icon-button" onClick={onClose} title={tx("Close", "关闭")} aria-label={tx("Close", "关闭")}>×</button>
+          </div>
+        </header>
+
+        <div className="workflow-console-tabs" role="tablist" aria-label={tx("Project Workflow Console views", "项目工作流控制台视图")}>
+          {([
+            ["runtime", tx("Runtime chain", "运行调用链")],
+            ["map", tx("Workflow map", "工作流图")],
+            ["binding", tx("Binding preview", "绑定预览")],
+            ["doctor", tx("Doctor", "项目体检")]
+          ] as const).map(([value, label]) => (
+            <button type="button" key={value} role="tab" aria-selected={activeTab === value} className={activeTab === value ? "active" : ""} onClick={() => setActiveTab(value)}>
+              {label}
+              {value === "runtime" ? <span>{traces.length}</span> : null}
+              {value === "binding" ? <span>{bindings.length}</span> : null}
+              {value === "doctor" && doctor ? <span className={`tone-${doctor.summary}`}>{doctor.summary === "healthy" ? tx("OK", "正常") : tx("!", "!")}</span> : null}
+            </button>
+          ))}
+        </div>
+
+        {error ? <div className="workflow-console-error" role="alert">{error}</div> : null}
+        {loading ? <div className="workflow-console-loading" role="status"><span className="trace-loading-ring" /><strong>{tx("Loading project Workflow evidence...", "正在加载项目工作流证据...")}</strong></div> : null}
+
+        {!loading && activeTab === "runtime" ? (
+          <div className="workflow-console-runtime">
+            <aside className="workflow-console-trace-list" aria-label={tx("Project session records", "项目会话记录")}>
+              <div><strong>{tx("Observed messages", "已观测消息")}</strong><span>{formatCount(traces.length)}</span></div>
+              <div className="workflow-console-trace-scroll">
+                {traces.map((trace) => (
+                  <button type="button" key={trace.traceId} className={traceDetail?.turn.traceId === trace.traceId ? "is-selected" : ""} onClick={() => onSelectTrace(trace.traceId)}>
+                    <strong>{trace.messageSummary}</strong>
+                    <small>{formatDateTime(trace.receivedAt)} · {trace.harnessId}</small>
+                    <span>{formatCount(trace.totalTokens)} Token · {trace.skillHits.length} {tx("Skill hits", "个技能命中")}</span>
+                  </button>
+                ))}
+                {tracesHasMore ? <button type="button" className="workflow-console-load-more" disabled={tracesLoadingMore} onClick={onLoadMoreTraces}>{tracesLoadingMore ? tx("Loading...", "加载中...") : tx("Load more project records", "加载更多项目记录")}</button> : null}
+                {traces.length === 0 ? <div className="workflow-console-empty"><strong>{tx("No project call chain yet", "尚未观测到项目调用链")}</strong><p>{tx("Refresh after running a conversation from this project directory. Only locally observed evidence is shown here.", "在此项目目录中进行会话后刷新。这里仅展示本地观测到的证据。")}</p></div> : null}
+              </div>
+            </aside>
+            <div className="workflow-console-trace-detail">
+              {traceLoading ? <div className="workflow-console-loading"><span className="trace-loading-ring" /><strong>{tx("Loading call chain...", "正在加载调用链...")}</strong></div> : null}
+              {!traceLoading && traceDetail ? (
+                <>
+                  <div className="workflow-console-trace-title">
+                    <div><span>{formatDateTime(traceDetail.turn.receivedAt)}</span><h3>{traceDetail.turn.messageSummary}</h3><small>{traceDetail.turn.harnessId} · {traceCaptureLabel(traceDetail.turn.captureMode, mode)}</small></div>
+                    <div><strong>{formatCount(traceDetail.turn.totalTokens)}</strong><span>Token</span></div>
+                  </div>
+                  <div className="workflow-console-span-list">
+                    {traceDetail.spans.map((span) => {
+                      const hit = span.skillId ? traceDetail.skillHits.find((entry) => entry.skillId === span.skillId) : null;
+                      return (
+                        <article className={`workflow-console-span type-${span.spanType} status-${span.status}`} key={span.id}>
+                          <div><span>{String(span.sequence).padStart(2, "0")}</span><b>{traceSpanTypeLabel(span.spanType, mode)}</b></div>
+                          <div>
+                            {span.skillId ? <button type="button" className="trace-skill-link" title={tx("Open Skill evidence", "打开技能证据")} onClick={(event) => onOpenSkill(traceDetail.turn.traceId, span.skillId as string, event.currentTarget)}>{span.name}</button> : <strong>{span.name}</strong>}
+                            <small>{formatDateTime(span.startedAt)} · {formatDuration(span.durationMs)}{span.workflowId ? ` · ${span.workflowId}` : ""}{span.workflowNodeId ? `/${span.workflowNodeId}` : ""}</small>
+                            {span.workflowBinding ? <small className={`workflow-binding-evidence state-${span.workflowBinding.state}`}>{span.workflowBinding.state === "current_binding_match" ? tx("Current binding matches the observed Workflow (configuration correlation only).", "当前绑定与观测到的工作流匹配（仅配置关联，不代表执行因果证明）。") : span.workflowBinding.state === "binding_version_mismatch" ? tx("Observed Workflow version differs from the current binding.", "观测到的工作流版本与当前绑定不一致。") : span.workflowBinding.state === "no_current_binding" ? tx("No current project binding matches this observed Workflow.", "当前项目没有匹配该观测工作流的绑定。") : tx("Current binding could not be resolved for this record.", "当前绑定无法为这条记录解析。")}</small> : null}
+                          </div>
+                          <div>{hit ? <span className="trace-hit-index">{tx("Hit", "命中")} {hit.hitIndex}</span> : null}{span.tokenCount > 0 ? <span>{formatCount(span.tokenCount)} Token</span> : null}</div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : null}
+              {!traceLoading && !traceDetail ? <div className="workflow-console-empty"><strong>{tx("Select an observed message", "选择一条已观测消息")}</strong><p>{tx("Its full project-scoped routing and execution chain will appear here.", "该消息在当前项目内的路由与执行链将显示在这里。")}</p></div> : null}
+            </div>
+          </div>
+        ) : null}
+
+        {!loading && activeTab === "map" ? (
+          <div className="workflow-console-map">
+            <div className="workflow-console-map-controls">
+              <label><span>{tx("Template", "工作流模板")}</span><select value={selectedTemplate ? templateKey(selectedTemplate) : ""} onChange={(event) => setSelectedTemplateKey(event.currentTarget.value)}>{templates.map((template) => <option value={templateKey(template)} key={templateKey(template)}>{workflowTemplateLabel(template.templateId, template.name, tx)}</option>)}</select></label>
+              <div className="segmented-control" role="tablist" aria-label={tx("Map presentation", "图谱呈现方式")}><button type="button" className={presentation === "flow" ? "active" : ""} onClick={() => setPresentation("flow")}>{tx("Flow", "流程图")}</button><button type="button" className={presentation === "mindmap" ? "active" : ""} onClick={() => setPresentation("mindmap")}>{tx("Mind map", "脑图")}</button></div>
+            </div>
+            {selectedTemplate ? presentation === "flow" ? (
+              <div className="workflow-console-map-flow">
+                <article className="entity-workflow"><span>{tx("Project binding", "项目绑定")}</span><strong>{selectedBinding ? workflowStatusLabel(selectedBinding.status, tx) : tx("Not bound", "未绑定")}</strong><small>{context.projectName}</small></article>
+                <i>→</i><article className="entity-workflow"><span>{tx("Workflow", "工作流")}</span><strong>{workflowTemplateLabel(selectedTemplate.templateId, selectedTemplate.name, tx)}</strong><small>{selectedTemplate.templateVersion}</small></article>
+                <i>→</i><article><span>{tx("Dependencies", "依赖")}</span><strong>{selectedTemplate.dependencyTemplateIds.length}</strong><small>{selectedTemplate.dependencyTemplateIds.join(", ") || tx("None", "无")}</small></article>
+                <i>→</i><article className="entity-skill"><span>{tx("Skill references", "技能引用")}</span><strong>{selectedTemplate.skillRefs.length}</strong><small>{selectedTemplate.skillRefs.join(", ") || tx("None", "无")}</small></article>
+              </div>
+            ) : (
+              <div className="workflow-console-map-mindmap"><div className="workflow-console-map-branch"><span>{tx("Dependencies", "依赖")}</span>{selectedTemplate.dependencyTemplateIds.length ? selectedTemplate.dependencyTemplateIds.map((item) => <strong key={item}>{item}</strong>) : <small>{tx("None", "无")}</small>}</div><article className="entity-workflow"><span>{tx("Workflow", "工作流")}</span><strong>{workflowTemplateLabel(selectedTemplate.templateId, selectedTemplate.name, tx)}</strong><small>{selectedBinding ? workflowStatusLabel(selectedBinding.status, tx) : tx("Not bound", "未绑定")}</small></article><div className="workflow-console-map-branch"><span>{tx("Skill references", "技能引用")}</span>{selectedTemplate.skillRefs.length ? selectedTemplate.skillRefs.map((item) => <strong key={item}>{item}</strong>) : <small>{tx("None", "无")}</small>}</div></div>
+            ) : <div className="workflow-console-empty"><strong>{tx("No local Workflow template", "没有本地工作流模板")}</strong></div>}
+            <div className="workflow-console-loop-summary"><span>{tx("Observed scenario loops", "已观测场景 Loop")}</span><strong>{formatCount(loopRuns.length)}</strong><small>{loopRuns[0] ? `${workflowStatusLabel(loopRuns[0].status, tx)} · ${tx("round", "第")} ${loopRuns[0].currentIteration}` : tx("No Loop evidence for this project", "该项目尚无 Loop 证据")}</small></div>
+          </div>
+        ) : null}
+
+        {!loading && activeTab === "binding" ? (
+          <div className="workflow-console-binding">
+            <div className="workflow-console-binding-intro"><div><span className="os-module-kicker">{tx("Preview before write", "写入前预览")}</span><h3>{tx("No project file changes until confirmation", "确认前不会修改项目文件")}</h3><p>{tx("Choose a verified template, inspect compatibility and warnings, then confirm the atomic write.", "选择已校验模板，检查兼容性与提醒后，再确认原子写入。")}</p></div><button type="button" className="primary" disabled={!selectedTemplate || !selectedTemplate.validation.valid} onClick={() => selectedTemplate && onPreviewBinding(selectedTemplate)}>{tx("Generate binding preview", "生成绑定预览")}</button></div>
+            {bindings.length ? <div className="workflow-console-binding-list">{bindings.map((binding) => <article key={binding.bindingId}><div><strong>{workflowTemplateLabel(binding.templateId, binding.templateName, tx)}</strong><small>{binding.templateVersion} · {workflowStatusLabel(binding.status, tx)}</small></div><div>{binding.readOnly ? <button type="button" onClick={() => onPreviewMigration(binding)}>{tx("Preview migration", "预览迁移")}</button> : null}{!binding.readOnly && binding.status === "needs_upgrade" ? <button type="button" onClick={() => { const template = templates.find((item) => item.templateId === binding.templateId); if (template) onPreviewBinding(template); }}>{tx("Preview upgrade", "预览升级")}</button> : null}{!binding.readOnly && binding.rollback ? <button type="button" onClick={() => onPreviewRollback(binding)}>{tx("Preview rollback", "预览回退")}</button> : null}</div></article>)}</div> : null}
+            {preview ? <article className="workflow-console-preview" aria-live="polite"><div><span>{workflowStatusLabel(preview.changeType, tx)}</span><strong>{preview.template.templateId}@{preview.template.templateVersion}</strong><small>{preview.bindingFilePath}</small></div><div className="workflow-console-preview-compatibility"><strong>{preview.readyForConfirmation ? tx("Ready for confirmation", "已就绪，等待确认") : tx("Blocked by compatibility", "兼容性阻塞")}</strong>{preview.warnings.length ? <ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : <p>{tx("No compatibility warning.", "没有兼容性提醒。")}</p>}<button type="button" className="primary" disabled={!preview.readyForConfirmation} onClick={onApplyPreview}>{tx("Confirm and apply", "确认并应用")}</button></div></article> : <div className="workflow-console-empty"><strong>{tx("No pending preview", "暂无待确认预览")}</strong><p>{tx("The preview stays in this dialog after it is generated.", "生成后预览会保留在此弹窗内。")}</p></div>}
+            {applyResult ? <div className="workflow-apply-result" aria-live="polite">{applyResult.verified ? tx("Binding was written atomically and verified by local read-back.", "绑定已原子写入，并通过本地回读验证。") : tx("Binding write requires review.", "绑定写入需要复核。")}</div> : null}
+          </div>
+        ) : null}
+
+        {!loading && activeTab === "doctor" ? (
+          <div className="workflow-console-doctor">
+            <div className="workflow-console-doctor-summary"><span>{tx("Local project health", "本地项目健康度")}</span><strong>{doctor ? (doctor.summary === "healthy" ? tx("Healthy", "健康") : doctor.summary === "attention" ? tx("Attention", "需关注") : tx("Blocked", "已阻塞")) : tx("Not checked", "尚未检查")}</strong><small>{doctor ? `${formatDateTime(doctor.checkedAt)} · ${doctor.bindingFilePath}` : tx("Refresh to run the local Workflow Doctor.", "刷新以运行本地工作流体检。")}</small></div>
+            <div className="workflow-console-doctor-list">{doctor?.checks.map((check) => <article className={`doctor-${check.status}`} key={check.id}><span>{check.status === "pass" ? tx("Pass", "通过") : check.status === "warning" ? tx("Attention", "需关注") : tx("Blocked", "已阻塞")}</span><strong>{check.title}</strong><p>{check.detail}</p>{check.evidenceRefs.length ? <small>{check.evidenceRefs[0]}</small> : null}</article>)}</div>
+          </div>
+        ) : null}
+      </section>
+    </div>
   );
 }
 
@@ -11280,6 +11776,7 @@ export default function App() {
     | "model-config"
     | "model-test"
     | "model-case-generation"
+    | "evidence-purge"
     | null
   >(null);
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
@@ -11310,12 +11807,25 @@ export default function App() {
   const [projectScenarioLoopRuns, setProjectScenarioLoopRuns] = useState<ScenarioLoopRunSummary[]>([]);
   const [projectWorkflowDoctor, setProjectWorkflowDoctor] =
     useState<ProjectWorkflowDoctorResult | null>(null);
-  const [workflowBindingPreview, setWorkflowBindingPreview] =
-    useState<ProjectWorkflowBindingPreview | null>(null);
-  const [workflowBindingApplyResult, setWorkflowBindingApplyResult] =
-    useState<ProjectWorkflowBindingApplyResult | null>(null);
   const [selectedWorkflowTemplateId, setSelectedWorkflowTemplateId] = useState<string | null>(null);
   const [workflowLibraryLoading, setWorkflowLibraryLoading] = useState(false);
+  const [workflowConsoleContext, setWorkflowConsoleContext] = useState<WorkflowConsoleContext | null>(null);
+  const [workflowConsoleTemplates, setWorkflowConsoleTemplates] = useState<WorkflowTemplateSummary[]>([]);
+  const [workflowConsoleBindings, setWorkflowConsoleBindings] = useState<ProjectWorkflowBindingSummary[]>([]);
+  const [workflowConsoleLoopRuns, setWorkflowConsoleLoopRuns] = useState<ScenarioLoopRunSummary[]>([]);
+  const [workflowConsoleDoctor, setWorkflowConsoleDoctor] = useState<ProjectWorkflowDoctorResult | null>(null);
+  const [workflowConsolePreview, setWorkflowConsolePreview] = useState<ProjectWorkflowBindingPreview | null>(null);
+  const [workflowConsoleApplyResult, setWorkflowConsoleApplyResult] = useState<ProjectWorkflowBindingApplyResult | null>(null);
+  const [workflowConsoleTraces, setWorkflowConsoleTraces] = useState<SessionTraceListItem[]>([]);
+  const [workflowConsoleTracesHasMore, setWorkflowConsoleTracesHasMore] = useState(false);
+  const [workflowConsoleTracesLoadingMore, setWorkflowConsoleTracesLoadingMore] = useState(false);
+  const [workflowConsoleTraceDetail, setWorkflowConsoleTraceDetail] = useState<SessionTraceDetail | null>(null);
+  const [workflowConsoleTraceLoading, setWorkflowConsoleTraceLoading] = useState(false);
+  const [workflowConsoleLoading, setWorkflowConsoleLoading] = useState(false);
+  const [workflowConsoleError, setWorkflowConsoleError] = useState<string | null>(null);
+  const workflowConsoleRequestRef = useRef(0);
+  const workflowConsoleTraceRequestRef = useRef(0);
+  const workflowConsoleProjectRootRef = useRef("");
   const [telemetryResult, setTelemetryResult] = useState<TelemetryImportResult | null>(null);
   const [localToolSources, setLocalToolSources] = useState<LocalToolTelemetrySource[]>([]);
   const [selectedLocalToolSourceId, setSelectedLocalToolSourceId] = useState("");
@@ -11383,9 +11893,15 @@ export default function App() {
   const [projectRuntimeRefreshing, setProjectRuntimeRefreshing] = useState(false);
   const [sessionTraces, setSessionTraces] = useState<SessionTraceListItem[]>([]);
   const [selectedSessionTraceId, setSelectedSessionTraceId] = useState<string | null>(null);
+  const [sessionTraceDetailRevision, setSessionTraceDetailRevision] = useState(0);
   const [sessionTraceDetail, setSessionTraceDetail] = useState<SessionTraceDetail | null>(null);
   const [sessionTraceLoading, setSessionTraceLoading] = useState(false);
   const [sessionTraceError, setSessionTraceError] = useState<string | null>(null);
+  const [messagePreferenceUpdating, setMessagePreferenceUpdating] = useState(false);
+  const [evidenceStorageStats, setEvidenceStorageStats] = useState<EvidenceStorageStats | null>(null);
+  const [evidencePurgeBefore, setEvidencePurgeBefore] = useState(
+    new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  );
   const [traceSkillDetail, setTraceSkillDetail] = useState<TraceSkillQuickDetail | null>(null);
   const [traceSkillLoading, setTraceSkillLoading] = useState(false);
   const [traceSkillDrawerOpen, setTraceSkillDrawerOpen] = useState(false);
@@ -12340,7 +12856,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedSessionTraceId]);
+  }, [selectedSessionTraceId, sessionTraceDetailRevision]);
 
   useEffect(() => {
     window.localStorage.setItem(managedProjectsStorageKey, JSON.stringify(managedProjects));
@@ -12487,7 +13003,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", closeBindDialogOnEscape);
   }, [pendingBindProjectRoot, busyAction]);
 
-  async function refreshProjectManagementRuntimeSnapshot() {
+  async function refreshProjectManagementRuntimeSnapshot(announce = false) {
     const projectPaths = managedProjects.map((project) => project.path);
     if (projectPaths.length === 0 || projectRuntimeSnapshotInFlightRef.current) {
       return;
@@ -12505,6 +13021,22 @@ export default function App() {
         setRecentRuns(runs);
         setProjectRuntimeRefreshedAt(new Date().toISOString());
       });
+    } catch (nextError) {
+      const message = nextError instanceof Error
+        ? nextError.message
+        : tx("Project runtime refresh failed.", "项目运行数据刷新失败。");
+      if (announce) {
+        showInteractionNotice({
+          area: tx("Project Management", "项目管理"),
+          action: tx("Refresh project runtime data", "刷新项目运行数据"),
+          result: message,
+          nextStep: tx(
+            "The last successful snapshot is still shown. Check local evidence access, then refresh again.",
+            "当前仍保留上一次成功快照。请检查本地证据访问后再次刷新。"
+          ),
+          tone: "warning"
+        });
+      }
     } finally {
       projectRuntimeSnapshotInFlightRef.current = false;
       setProjectRuntimeRefreshing(false);
@@ -12539,7 +13071,7 @@ export default function App() {
       if (remaining === 0 && !projectRuntimeSnapshotInFlightRef.current) {
         refresh();
       }
-    }, 1000);
+    }, projectManagementCountdownTickMs);
 
     return () => {
       disposed = true;
@@ -12550,6 +13082,7 @@ export default function App() {
   useEffect(() => {
     const monitoredProjects = managedProjects.filter((project) => project.monitoringEnabled);
     if (
+      loading ||
       monitoredProjects.length === 0 ||
       boot?.policy?.telemetryMode === "disabled" ||
       !boot?.policy?.allowBackgroundWatch
@@ -12557,47 +13090,63 @@ export default function App() {
       return undefined;
     }
 
-    const timer = window.setInterval(() => {
-      if (monitoringBatchInFlightRef.current) {
-        return;
-      }
+    let disposed = false;
+    let timer: number | null = null;
+
+    const resolveNextProject = (now: number) => monitoredProjects
+      .filter((project) => !monitoringRefreshInFlightRef.current.has(project.path))
+      .map((project) => {
+        const lastMonitorAt = project.lastMonitorAt ?? project.lastScanAt ?? project.boundAt;
+        const lastMonitorMs = lastMonitorAt ? new Date(lastMonitorAt).getTime() : Number.NaN;
+        const projectDueAt = Number.isFinite(lastMonitorMs)
+          ? lastMonitorMs + project.monitoringIntervalMs
+          : now;
+        const sessionDueAt = monitoringSessionStartedAtRef.current + project.monitoringIntervalMs;
+        return { project, dueAt: Math.max(projectDueAt, sessionDueAt) };
+      })
+      .sort((left, right) => left.dueAt - right.dueAt)[0] ?? null;
+
+    const scheduleNextMonitor = () => {
+      if (disposed) return;
       const now = Date.now();
-      const nextProject = monitoredProjects
-        .filter((project) => {
-          if (now - monitoringSessionStartedAtRef.current < project.monitoringIntervalMs) {
-            return false;
-          }
-          const lastMonitorAt = project.lastMonitorAt ?? project.lastScanAt ?? project.boundAt;
-          const elapsedMs = lastMonitorAt
-            ? now - new Date(lastMonitorAt).getTime()
-            : Number.POSITIVE_INFINITY;
-          return (
-            elapsedMs >= project.monitoringIntervalMs &&
-            !monitoringRefreshInFlightRef.current.has(project.path)
-          );
-        })
-        .sort((left, right) => {
-          const leftAt = left.lastMonitorAt ?? left.lastScanAt ?? left.boundAt;
-          const rightAt = right.lastMonitorAt ?? right.lastScanAt ?? right.boundAt;
-          return new Date(leftAt).getTime() - new Date(rightAt).getTime();
-        })[0];
+      const next = resolveNextProject(now);
+      const delay = monitoringBatchInFlightRef.current
+        ? minimumBackgroundMonitorDelayMs
+        : next
+          ? Math.max(0, next.dueAt - now)
+          : maximumBackgroundMonitorDelayMs;
+      timer = window.setTimeout(runNextMonitor, delay === 0 ? 0 : Math.min(Math.max(delay, minimumBackgroundMonitorDelayMs), maximumBackgroundMonitorDelayMs));
+    };
 
-      if (!nextProject) {
+    const runNextMonitor = () => {
+      if (disposed) return;
+      if (monitoringBatchInFlightRef.current) {
+        scheduleNextMonitor();
         return;
       }
-
+      const next = resolveNextProject(Date.now());
+      if (!next || next.dueAt > Date.now()) {
+        scheduleNextMonitor();
+        return;
+      }
       monitoringBatchInFlightRef.current = true;
-      monitoringRefreshInFlightRef.current.add(nextProject.path);
-      void refreshProjectRuntimeEvidence(nextProject, { silent: true }).finally(() => {
-        monitoringRefreshInFlightRef.current.delete(nextProject.path);
+      monitoringRefreshInFlightRef.current.add(next.project.path);
+      void refreshProjectRuntimeEvidence(next.project, { silent: true }).finally(() => {
+        monitoringRefreshInFlightRef.current.delete(next.project.path);
         monitoringBatchInFlightRef.current = false;
+        scheduleNextMonitor();
       });
-    }, 5000);
+    };
 
-    return () => window.clearInterval(timer);
+    scheduleNextMonitor();
+    return () => {
+      disposed = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [
     boot?.policy?.allowBackgroundWatch,
     boot?.policy?.telemetryMode,
+    loading,
     managedProjects
   ]);
 
@@ -13493,11 +14042,12 @@ export default function App() {
 
     try {
       const next = await loadBootstrapState();
-      const [nextAuditEvents, nextBackups, nextRemoteCandidates, nextModelEvaluationConfig] = await Promise.all([
+      const [nextAuditEvents, nextBackups, nextRemoteCandidates, nextModelEvaluationConfig, nextEvidenceStorageStats] = await Promise.all([
         window.workbench.listAuditEvents(12),
         window.workbench.listBackups(8),
         window.workbench.listRemoteSkillCandidates(),
-        window.workbench.getModelEvaluationConfig()
+        window.workbench.getModelEvaluationConfig(),
+        window.workbench.getEvidenceStorageStats()
       ]);
       let summary: DailyMetricsSummary | null = null;
       let nextWeeklySummary: WeeklyMetricsSummary | null = null;
@@ -13527,6 +14077,7 @@ export default function App() {
         setGraphSnapshot(nextGraph);
         setRecentRuns(runs);
         setSessionTraces(nextSessionTraces);
+        setSessionTraceDetailRevision((current) => current + 1);
         setSelectedSessionTraceId((current) =>
           current && nextSessionTraces.some((trace) => trace.traceId === current)
             ? current
@@ -13536,6 +14087,7 @@ export default function App() {
         setBackups(nextBackups);
         setRemoteCandidates(nextRemoteCandidates);
         setModelEvaluationConfig(nextModelEvaluationConfig);
+        setEvidenceStorageStats(nextEvidenceStorageStats);
         if (!modelEvaluationConfigHydratedRef.current) {
           modelEvaluationConfigHydratedRef.current = true;
           setModelProviderLabel(nextModelEvaluationConfig.providerLabel);
@@ -13560,8 +14112,10 @@ export default function App() {
           return next.skills[0]?.id ?? "";
         });
       });
+      return true;
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Unknown bootstrap error");
+      return false;
     } finally {
       if (showLoader) {
         setLoading(false);
@@ -13576,6 +14130,7 @@ export default function App() {
       const nextTraces = await window.workbench.listSessionTraces({ limit: 120 });
       startTransition(() => {
         setSessionTraces(nextTraces);
+        setSessionTraceDetailRevision((current) => current + 1);
         setSelectedSessionTraceId((current) =>
           current && nextTraces.some((trace) => trace.traceId === current)
             ? current
@@ -13585,10 +14140,140 @@ export default function App() {
       if (nextTraces.length === 0) {
         setSessionTraceDetail(null);
       }
+      return true;
     } catch (nextError) {
       setSessionTraceError(nextError instanceof Error ? nextError.message : tx("Trace refresh failed.", "链路刷新失败。"));
+      return false;
     } finally {
       setSessionTraceLoading(false);
+    }
+  }
+
+  function selectSessionTrace(traceId: string) {
+    if (traceId === selectedSessionTraceId) {
+      setSessionTraceDetailRevision((current) => current + 1);
+      return;
+    }
+    setSelectedSessionTraceId(traceId);
+  }
+
+  async function updateMessageSummaryPreference(enabled: boolean) {
+    setMessagePreferenceUpdating(true);
+    setSessionTraceError(null);
+    try {
+      const nextBoot = await window.workbench.updateAuthorizationPreferences({
+        allowMessageSummary: enabled
+      });
+      const nextAuditEvents = await window.workbench.listAuditEvents(12);
+      setBoot(nextBoot);
+      setAuditEvents(nextAuditEvents);
+      showInteractionNotice({
+        area: tx("Session Trace", "会话链路"),
+        action: enabled ? tx("Enable message summaries", "开启消息摘要") : tx("Disable message summaries", "关闭消息摘要"),
+        result: enabled
+          ? tx("Sanitized user-message summaries will be stored locally.", "后续会在本机保存脱敏后的用户消息摘要。")
+          : tx("New runtime evidence will no longer store user-message summaries.", "后续运行证据不再保存用户消息摘要。"),
+        nextStep: enabled
+          ? tx("The next project evidence refresh will rebuild eligible records; full raw prompts remain unstored.", "下一次项目证据刷新会重建可用记录；完整消息原文仍不会保存。")
+          : tx("Existing local summaries remain until evidence cleanup; new records use privacy placeholders.", "已有本地摘要会保留到证据清理时；新记录改用隐私占位说明。"),
+        tone: "success"
+      });
+    } catch (nextError) {
+      const message = nextError instanceof Error
+        ? nextError.message
+        : tx("Message summary preference failed to update.", "消息摘要设置更新失败。");
+      setSessionTraceError(message);
+      showInteractionNotice({
+        area: tx("Session Trace", "会话链路"),
+        action: tx("Update privacy preference", "更新隐私设置"),
+        result: message,
+        nextStep: tx("Confirm local authorization is active, then try again.", "确认本地授权已生效后重试。"),
+        tone: "warning"
+      });
+    } finally {
+      setMessagePreferenceUpdating(false);
+    }
+  }
+
+  async function purgeStoredEvidence() {
+    const beforeDate = new Date(`${evidencePurgeBefore}T00:00:00.000Z`);
+    if (Number.isNaN(beforeDate.getTime())) {
+      setError(tx("Choose a valid cleanup date.", "请选择有效的清理日期。"));
+      return;
+    }
+    setBusyAction("evidence-purge");
+    setError(null);
+    try {
+      const preview = await window.workbench.previewEvidencePurge({
+        before: beforeDate.toISOString(),
+        includeSkillRuns: true
+      });
+      const evidenceItems = preview.traceEvents + preview.skillRuns;
+      if (evidenceItems === 0) {
+        showInteractionNotice({
+          area: tx("Evidence Storage", "证据存储"),
+          action: tx("Preview cleanup", "预览清理"),
+          result: tx("No stored Trace events or Skill runs match this date.", "该日期范围内没有可清理的链路事件或技能运行记录。"),
+          nextStep: tx("Choose a later date only when you want to clear newer local evidence.", "仅在希望清理更新的本地证据时再选择更晚日期。"),
+          tone: "info"
+        });
+        return;
+      }
+      const confirmed = window.confirm(
+        tx(
+          `Delete ${preview.traceEvents} Trace events from ${preview.traceSessions} sessions and ${preview.skillRuns} Skill runs before ${evidencePurgeBefore}? This cannot be undone.`,
+          `确定删除 ${evidencePurgeBefore} 之前的 ${preview.traceSessions} 个会话中的 ${preview.traceEvents} 条链路事件和 ${preview.skillRuns} 条技能运行记录吗？此操作不可撤销。`
+        )
+      );
+      if (!confirmed) {
+        return;
+      }
+      const result = await window.workbench.purgeEvidence({
+        before: beforeDate.toISOString(),
+        confirm: true,
+        includeSkillRuns: true
+      });
+      const [traceRefresh, workbenchRefresh, storageRefresh] = await Promise.allSettled([
+        refreshSessionTraces(),
+        refreshWorkbench(false),
+        window.workbench.getEvidenceStorageStats()
+      ]);
+      if (storageRefresh.status === "fulfilled") {
+        setEvidenceStorageStats(storageRefresh.value);
+      }
+      const refreshWarning =
+        traceRefresh.status !== "fulfilled" ||
+        !traceRefresh.value ||
+        workbenchRefresh.status !== "fulfilled" ||
+        !workbenchRefresh.value ||
+        storageRefresh.status !== "fulfilled"
+        ? tx(
+            "The evidence cleanup completed, but part of the interface could not refresh. Use Refresh to load the latest snapshot.",
+            "证据清理已完成，但部分界面未能刷新。请点击刷新加载最新快照。"
+          )
+        : null;
+      showInteractionNotice({
+        area: tx("Evidence Storage", "证据存储"),
+        action: tx("Clean up history", "清理历史证据"),
+        result: tx(
+          `${result.deletedTraceEvents} Trace events and ${result.deletedSkillRuns} Skill runs were deleted.`,
+          `已删除 ${result.deletedTraceEvents} 条链路事件和 ${result.deletedSkillRuns} 条技能运行记录。`
+        ),
+        nextStep: refreshWarning ?? tx("New evidence will continue to be stored locally when monitoring is authorized.", "授权监控后，新的证据仍会继续保存在本地。"),
+        tone: refreshWarning ? "warning" : "success"
+      });
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("Evidence cleanup failed.", "证据清理失败。");
+      setError(message);
+      showInteractionNotice({
+        area: tx("Evidence Storage", "证据存储"),
+        action: tx("Clean up history", "清理历史证据"),
+        result: message,
+        nextStep: tx("Review the date and authorization, then try again.", "检查日期和授权后重试。"),
+        tone: "warning"
+      });
+    } finally {
+      setBusyAction(null);
     }
   }
 
@@ -14365,15 +15050,19 @@ export default function App() {
     setProjectRepairFeedback({
       projectPath: project.path,
       status: "running",
-      detail: tx("Step 3/4: checking the Codex project directory...", "第 3/4 步：正在检查 Codex 项目目录...")
+      detail: tx("Step 3/4: importing Codex runtime evidence...", "第 3/4 步：正在导入 Codex 运行证据...")
     });
     appendProjectOnboardingLog(
       project.path,
       "connection",
       "info",
-      tx("Started matching the Codex task directory.", "开始匹配 Codex 任务目录。")
+      tx("Started importing Codex runtime evidence for this project.", "开始导入该项目的 Codex 运行证据。")
     );
-    const runtimeResult = await checkProjectConnectionHeartbeat(repairedProject);
+    const runtimeResult = await refreshProjectRuntimeEvidence(repairedProject, {
+      silent: true,
+      mode: "full",
+      since: null
+    });
     const observedWorkspace = getLatestObservedWorkspace(runtimeResult);
     const connectionComplete = runtimeResult?.status === "imported";
     const directoryConnected = connectionComplete || runtimeResult?.status === "connected_no_skill_runs";
@@ -14381,8 +15070,8 @@ export default function App() {
       ? tx("Configuration and Codex project connection were verified.", "配置和 Codex 项目连接均已验证。")
       : directoryConnected
         ? tx(
-            "The Codex project directory is connected; waiting for a project Skill invocation.",
-            "Codex 项目目录已连接，正在等待项目技能触发。"
+            "The Codex project directory is connected. Skill evidence is not available from this connection check.",
+            "Codex 项目目录已连接；本次连接检测无法提供技能证据。"
           )
       : observedWorkspace
         ? tx(
@@ -14415,7 +15104,7 @@ export default function App() {
       connectionComplete
         ? tx("Project onboarding and connection verification completed.", "项目接入和连接验证完成。")
         : directoryConnected
-          ? tx("Project connection is ready and awaiting a Skill invocation.", "项目连接已就绪，等待技能触发。")
+          ? tx("Project connection is ready; Skill evidence is not available from this check.", "项目连接已就绪；本次检测无法提供技能证据。")
         : tx("Configuration repair completed, but the Codex task directory still needs correction.", "配置修正完成，但仍需修正 Codex 任务目录。")
     );
     showInteractionNotice({
@@ -14537,7 +15226,7 @@ export default function App() {
 
   async function refreshProjectRuntimeEvidence(
     project: ManagedProject,
-    options: { silent?: boolean } = {}
+    options: { silent?: boolean; mode?: "full" | "incremental"; since?: string | null } = {}
   ) {
     if (!options.silent) {
       setBusyAction("runtime-refresh");
@@ -14546,10 +15235,10 @@ export default function App() {
 
     try {
       const result = await window.workbench.refreshProjectRuntimeEvidence(project.path, {
-        mode: options.silent ? "incremental" : "full",
-        since: options.silent
+        mode: options.mode ?? "incremental",
+        since: options.since === undefined
           ? project.lastMonitorAt ?? project.lastScanAt ?? project.boundAt
-          : undefined
+          : options.since ?? undefined
       });
       const proposalResult = options.silent
         ? null
@@ -14588,8 +15277,8 @@ export default function App() {
           ? tx("Open Evaluation Reports to inspect project and Skill usage.", "打开评测报告查看项目与技能使用情况。")
           : result.status === "connected_no_skill_runs"
             ? tx(
-                "Continue using the project; the status will become healthy after a project Skill is invoked.",
-                "继续使用该项目；项目技能触发后，状态会自动变为运行正常。"
+                "Open Session Trace to inspect observed turns. If Skill hits stay empty, the current Codex log only proves directory/tool activity, not Skill routing.",
+                "打开会话链路查看已观测回合。如果技能命中仍为空，说明当前 Codex 日志只能证明目录和工具活动，不能证明 Skill 路由。"
               )
           : result.status === "telemetry_disabled"
             ? tx("Click Enable Telemetry in the project detail dialog, then refresh runtime evidence again.", "在项目详情弹窗点击开启遥测，然后再次刷新运行证据。")
@@ -14653,6 +15342,7 @@ export default function App() {
         startTransition(() => {
           setBoot(nextBoot);
           setSessionTraces(nextSessionTraces);
+          setSessionTraceDetailRevision((current) => current + 1);
         });
       } else {
         await refreshWorkbench(false);
@@ -15007,114 +15697,283 @@ export default function App() {
     }
   }
 
-  async function previewProjectWorkflowBinding(template: WorkflowTemplateSummary) {
-    const projectRoot = normalizeProjectPath(targetProjectRoot);
-    if (!projectRoot) {
-      navigateToProductSection("#discovery");
+  function beginWorkflowConsoleRequest(projectRoot: string) {
+    const requestId = workflowConsoleRequestRef.current + 1;
+    workflowConsoleRequestRef.current = requestId;
+    return { requestId, projectRoot };
+  }
+
+  function isWorkflowConsoleRequestCurrent(requestId: number, projectRoot: string) {
+    return (
+      workflowConsoleRequestRef.current === requestId &&
+      workflowConsoleProjectRootRef.current === projectRoot
+    );
+  }
+
+  async function refreshWorkflowConsoleState(projectRoot: string, requestId?: number) {
+    const normalizedProjectRoot = normalizeProjectPath(projectRoot);
+    if (!normalizedProjectRoot) return null;
+    const currentRequestId = requestId ?? beginWorkflowConsoleRequest(normalizedProjectRoot).requestId;
+    if (!isWorkflowConsoleRequestCurrent(currentRequestId, normalizedProjectRoot)) return null;
+    setWorkflowConsoleLoading(true);
+    setWorkflowConsoleError(null);
+    try {
+      const [templates, bindings, loopRuns, doctor, traces] = await Promise.all([
+        window.workbench.listWorkflowTemplates(),
+        window.workbench.listProjectWorkflowBindings(normalizedProjectRoot),
+        window.workbench.listProjectScenarioLoopRuns(normalizedProjectRoot),
+        window.workbench.doctorProjectWorkflow(normalizedProjectRoot),
+        window.workbench.listSessionTraces({ projectRoot: normalizedProjectRoot, limit: 80 })
+      ]);
+      if (!isWorkflowConsoleRequestCurrent(currentRequestId, normalizedProjectRoot)) return null;
+      startTransition(() => {
+        setWorkflowConsoleTemplates(templates);
+        setWorkflowConsoleBindings(bindings);
+        setWorkflowConsoleLoopRuns(loopRuns);
+        setWorkflowConsoleDoctor(doctor);
+        setWorkflowConsoleTraces(traces);
+        setWorkflowConsoleTracesHasMore(traces.length === 80);
+        setWorkflowConsoleTraceDetail((current) =>
+          current && traces.some((trace) => trace.traceId === current.turn.traceId) ? current : null
+        );
+      });
+      return { templates, bindings };
+    } catch (nextError) {
+      if (!isWorkflowConsoleRequestCurrent(currentRequestId, normalizedProjectRoot)) return null;
+      setWorkflowConsoleError(
+        nextError instanceof Error
+          ? nextError.message
+          : tx("Project Workflow state could not be loaded.", "项目工作流状态加载失败。")
+      );
+    } finally {
+      if (isWorkflowConsoleRequestCurrent(currentRequestId, normalizedProjectRoot)) {
+        setWorkflowConsoleLoading(false);
+      }
+    }
+  }
+
+  async function loadMoreWorkflowConsoleTraces() {
+    const projectRoot = workflowConsoleProjectRootRef.current;
+    const cursor = workflowConsoleTraces[workflowConsoleTraces.length - 1];
+    if (!projectRoot || !cursor || workflowConsoleTracesLoadingMore || !workflowConsoleTracesHasMore) return;
+    const { requestId } = beginWorkflowConsoleRequest(projectRoot);
+    setWorkflowConsoleTracesLoadingMore(true);
+    setWorkflowConsoleError(null);
+    try {
+      const nextTraces = await window.workbench.listSessionTraces({
+        projectRoot,
+        limit: 80,
+        cursor: { receivedAt: cursor.receivedAt, traceId: cursor.traceId }
+      });
+      if (!isWorkflowConsoleRequestCurrent(requestId, projectRoot)) return;
+      setWorkflowConsoleTraces((current) => {
+        const known = new Set(current.map((trace) => trace.traceId));
+        return [...current, ...nextTraces.filter((trace) => !known.has(trace.traceId))];
+      });
+      setWorkflowConsoleTracesHasMore(nextTraces.length === 80);
+    } catch (nextError) {
+      if (!isWorkflowConsoleRequestCurrent(requestId, projectRoot)) return;
+      setWorkflowConsoleError(
+        nextError instanceof Error
+          ? nextError.message
+          : tx("More project call-chain records could not be loaded.", "无法继续加载项目调用链记录。")
+      );
+    } finally {
+      if (isWorkflowConsoleRequestCurrent(requestId, projectRoot)) {
+        setWorkflowConsoleTracesLoadingMore(false);
+      }
+    }
+  }
+
+  function closeWorkflowConsole() {
+    workflowConsoleRequestRef.current += 1;
+    workflowConsoleTraceRequestRef.current += 1;
+    workflowConsoleProjectRootRef.current = "";
+    setWorkflowConsoleContext(null);
+    setWorkflowConsoleTraceDetail(null);
+    setWorkflowConsolePreview(null);
+    setWorkflowConsoleApplyResult(null);
+  }
+
+  function openWorkflowConsole(
+    projectRoot: string,
+    template?: WorkflowTemplateSummary,
+    initialTab: WorkflowConsoleTab = "runtime",
+    initialAction: WorkflowConsoleInitialAction = null
+  ) {
+    const normalizedProjectRoot = normalizeProjectPath(projectRoot);
+    if (!normalizedProjectRoot) {
       showInteractionNotice({
         area: tx("Workflow Library", "工作流库"),
-        action: tx("Preview binding", "预览绑定"),
-        result: tx("Choose a project before previewing a Workflow binding.", "请先选择项目，再预览工作流绑定。"),
-        nextStep: tx("Bind or select one project from Project Management.", "请到项目管理绑定或选择一个项目。"),
+        action: tx("Open project console", "打开项目控制台"),
+        result: tx("Choose a bound project first.", "请先选择一个已绑定项目。"),
+        nextStep: tx("Bind a project from Project Management, then open its Workflow console.", "请先在项目管理中绑定项目，再打开它的工作流控制台。"),
         tone: "warning"
       });
       return;
     }
-    setWorkflowLibraryLoading(true);
+    const action = initialAction ?? (
+      template && initialTab === "binding"
+        ? { kind: "binding", templateKey: `${template.templateId}@${template.templateVersion}` } as const
+        : null
+    );
+    const managedProject = managedProjects.find((project) => project.path === normalizedProjectRoot);
+    workflowConsoleProjectRootRef.current = normalizedProjectRoot;
+    const { requestId } = beginWorkflowConsoleRequest(normalizedProjectRoot);
+    setWorkflowConsoleContext({
+      projectRoot: normalizedProjectRoot,
+      projectName: managedProject?.name ?? getProjectDisplayName(normalizedProjectRoot),
+      initialTab,
+      initialTemplateKey: template ? `${template.templateId}@${template.templateVersion}` : null,
+      initialAction: action
+    });
+    setWorkflowConsolePreview(null);
+    setWorkflowConsoleApplyResult(null);
+    setWorkflowConsoleTraceDetail(null);
+    setWorkflowConsoleTraces([]);
+    setWorkflowConsoleTracesHasMore(false);
+    void (async () => {
+      const loaded = await refreshWorkflowConsoleState(normalizedProjectRoot, requestId);
+      if (!isWorkflowConsoleRequestCurrent(requestId, normalizedProjectRoot) || !action) return;
+      if (action.kind === "binding") {
+        const selectedTemplate = template ?? loaded?.templates.find((item) => `${item.templateId}@${item.templateVersion}` === action.templateKey);
+        if (selectedTemplate) await previewWorkflowConsoleBinding(selectedTemplate, normalizedProjectRoot);
+        return;
+      }
+      const selectedBinding = loaded?.bindings.find((binding) => binding.bindingId === action.bindingId);
+      if (!selectedBinding) {
+        setWorkflowConsoleError(tx("The selected project binding is no longer available.", "所选项目绑定已不可用。"));
+        return;
+      }
+      if (action.kind === "migration") await previewWorkflowConsoleMigration(selectedBinding);
+      if (action.kind === "rollback") await previewWorkflowConsoleRollback(selectedBinding);
+    })();
+  }
+
+  async function openWorkflowConsoleTrace(traceId: string) {
+    const projectRoot = workflowConsoleProjectRootRef.current;
+    if (!projectRoot) return;
+    const requestId = workflowConsoleTraceRequestRef.current + 1;
+    workflowConsoleTraceRequestRef.current = requestId;
+    setWorkflowConsoleTraceLoading(true);
+    setWorkflowConsoleError(null);
+    try {
+      const detail = await window.workbench.getSessionTrace(traceId);
+      if (workflowConsoleTraceRequestRef.current !== requestId || workflowConsoleProjectRootRef.current !== projectRoot) return;
+      if (!detail) {
+        setWorkflowConsoleTraceDetail(null);
+        setWorkflowConsoleError(tx("This project call-chain record is no longer available locally.", "这条项目调用链记录已不在本地可用。"));
+        return;
+      }
+      if (detail.turn.workspaceRef && !isPathInsideProject(detail.turn.workspaceRef, projectRoot)) {
+        setWorkflowConsoleTraceDetail(null);
+        setWorkflowConsoleError(tx("This record does not belong to the open project.", "该记录不属于当前打开的项目。"));
+        return;
+      }
+      setWorkflowConsoleTraceDetail(detail);
+    } catch (nextError) {
+      if (workflowConsoleTraceRequestRef.current !== requestId || workflowConsoleProjectRootRef.current !== projectRoot) return;
+      setWorkflowConsoleError(nextError instanceof Error ? nextError.message : tx("Call chain could not be loaded.", "调用链加载失败。"));
+    } finally {
+      if (workflowConsoleTraceRequestRef.current === requestId && workflowConsoleProjectRootRef.current === projectRoot) {
+        setWorkflowConsoleTraceLoading(false);
+      }
+    }
+  }
+
+  async function previewWorkflowConsoleBinding(
+    template: WorkflowTemplateSummary,
+    projectRootOverride?: string
+  ) {
+    const projectRoot = normalizeProjectPath(projectRootOverride ?? workflowConsoleProjectRootRef.current);
+    if (!projectRoot || workflowConsoleProjectRootRef.current !== projectRoot) return;
+    const { requestId } = beginWorkflowConsoleRequest(projectRoot);
+    setWorkflowConsoleLoading(true);
+    setWorkflowConsoleError(null);
     try {
       const preview = await window.workbench.previewProjectWorkflowBinding({
         projectRoot,
         templateId: template.templateId,
         templateVersion: template.templateVersion
       });
-      setWorkflowBindingPreview(preview);
-      setWorkflowBindingApplyResult(null);
-      showInteractionNotice({
-        area: tx("Workflow Library", "工作流库"),
-        action: tx("Preview binding", "预览绑定"),
-        result: tx("No project file has been changed. Review the version, compatibility, and warnings below.", "尚未修改项目文件，请在下方检查版本、兼容性与提醒。"),
-        nextStep: tx("Confirm and apply only after the preview is acceptable.", "预览确认无误后，再点击确认并应用。"),
-        tone: preview.readyForConfirmation ? "info" : "warning"
-      });
+      if (!isWorkflowConsoleRequestCurrent(requestId, projectRoot) || normalizeProjectPath(preview.projectRoot) !== projectRoot) return;
+      setWorkflowConsolePreview(preview);
+      setWorkflowConsoleApplyResult(null);
     } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : tx("Binding preview failed.", "绑定预览失败。");
-      setError(message);
-      showInteractionNotice({ area: tx("Workflow Library", "工作流库"), action: tx("Preview binding", "预览绑定"), result: message, nextStep: tx("Resolve the compatibility issue and generate a new preview.", "请解决兼容性问题后重新生成预览。"), tone: "warning" });
+      if (!isWorkflowConsoleRequestCurrent(requestId, projectRoot)) return;
+      setWorkflowConsoleError(nextError instanceof Error ? nextError.message : tx("Binding preview failed.", "绑定预览失败。"));
     } finally {
-      setWorkflowLibraryLoading(false);
+      if (isWorkflowConsoleRequestCurrent(requestId, projectRoot)) {
+        setWorkflowConsoleLoading(false);
+      }
     }
   }
 
-  async function previewProjectWorkflowMigration(binding: ProjectWorkflowBindingSummary) {
-    const projectRoot = normalizeProjectPath(targetProjectRoot);
-    if (!projectRoot) return;
-    setWorkflowLibraryLoading(true);
+  async function previewWorkflowConsoleMigration(binding: ProjectWorkflowBindingSummary) {
+    const projectRoot = workflowConsoleProjectRootRef.current;
+    if (!projectRoot || normalizeProjectPath(binding.projectRoot) !== projectRoot) return;
+    const { requestId } = beginWorkflowConsoleRequest(projectRoot);
+    setWorkflowConsoleLoading(true);
+    setWorkflowConsoleError(null);
     try {
       const preview = await window.workbench.previewProjectWorkflowLegacyMigration({ projectRoot, legacyBindingId: binding.bindingId });
-      setWorkflowBindingPreview(preview);
-      setWorkflowBindingApplyResult(null);
-      showInteractionNotice({
-        area: tx("Workflow Library", "工作流库"),
-        action: tx("Preview shadow migration", "预览影子迁移"),
-        result: tx("The legacy declaration remains read-only. The preview only proposes a new managed binding file.", "旧声明会保持只读；预览仅提出新增受管绑定文件。"),
-        nextStep: tx("Review the retained source and confirm only when the new binding is correct.", "请检查保留的来源与新绑定，确认正确后再应用。"),
-        tone: preview.readyForConfirmation ? "info" : "warning"
-      });
+      if (!isWorkflowConsoleRequestCurrent(requestId, projectRoot) || normalizeProjectPath(preview.projectRoot) !== projectRoot) return;
+      setWorkflowConsolePreview(preview);
+      setWorkflowConsoleApplyResult(null);
     } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : tx("Migration preview failed.", "迁移预览失败。");
-      setError(message);
-      showInteractionNotice({ area: tx("Workflow Library", "工作流库"), action: tx("Preview shadow migration", "预览影子迁移"), result: message, nextStep: tx("Install the exact local template or resolve the project compatibility issue.", "请安装精确匹配的本地模板，或解决项目兼容性问题。"), tone: "warning" });
+      if (!isWorkflowConsoleRequestCurrent(requestId, projectRoot)) return;
+      setWorkflowConsoleError(nextError instanceof Error ? nextError.message : tx("Migration preview failed.", "迁移预览失败。"));
     } finally {
-      setWorkflowLibraryLoading(false);
+      if (isWorkflowConsoleRequestCurrent(requestId, projectRoot)) {
+        setWorkflowConsoleLoading(false);
+      }
     }
   }
 
-  async function previewProjectWorkflowRollback(binding: ProjectWorkflowBindingSummary) {
-    const projectRoot = normalizeProjectPath(targetProjectRoot);
-    if (!projectRoot) return;
-    setWorkflowLibraryLoading(true);
+  async function previewWorkflowConsoleRollback(binding: ProjectWorkflowBindingSummary) {
+    const projectRoot = workflowConsoleProjectRootRef.current;
+    if (!projectRoot || normalizeProjectPath(binding.projectRoot) !== projectRoot) return;
+    const { requestId } = beginWorkflowConsoleRequest(projectRoot);
+    setWorkflowConsoleLoading(true);
+    setWorkflowConsoleError(null);
     try {
       const preview = await window.workbench.previewProjectWorkflowBindingRollback({ projectRoot, bindingId: binding.bindingId });
-      setWorkflowBindingPreview(preview);
-      setWorkflowBindingApplyResult(null);
-      showInteractionNotice({
-        area: tx("Workflow Library", "工作流库"),
-        action: tx("Preview rollback", "预览回退"),
-        result: tx("No version has changed. The captured prior version is shown in the preview.", "尚未变更版本，已在预览中展示此前捕获的版本。"),
-        nextStep: tx("Confirm only after checking the version and local fingerprint.", "请检查版本和本地指纹后，再确认应用。"),
-        tone: preview.readyForConfirmation ? "info" : "warning"
-      });
+      if (!isWorkflowConsoleRequestCurrent(requestId, projectRoot) || normalizeProjectPath(preview.projectRoot) !== projectRoot) return;
+      setWorkflowConsolePreview(preview);
+      setWorkflowConsoleApplyResult(null);
     } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : tx("Rollback preview failed.", "回退预览失败。 ");
-      setError(message);
-      showInteractionNotice({ area: tx("Workflow Library", "工作流库"), action: tx("Preview rollback", "预览回退"), result: message, nextStep: tx("The captured local version must be available and unchanged before rollback.", "执行回退前，必须存在且未变更此前捕获的本地版本。"), tone: "warning" });
+      if (!isWorkflowConsoleRequestCurrent(requestId, projectRoot)) return;
+      setWorkflowConsoleError(nextError instanceof Error ? nextError.message : tx("Rollback preview failed.", "回退预览失败。"));
     } finally {
-      setWorkflowLibraryLoading(false);
+      if (isWorkflowConsoleRequestCurrent(requestId, projectRoot)) {
+        setWorkflowConsoleLoading(false);
+      }
     }
   }
 
-  async function applyProjectWorkflowBindingPreview() {
-    const preview = workflowBindingPreview;
-    if (!preview) return;
-    setWorkflowLibraryLoading(true);
+  async function applyWorkflowConsolePreview() {
+    const preview = workflowConsolePreview;
+    const projectRoot = workflowConsoleProjectRootRef.current;
+    if (!preview || !projectRoot || normalizeProjectPath(preview.projectRoot) !== projectRoot) {
+      setWorkflowConsoleError(tx("Refresh the project preview before applying it.", "请刷新当前项目预览后再应用。"));
+      return;
+    }
+    const { requestId } = beginWorkflowConsoleRequest(projectRoot);
+    setWorkflowConsoleLoading(true);
+    setWorkflowConsoleError(null);
     try {
       const result = await window.workbench.applyProjectWorkflowBinding({ previewId: preview.previewId });
-      setWorkflowBindingApplyResult(result);
-      setWorkflowBindingPreview(result.preview);
-      await refreshWorkflowLibraryState(result.binding.projectRoot);
-      showInteractionNotice({
-        area: tx("Workflow Library", "工作流库"),
-        action: tx("Confirm and apply", "确认并应用"),
-        result: result.verified ? tx("The binding was written atomically and verified by reading it back.", "绑定已原子写入，并通过回读验证。") : tx("The write needs review.", "写入需要复核。"),
-        nextStep: tx("Review the refreshed binding and read-only Loop evidence for this project.", "查看该项目已刷新的绑定和只读 Loop 证据。"),
-        tone: result.verified ? "success" : "warning"
-      });
+      if (!isWorkflowConsoleRequestCurrent(requestId, projectRoot) || normalizeProjectPath(result.binding.projectRoot) !== projectRoot) return;
+      setWorkflowConsoleApplyResult(result);
+      setWorkflowConsolePreview(result.preview);
+      await refreshWorkflowConsoleState(projectRoot, requestId);
     } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : tx("Binding apply failed.", "绑定应用失败。 ");
-      setError(message);
-      showInteractionNotice({ area: tx("Workflow Library", "工作流库"), action: tx("Confirm and apply", "确认并应用"), result: message, nextStep: tx("Generate a new preview if the project state changed.", "如项目状态已变化，请重新生成预览。"), tone: "warning" });
+      if (!isWorkflowConsoleRequestCurrent(requestId, projectRoot)) return;
+      setWorkflowConsoleError(nextError instanceof Error ? nextError.message : tx("Binding apply failed.", "绑定应用失败。"));
     } finally {
-      setWorkflowLibraryLoading(false);
+      if (isWorkflowConsoleRequestCurrent(requestId, projectRoot)) {
+        setWorkflowConsoleLoading(false);
+      }
     }
   }
 
@@ -15189,8 +16048,50 @@ export default function App() {
   }
 
   async function chooseTargetProjectRoot() {
-    await beginBindProjectFlow();
-    return null;
+    try {
+      showInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("Choose Project Folder", "选择项目文件夹"),
+        result: tx("Opening the system folder chooser...", "正在打开系统文件夹选择窗口..."),
+        nextStep: tx("Select one project folder to continue.", "选择一个项目文件夹后继续。"),
+        tone: "info"
+      });
+      const picked = await window.workbench.pickDirectory();
+      if (!picked) {
+        showInteractionNotice({
+          area: tx("Project Management", "项目管理"),
+          action: tx("Choose Project Folder", "选择项目文件夹"),
+          result: tx("Project folder selection was cancelled.", "已取消选择项目文件夹。"),
+          nextStep: tx("Choose a folder when you are ready.", "准备好后重新选择文件夹。"),
+          tone: "info"
+        });
+        return null;
+      }
+
+      const normalizedPicked = normalizeProjectPath(picked);
+      startTransition(() => {
+        setTargetProjectRoot(normalizedPicked);
+        setScanRoots([normalizedPicked]);
+        setScanExclusions([]);
+        setWorkflowStarterPreview(null);
+        setWorkflowStarterResult(null);
+        setWorkflowStarterHighlighted(false);
+        setScanResultDialog(null);
+        setScanResult(null);
+      });
+      return normalizedPicked;
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : tx("Project folder picker failed.", "项目文件夹选择失败。");
+      setError(message);
+      showInteractionNotice({
+        area: tx("Project Management", "项目管理"),
+        action: tx("Choose Project Folder", "选择项目文件夹"),
+        result: message,
+        nextStep: tx("Try choosing the project folder again.", "请重新选择项目文件夹。"),
+        tone: "warning"
+      });
+      return null;
+    }
   }
 
   function updateTargetProjectRoot(path: string) {
@@ -15199,12 +16100,12 @@ export default function App() {
       setScanRoots(path.trim() ? [path.trim()] : []);
       setScanExclusions([]);
       setWorkflowStarterPreview(null);
-	      setWorkflowStarterResult(null);
-	      setWorkflowStarterHighlighted(false);
-	      setScanResultDialog(null);
-	      setScanResult(null);
-	    });
-	  }
+      setWorkflowStarterResult(null);
+      setWorkflowStarterHighlighted(false);
+      setScanResultDialog(null);
+      setScanResult(null);
+    });
+  }
 
   function saveScanResultProjectName() {
     const projectRoot = scanResultDialogProjectRoot;
@@ -16617,7 +17518,12 @@ export default function App() {
     const interactive = target.closest<HTMLElement>(
       "button, [role='button'], .skill-top-card, .skill-simple-row, .graph-search-item, .graph-navigation-item, .graph-scope-item"
     );
-    if (!interactive || interactive.closest(".product-nav, .language-switcher, .product-topbar-actions")) {
+    if (
+      !interactive ||
+      interactive.closest(
+        ".product-nav, .language-switcher, .product-topbar-actions, .trace-explorer-module, .trace-span-modal"
+      )
+    ) {
       return;
     }
 
@@ -17835,7 +18741,7 @@ export default function App() {
           onScanProject={scanManagedProject}
           onRepairProject={(project) => void repairManagedProject(project)}
           onViewOnboardingLog={(project) => setSelectedProjectLogPath(project.path)}
-          onRefreshRuntimeSnapshot={() => void refreshProjectManagementRuntimeSnapshot()}
+          onRefreshRuntimeSnapshot={() => void refreshProjectManagementRuntimeSnapshot(true)}
           onToggleMonitoring={toggleProjectMonitoring}
           onUnbindProject={unbindManagedProject}
         />
@@ -19855,9 +20761,12 @@ export default function App() {
         loading={sessionTraceLoading}
         error={sessionTraceError}
         onRefresh={() => void refreshSessionTraces()}
-        onSelectTrace={setSelectedSessionTraceId}
+        onSelectTrace={selectSessionTrace}
         onOpenSkill={(traceId, skillId, trigger) => void openTraceSkill(traceId, skillId, trigger)}
         onOpenMonitoring={() => navigateToProductSection("#analysis")}
+        messageSummaryEnabled={Boolean(boot.policy?.allowMessageSummary)}
+        preferenceUpdating={messagePreferenceUpdating}
+        onToggleMessageSummary={(enabled) => void updateMessageSummaryPreference(enabled)}
       />
 
       <section className="panel os-module-panel" data-product-section="analysis" id="analysis">
@@ -22019,15 +22928,9 @@ export default function App() {
             bindings={projectWorkflowBindings}
             loopRuns={projectScenarioLoopRuns}
             doctor={projectWorkflowDoctor}
-            preview={workflowBindingPreview}
-            applyResult={workflowBindingApplyResult}
             loading={workflowLibraryLoading}
             onSelectTemplate={setSelectedWorkflowTemplateId}
-            onPreviewBinding={(template) => void previewProjectWorkflowBinding(template)}
-            onPreviewMigration={(binding) => void previewProjectWorkflowMigration(binding)}
-            onPreviewRollback={(binding) => void previewProjectWorkflowRollback(binding)}
-            onApplyPreview={() => void applyProjectWorkflowBindingPreview()}
-            onRefreshProject={() => void refreshWorkflowLibraryState(undefined, true)}
+            onOpenProjectConsole={(template, tab, initialAction) => openWorkflowConsole(normalizedTargetProjectRoot, template, tab, initialAction)}
           />
 
           <section className="panel" data-product-section="registry" id="registry">
@@ -22156,7 +23059,7 @@ export default function App() {
               onScanProject={scanManagedProject}
               onRepairProject={(project) => void repairManagedProject(project)}
               onViewOnboardingLog={(project) => setSelectedProjectLogPath(project.path)}
-              onRefreshRuntimeSnapshot={() => void refreshProjectManagementRuntimeSnapshot()}
+              onRefreshRuntimeSnapshot={() => void refreshProjectManagementRuntimeSnapshot(true)}
               onToggleMonitoring={toggleProjectMonitoring}
               onUnbindProject={unbindManagedProject}
             />
@@ -22427,7 +23330,9 @@ export default function App() {
                   <span className="mini-pill">
                     {modelEvaluationConfig?.secretStorage === "system_secure"
                       ? tx("System secure storage", "系统安全存储")
-                      : tx("Secure storage unavailable", "安全存储不可用")}
+                      : modelEvaluationConfig?.secretStorage === "unavailable"
+                        ? tx("Secure storage unavailable", "安全存储不可用")
+                        : tx("Checked when saving a key", "保存 Key 时检查")}
                   </span>
                   <span className="mini-pill">
                     {modelEvaluationConfig?.hasApiKey ? tx("Key saved", "Key 已保存") : tx("No key", "未保存 Key")}
@@ -22521,11 +23426,24 @@ export default function App() {
               <article className="os-module-card">
                 <span className="os-module-kicker">{tx("Permissions", "权限")}</span>
                 <h3>{boot.status === "ready" ? tx("Authorized", "已授权") : tx("Limited", "受限")}</h3>
-                <p>{tx("Raw content and background monitoring stay explicit choices.", "原始内容和后台监听始终是显式选择。")}</p>
+                <p>{tx("Raw content, sanitized summaries, and background monitoring stay explicit choices.", "原始内容、脱敏摘要和后台监听始终是显式选择。")}</p>
                 <div className="settings-pill-row">
                   <span className="mini-pill">{boot.policy?.allowRawContent ? tx("Raw allowed", "允许原文") : tx("Metrics only", "仅指标")}</span>
+                  <span className="mini-pill">{boot.policy?.allowMessageSummary ? tx("Summary on", "摘要已开") : tx("Summary off", "摘要已关")}</span>
                   <span className="mini-pill">{boot.policy?.allowBackgroundWatch ? tx("Watch approved", "监听已批准") : tx("Watch off", "监听关闭")}</span>
                 </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={Boolean(boot.policy?.allowMessageSummary)}
+                  className="switch-control compact settings-message-summary-switch"
+                  disabled={messagePreferenceUpdating || !boot.policy}
+                  onClick={() => void updateMessageSummaryPreference(!boot.policy?.allowMessageSummary)}
+                >
+                  <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+                  <span>{tx("Local message summaries", "本地消息摘要")}</span>
+                  <strong>{boot.policy?.allowMessageSummary ? tx("On", "已开") : tx("Off", "已关")}</strong>
+                </button>
               </article>
               <article className="os-module-card">
                 <span className="os-module-kicker">{tx("Telemetry", "遥测")}</span>
@@ -22534,6 +23452,41 @@ export default function App() {
                 <div className="settings-pill-row">
                   <span className="mini-pill">{formatCount(recentRuns.length)} {tx("recent runs", "最近运行")}</span>
                 </div>
+              </article>
+              <article className="os-module-card evidence-retention-card">
+                <span className="os-module-kicker">{tx("Evidence Storage", "证据存储")}</span>
+                <h3>{evidenceStorageStats ? formatBytes(evidenceStorageStats.databaseBytes) : tx("Loading...", "加载中...")}</h3>
+                <p>
+                  {evidenceStorageStats
+                    ? tx(
+                        `${evidenceStorageStats.traceEvents} Trace events · ${evidenceStorageStats.skillRuns} Skill runs`,
+                        `${evidenceStorageStats.traceEvents} 条链路事件 · ${evidenceStorageStats.skillRuns} 条技能运行`
+                      )
+                    : tx("Local evidence size and counts", "本地证据大小和数量")}
+                </p>
+                <div className="settings-pill-row">
+                  <span className="mini-pill">{tx("Oldest", "最早")} {formatDateTime(evidenceStorageStats?.oldestEvidenceAt ?? null)}</span>
+                  <span className="mini-pill">{tx("Newest", "最新")} {formatDateTime(evidenceStorageStats?.newestEvidenceAt ?? null)}</span>
+                </div>
+                <div className="evidence-retention-controls">
+                  <label>
+                    <span>{tx("Delete before", "删除早于")}</span>
+                    <input
+                      type="date"
+                      value={evidencePurgeBefore}
+                      onChange={(event) => setEvidencePurgeBefore(event.currentTarget.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    disabled={busyAction === "evidence-purge" || !evidenceStorageStats}
+                    onClick={() => void purgeStoredEvidence()}
+                  >
+                    {busyAction === "evidence-purge" ? tx("Cleaning...", "清理中...") : tx("Clean history", "清理历史")}
+                  </button>
+                </div>
+                <small>{tx("No automatic purge. Cleanup is local and requires confirmation.", "不会自动删除；清理仅作用于本地且需要确认。")}</small>
               </article>
               <article className="os-module-card">
                 <span className="os-module-kicker">{tx("Language", "语言")}</span>
@@ -22607,10 +23560,39 @@ export default function App() {
                 navigateToProductSection(href);
               }}
               onOpenTelemetryIntake={navigateToTelemetryIntake}
+              onOpenWorkflowConsole={(project) => openWorkflowConsole(project.path)}
               onClose={() => setInspectedProjectPath("")}
             />
           </section>
         </div>
+      ) : null}
+      {workflowConsoleContext ? (
+        <ProjectWorkflowConsoleModal
+          key={`${workflowConsoleContext.projectRoot}:${workflowConsoleContext.initialTemplateKey ?? "default"}:${workflowConsoleContext.initialTab}`}
+          context={workflowConsoleContext}
+          templates={workflowConsoleTemplates}
+          bindings={workflowConsoleBindings}
+          loopRuns={workflowConsoleLoopRuns}
+          doctor={workflowConsoleDoctor}
+          preview={workflowConsolePreview}
+          applyResult={workflowConsoleApplyResult}
+          traces={workflowConsoleTraces}
+          tracesHasMore={workflowConsoleTracesHasMore}
+          tracesLoadingMore={workflowConsoleTracesLoadingMore}
+          traceDetail={workflowConsoleTraceDetail}
+          traceLoading={workflowConsoleTraceLoading}
+          loading={workflowConsoleLoading}
+          error={workflowConsoleError}
+          onClose={closeWorkflowConsole}
+          onRefresh={() => void refreshWorkflowConsoleState(workflowConsoleContext.projectRoot)}
+          onLoadMoreTraces={() => void loadMoreWorkflowConsoleTraces()}
+          onSelectTrace={(traceId) => void openWorkflowConsoleTrace(traceId)}
+          onOpenSkill={(traceId, skillId, trigger) => void openTraceSkill(traceId, skillId, trigger)}
+          onPreviewBinding={(template) => void previewWorkflowConsoleBinding(template)}
+          onPreviewMigration={(binding) => void previewWorkflowConsoleMigration(binding)}
+          onPreviewRollback={(binding) => void previewWorkflowConsoleRollback(binding)}
+          onApplyPreview={() => void applyWorkflowConsolePreview()}
+        />
       ) : null}
       {controlledVerificationProject ? (
         <ControlledVerificationModal

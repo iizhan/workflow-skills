@@ -33,6 +33,7 @@ interface SourceFile {
   path: string;
   size: number;
   modifiedAt: string | null;
+  oversized?: boolean;
 }
 
 interface RunDraft {
@@ -71,20 +72,55 @@ interface ScanOptions {
   since?: string;
 }
 
+interface IncrementalTurnPrelude {
+  workspaceRef: string | null;
+  sessionRef: string | null;
+  turnRef: string | null;
+  messageHash: string | null;
+  messageSummary: string | null;
+  messageSequence: number;
+  hasExplicitTurnBoundary: boolean;
+}
+
+interface SourceFileHeader {
+  workspaceRef: string | null;
+  sessionRef: string | null;
+  isSyntheticSubagent: boolean;
+}
+
 const MAX_FILES_PER_SOURCE = 120;
 const MAX_DIRECTORIES_PER_SOURCE = 4000;
 const MAX_LINES_PER_FILE = 20000;
 const MAX_BYTES_PER_TEXT_FILE = 150 * 1024 * 1024;
-const MAX_INCREMENTAL_FILES = 3;
-const MAX_INCREMENTAL_LINES_PER_FILE = 4000;
-const MAX_INCREMENTAL_BYTES_PER_FILE = 4 * 1024 * 1024;
+const MAX_INCREMENTAL_FILES = 2;
+const MAX_PROJECT_REFRESH_FILES = 8;
+const MAX_INCREMENTAL_FILE_CANDIDATES = 16;
+const MAX_INCREMENTAL_LINES_PER_FILE = 2400;
+const MAX_INCREMENTAL_BYTES_PER_FILE = 5 * 1024 * 1024;
+const MAX_INCREMENTAL_PRELUDE_BYTES = 4 * 1024 * 1024;
 const SOURCE_INVENTORY_CACHE_MS = 15_000;
 const LOG_EXTENSIONS = new Set([".jsonl", ".ndjson", ".json", ".log", ".txt"]);
 const SENSITIVE_PATTERNS = [
   /\bsk-[A-Za-z0-9_-]{12,}/,
   /\bBearer\s+[A-Za-z0-9._-]{12,}/i,
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/,
-  /\b(api[_-]?key|token|password|secret)\b\s*[:=]\s*["']?[^"',\s]{8,}/i
+  /\b(api[_-]?key|token|password|secret)\b\s*[:=：]\s*["']?[^"',\s]{8,}/i,
+  /(?:密码|口令|密钥|令牌|访问令牌)\s*[:=：]\s*[^\s,，。]{4,}/i
+];
+const SYNTHETIC_MESSAGE_BLOCKS = [
+  "environment_context",
+  "in-app-browser-context",
+  "app-context",
+  "permissions instructions",
+  "collaboration_mode",
+  "plugins_instructions",
+  "skills_instructions"
+];
+const MAX_MESSAGE_SUMMARY_CHARACTERS = 800;
+const SYNTHETIC_USER_MESSAGE_PREFIXES = [
+  "The following is the Codex agent history added since your last approval assessment.",
+  "The following is the Codex agent history whose request action you are assessing.",
+  "Assess the exact planned action below. Use read-only tool checks when local state matters."
 ];
 
 function nowIso() {
@@ -145,6 +181,15 @@ function extensionOf(path: string) {
   const name = basename(path).toLowerCase();
   const dot = name.lastIndexOf(".");
   return dot >= 0 ? name.slice(dot) : "";
+}
+
+function supportsTailWindowScan(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  return (
+    normalized.includes("/.codex/sessions/") ||
+    normalized.includes("/.codex/archived_sessions/") ||
+    normalized.includes("/.claude/projects/")
+  );
 }
 
 function normalizeProjectPath(path: string) {
@@ -208,6 +253,55 @@ function collectPrimitiveText(value: unknown, depth = 0): string[] {
     ]);
   }
   return [];
+}
+
+function collectSkillEvidenceText(record: JsonRecord) {
+  const payload = isRecord(record.payload) ? record.payload : {};
+  const topLevelType = (readString(record, ["type"]) ?? "").toLowerCase();
+  const payloadType = (readString(payload, ["type"]) ?? "").toLowerCase();
+  const payloadRole = (readString(payload, ["role"]) ?? "").toLowerCase();
+  const evidence: string[] = [];
+  const addEvidence = (...values: unknown[]) => {
+    for (const value of values) {
+      evidence.push(...collectMessageText(value));
+    }
+  };
+
+  addEvidence(
+    readString(record, ["skill_name", "skillName"]),
+    readString(payload, ["skill_name", "skillName"])
+  );
+
+  if (["session_meta", "world_state", "compacted", "turn_context"].includes(topLevelType)) {
+    return stripSyntheticMessageBlocks(evidence.join("\n"));
+  }
+  if (
+    [
+      "custom_tool_call_output",
+      "function_call_output",
+      "tool_call_output",
+      "tool_result",
+      "token_count",
+      "thread_settings_applied"
+    ].includes(payloadType)
+  ) {
+    return stripSyntheticMessageBlocks(evidence.join("\n"));
+  }
+
+  if (payloadType === "user_message" || payloadType === "agent_message") {
+    addEvidence(payload.message, payload.content, payload.text);
+  } else if (payloadType === "message" && ["user", "assistant"].includes(payloadRole)) {
+    addEvidence(payload.content, payload.message, payload.text);
+  } else if (["custom_tool_call", "function_call", "tool_call"].includes(payloadType)) {
+    addEvidence(payload.name, payload.input, payload.arguments);
+  } else if (payloadType === "mcp_tool_call_begin" || payloadType === "mcp_tool_call_end") {
+    const invocation = isRecord(payload.invocation) ? payload.invocation : {};
+    addEvidence(invocation.server, invocation.tool, invocation.arguments);
+  } else if (typeof record.line === "string") {
+    addEvidence(record.line);
+  }
+
+  return stripSyntheticMessageBlocks(evidence.join("\n"));
 }
 
 function findDeepRecord(record: JsonRecord, keys: string[], depth = 0): unknown {
@@ -360,64 +454,24 @@ function detectWorkflowSignals(record: JsonRecord, rawLine: string) {
   return signals;
 }
 
-function projectSkillNameByCanonical(
-  skills: ActiveSkill[],
-  canonicalName: string,
-  projectRoot: string | null | undefined
-) {
-  const normalizedCanonicalName = canonicalName.toLowerCase();
-  const candidates = skills.filter((skill) => {
-    const matchesName =
-      skill.canonicalName.toLowerCase() === normalizedCanonicalName ||
-      skill.displayName.toLowerCase() === normalizedCanonicalName ||
-      skill.aliases.some((alias) => alias.toLowerCase() === normalizedCanonicalName);
-    if (!matchesName) {
-      return false;
-    }
-    return projectRoot ? isSameOrDescendantPath(skill.sourcePath, projectRoot) : true;
-  });
-  return candidates[0]?.displayName ?? null;
-}
-
-function inferProjectWorkflowSkillNames(
-  draft: RunDraft,
-  skills: ActiveSkill[],
-  options: ScanOptions = {}
-) {
-  const names = new Set<string>();
-  if (!options.projectRoot || !draft.projectMatched || draft.toolNames.size === 0 || draft.skillNames.size > 0) {
-    return names;
-  }
-
-  const signals = draft.workflowSignals;
-  const preferredCanonicals = [
-    "project-dev-core",
-    signals.has("code_generation") ? "project-code-generation" : null,
-    signals.has("test_and_report") ? "project-test-and-report" : null,
-    signals.has("verification_loop") ? "project-verification-loop" : null,
-    signals.has("codebase_onboarding") ? "project-codebase-onboarding" : null,
-    signals.has("frontend_css") ? "project-frontend-css" : null,
-    signals.has("frontend_react") ? "project-frontend-react" : null,
-    signals.has("frontend_vue") ? "project-frontend-vue" : null,
-    signals.has("frontend_js") ? "project-frontend-js" : null,
-    signals.has("security_review") ? "project-security-review" : null,
-    signals.has("code_review") ? "project-code-review" : null
-  ].filter((value): value is string => Boolean(value));
-
-  for (const canonicalName of preferredCanonicals) {
-    const displayName = projectSkillNameByCanonical(skills, canonicalName, options.projectRoot);
-    if (displayName) {
-      names.add(displayName);
-    }
-    if (names.size >= 3) {
-      break;
-    }
-  }
-
-  return names;
-}
-
 function detectTokenFields(record: JsonRecord) {
+  const payload = isRecord(record.payload) ? record.payload : {};
+  const info = isRecord(payload.info) ? payload.info : {};
+  const lastTokenUsage = isRecord(info.last_token_usage) ? info.last_token_usage : null;
+  if (readString(payload, ["type"]) === "token_count" && lastTokenUsage) {
+    const promptTokens = readDeepNumber(lastTokenUsage, ["input_tokens", "inputTokens"]);
+    const completionTokens = readDeepNumber(lastTokenUsage, ["output_tokens", "outputTokens"]);
+    const totalTokens = readDeepNumber(lastTokenUsage, ["total_tokens", "totalTokens"]);
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens:
+        totalTokens ??
+        (promptTokens != null || completionTokens != null
+          ? (promptTokens ?? 0) + (completionTokens ?? 0)
+          : null)
+    };
+  }
   const promptTokens = readDeepNumber(record, [
     "prompt_tokens",
     "promptTokens",
@@ -442,6 +496,91 @@ function detectTokenFields(record: JsonRecord) {
   };
 }
 
+function findProjectSkill(
+  skills: ActiveSkill[],
+  projectRoot: string,
+  canonicalName: string
+) {
+  const normalizedName = canonicalName.toLowerCase();
+  return skills.find(
+    (skill) =>
+      isSameOrDescendantPath(skill.sourcePath, projectRoot) &&
+      (skill.canonicalName.toLowerCase() === normalizedName ||
+        skill.displayName.toLowerCase() === normalizedName ||
+        basename(skill.sourcePath).toLowerCase() === normalizedName)
+  );
+}
+
+function inferProjectWorkflowSkillNames(
+  draft: RunDraft,
+  skills: ActiveSkill[],
+  projectRoot?: string
+) {
+  const names = new Set<string>();
+  if (
+    !projectRoot ||
+    !draft.projectMatched ||
+    (draft.toolNames.size === 0 && draft.workflowSignals.size === 0)
+  ) {
+    return names;
+  }
+
+  const add = (canonicalName: string) => {
+    const skill = findProjectSkill(skills, projectRoot, canonicalName);
+    if (skill) {
+      names.add(skill.displayName);
+    }
+  };
+  const has = (signal: string) => draft.workflowSignals.has(signal);
+  const hasAny = (...signals: string[]) => signals.some((signal) => has(signal));
+
+  add("project-workflow-router");
+  if (draft.messageHash || draft.messageSummary) {
+    add("project-requirement-gate");
+  }
+  if (draft.toolNames.size > 0 || draft.workflowSignals.size > 0) {
+    add("project-dev-core");
+  }
+  if (has("codebase_onboarding")) {
+    add("project-codebase-onboarding");
+  }
+  if (has("code_generation")) {
+    add("project-code-generation");
+    add("project-scope-impact-guard");
+  }
+  if (has("test_and_report")) {
+    add("project-test-and-report");
+  }
+  if (has("verification_loop")) {
+    add("project-verification-loop");
+  }
+  if (has("code_review")) {
+    add("project-code-review");
+    add("project-scope-impact-guard");
+  }
+  if (has("security_review")) {
+    add("project-security-review");
+    add("project-scope-impact-guard");
+  }
+  if (hasAny("frontend_css", "frontend_js", "frontend_react", "frontend_vue")) {
+    add("project-frontend-standards");
+  }
+  if (has("frontend_css")) {
+    add("project-frontend-css");
+  }
+  if (has("frontend_js")) {
+    add("project-frontend-js");
+  }
+  if (has("frontend_react")) {
+    add("project-frontend-react");
+  }
+  if (has("frontend_vue")) {
+    add("project-frontend-vue");
+  }
+
+  return names;
+}
+
 function isUserMessageRecord(record: JsonRecord) {
   const topLevelType = readString(record, ["type", "role"]);
   const payload = isRecord(record.payload) ? record.payload : null;
@@ -455,10 +594,110 @@ function isUserMessageRecord(record: JsonRecord) {
     || topLevelType === "user";
 }
 
+function collectMessageText(value: unknown, depth = 0): string[] {
+  if (depth > 5 || value == null) {
+    return [];
+  }
+  if (typeof value === "string") {
+    return value.trim() ? [value.trim()] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectMessageText(entry, depth + 1));
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  const directText = [value.text, value.input_text, value.output_text]
+    .filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()));
+  if (directText.length > 0) {
+    return directText.map((entry) => entry.trim());
+  }
+  return [value.content, value.message]
+    .flatMap((entry) => collectMessageText(entry, depth + 1));
+}
+
+export function sanitizeUserMessageSummaryForStorage(record: JsonRecord, sequence: number) {
+  const payload = isRecord(record.payload) ? record.payload : {};
+  const candidates = [
+    payload.content,
+    payload.message,
+    record.content,
+    record.message,
+    record.text
+  ];
+  let summary = candidates
+    .flatMap((candidate) => collectMessageText(candidate))
+    .join("\n")
+    .trim();
+  summary = stripSyntheticMessageBlocks(summary);
+  summary = summary.replace(/\s+/g, " ").trim();
+  if (!summary) {
+    return `第 ${sequence} 条用户消息（未提取到可显示文本）`;
+  }
+  if (SENSITIVE_PATTERNS.some((pattern) => pattern.test(summary))) {
+    return `第 ${sequence} 条用户消息（检测到疑似凭据，摘要已隐藏）`;
+  }
+  const characters = Array.from(summary);
+  return characters.length > MAX_MESSAGE_SUMMARY_CHARACTERS
+    ? `${characters.slice(0, MAX_MESSAGE_SUMMARY_CHARACTERS).join("")}...`
+    : summary;
+}
+
+export function stripSyntheticMessageBlocks(value: string) {
+  const trimmed = value.trim();
+  if (
+    SYNTHETIC_USER_MESSAGE_PREFIXES.some((prefix) => trimmed.startsWith(prefix)) ||
+    (trimmed.includes(">>> TRANSCRIPT DELTA START") && trimmed.includes(">>> TRANSCRIPT DELTA END"))
+  ) {
+    return "";
+  }
+  let sanitized = value;
+  for (const blockName of SYNTHETIC_MESSAGE_BLOCKS) {
+    const escapedName = safeRegex(blockName);
+    sanitized = sanitized.replace(
+      new RegExp(`<${escapedName}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${escapedName}>`, "gi"),
+      " "
+    );
+  }
+  return sanitized;
+}
+
+export function isSyntheticUserMessageRecord(record: JsonRecord) {
+  if (!isUserMessageRecord(record)) {
+    return false;
+  }
+  const payload = isRecord(record.payload) ? record.payload : {};
+  const rawMessage = [
+    payload.content,
+    payload.message,
+    record.content,
+    record.message,
+    record.text
+  ]
+    .flatMap((candidate) => collectMessageText(candidate))
+    .join("\n")
+    .trim();
+  if (!rawMessage) {
+    return true;
+  }
+  return stripSyntheticMessageBlocks(rawMessage).replace(/\s+/g, " ").trim().length === 0;
+}
+
+export function isSyntheticSubagentSessionRecord(record: JsonRecord) {
+  if (readString(record, ["type"]) !== "session_meta") {
+    return false;
+  }
+  const payload = isRecord(record.payload) ? record.payload : {};
+  const source = isRecord(payload.source) ? payload.source : {};
+  return readString(payload, ["thread_source"]) === "subagent" || isRecord(source.subagent);
+}
+
 function updateRunDraft(
   draft: RunDraft,
   record: JsonRecord,
   rawLine: string,
+  skillEvidenceText: string,
   file: SourceFile,
   skills: ActiveSkill[],
   options: ScanOptions = {}
@@ -520,7 +759,7 @@ function updateRunDraft(
   for (const toolName of detectToolNames(record, rawLine)) {
     draft.toolNames.add(toolName);
   }
-  for (const skillName of detectSkillNames(rawLine, skills)) {
+  for (const skillName of detectSkillNames(skillEvidenceText, skills)) {
     draft.skillNames.add(skillName);
   }
   for (const signal of detectWorkflowSignals(record, rawLine)) {
@@ -757,7 +996,10 @@ export class LocalToolTelemetryService {
   ): Promise<ProjectRuntimeEvidenceRefreshResult> {
     await this.stagingCleanupPromise;
     const normalizedProjectRoot = normalizeProjectPath(projectRoot);
-    const refreshMode = options.mode ?? "full";
+    // Interactive refreshes must stay bounded. A full historical rebuild is a
+    // separate maintenance operation because it can monopolize Electron's main
+    // process when a user has years of local session logs.
+    const refreshMode = options.mode ?? "incremental";
     const policy = this.authorizationService.getActivePolicy();
     if (!policy) {
       return {
@@ -837,9 +1079,9 @@ export class LocalToolTelemetryService {
         sourcePreviews: []
       };
     }
-    const sourceFingerprint = sources
+    const sourceFingerprint = [`message-summary:${policy.allowMessageSummary ? "on" : "off"}`, ...sources
       .map((source) => `${source.id}:${source.fileCount}:${source.byteCount}:${source.lastModifiedAt ?? ""}`)
-      .join("|");
+    ].join("|");
     const cached = this.projectRefreshCache.get(normalizedProjectRoot);
     if (
       cached?.fingerprint === sourceFingerprint &&
@@ -862,11 +1104,13 @@ export class LocalToolTelemetryService {
     const warnings = new Set<string>();
     const errors = new Set<string>();
     const affectedSkillIds = new Set<string>();
+    const connectionBaseline = this.checkProjectConnection(normalizedProjectRoot);
     let importedRuns = 0;
     let updatedRuns = 0;
     let importableRuns = 0;
-    let matchedWorkspaceRef: string | null = null;
-    let latestObservedWorkspaceRef: string | null = null;
+    let matchedWorkspaceRef: string | null = connectionBaseline.matchedWorkspaceRef ?? null;
+    let latestObservedWorkspaceRef: string | null =
+      connectionBaseline.latestObservedWorkspaceRef ?? null;
 
     for (const source of sources) {
       const scan = await this.scanSource(source, {
@@ -916,6 +1160,13 @@ export class LocalToolTelemetryService {
 
     matchedWorkspaceRef ??= cached?.result.matchedWorkspaceRef ?? null;
     latestObservedWorkspaceRef ??= cached?.result.latestObservedWorkspaceRef ?? null;
+    if (matchedWorkspaceRef) {
+      for (const warning of warnings) {
+        if (warning.startsWith("No local session cwd matched")) {
+          warnings.delete(warning);
+        }
+      }
+    }
 
     const result: ProjectRuntimeEvidenceRefreshResult = {
       projectRoot: normalizedProjectRoot,
@@ -1017,8 +1268,9 @@ export class LocalToolTelemetryService {
     const resolved = resolve(path);
     const rootStat = await stat(resolved);
     if (pathType === "file" || rootStat.isFile()) {
-      return LOG_EXTENSIONS.has(extensionOf(resolved))
-        ? [{ path: resolved, size: rootStat.size, modifiedAt: rootStat.mtime.toISOString() }]
+      const oversized = rootStat.size > MAX_BYTES_PER_TEXT_FILE;
+      return LOG_EXTENSIONS.has(extensionOf(resolved)) && (!oversized || supportsTailWindowScan(resolved))
+        ? [{ path: resolved, size: rootStat.size, modifiedAt: rootStat.mtime.toISOString(), oversized }]
         : [];
     }
 
@@ -1043,13 +1295,15 @@ export class LocalToolTelemetryService {
           continue;
         }
         const fileStat = await stat(nextPath);
-        if (fileStat.size > MAX_BYTES_PER_TEXT_FILE) {
+        const oversized = fileStat.size > MAX_BYTES_PER_TEXT_FILE;
+        if (oversized && !supportsTailWindowScan(nextPath)) {
           continue;
         }
         files.push({
           path: nextPath,
           size: fileStat.size,
-          modifiedAt: fileStat.mtime.toISOString()
+          modifiedAt: fileStat.mtime.toISOString(),
+          oversized
         });
       }
     }
@@ -1101,12 +1355,13 @@ export class LocalToolTelemetryService {
       return this.emptyScan(["No indexed Skills are available. Scan approved roots before importing tool telemetry."]);
     }
 
+    const allowMessageSummary = this.authorizationService.getActivePolicy()?.allowMessageSummary === true;
     const sourcePath = resolve(source.path);
     const candidateFiles =
       this.sourceFilesByPath.get(sourcePath) ??
       await this.listCandidateFiles(source.path, source.pathType === "file" ? "file" : "directory");
     const incrementalKey = options.projectRoot
-      ? `${normalizeProjectPath(options.projectRoot)}::${options.mode ?? "full"}::${source.id}::${sourcePath}`
+      ? `${normalizeProjectPath(options.projectRoot)}::${options.mode ?? "full"}::summary-${allowMessageSummary ? "on" : "off"}::${source.id}::${sourcePath}`
       : null;
     const previousFingerprints = incrementalKey
       ? this.projectSourceFingerprints.get(incrementalKey)
@@ -1125,7 +1380,7 @@ export class LocalToolTelemetryService {
             }
             return new Date(file.modifiedAt).getTime() >= incrementalSince - 2_000;
           })
-          .slice(0, MAX_INCREMENTAL_FILES)
+          .slice(0, MAX_INCREMENTAL_FILE_CANDIDATES)
       : changedFiles;
     const warnings = [...source.warnings];
     const runs = new Map<string, RunDraft>();
@@ -1140,19 +1395,64 @@ export class LocalToolTelemetryService {
     let detectedEvents = 0;
     let sensitiveFieldCount = 0;
     let tokenFieldsDetected = false;
+    let acceptedFiles = 0;
+    let ignoredSyntheticSessionFiles = 0;
 
     for (const file of files) {
-      readableFiles += 1;
-      let fileWorkspaceRef: string | null = null;
-      let fileSessionRef: string | null = null;
-      let fileTurnRef = `file-${hashId(file.path)}`;
-      let fileTurnMessageHash: string | null = null;
-      let fileTurnMessageSummary: string | null = null;
-      let fileTurnSequence = 0;
-      const incrementalStart = options.mode === "incremental"
+      const acceptedFileLimit = options.projectRoot
+        ? options.mode === "incremental"
+          ? MAX_INCREMENTAL_FILES
+          : MAX_PROJECT_REFRESH_FILES
+        : Number.POSITIVE_INFINITY;
+      if (acceptedFiles >= acceptedFileLimit) {
+        break;
+      }
+      const header = await this.readSourceFileHeader(file.path);
+      if (header.isSyntheticSubagent) {
+        ignoredSyntheticSessionFiles += 1;
+        continue;
+      }
+      if (
+        options.projectRoot &&
+        header.workspaceRef &&
+        !isSameOrDescendantPath(header.workspaceRef, options.projectRoot)
+      ) {
+        observedWorkspaceRefs.add(header.workspaceRef);
+        latestObservedWorkspaceRef ??= header.workspaceRef;
+        continue;
+      }
+      const boundedWindowScan = Boolean(options.projectRoot) || options.mode === "incremental" || file.oversized === true;
+      if (file.oversized) {
+        warnings.push(
+          `Large session file ${file.path} was scanned with a bounded recent-window reader to avoid blocking the app.`
+        );
+      }
+      const incrementalStart = boundedWindowScan
         ? Math.max(0, file.size - MAX_INCREMENTAL_BYTES_PER_FILE)
         : 0;
-      const maxLines = options.mode === "incremental"
+      const prelude = boundedWindowScan
+        ? await this.readIncrementalTurnPrelude(file.path, incrementalStart, allowMessageSummary)
+        : null;
+      let fileWorkspaceRef: string | null = prelude?.workspaceRef ?? header.workspaceRef;
+      let fileSessionRef: string | null = prelude?.sessionRef ?? header.sessionRef;
+      let fileTurnRef = prelude?.turnRef ?? `file-${hashId(file.path)}`;
+      let fileTurnMessageHash: string | null = prelude?.messageHash ?? null;
+      let fileTurnMessageSummary: string | null = prelude?.messageSummary ?? null;
+      let fileTurnSequence = prelude?.messageSequence ?? 0;
+      let fileHasExplicitTurnBoundary = prelude?.hasExplicitTurnBoundary ?? false;
+      let fileAccepted = false;
+      if (fileWorkspaceRef) {
+        observedWorkspaceRefs.add(fileWorkspaceRef);
+        latestObservedWorkspaceRef ??= fileWorkspaceRef;
+        if (
+          options.projectRoot &&
+          !matchedWorkspaceRef &&
+          isSameOrDescendantPath(fileWorkspaceRef, options.projectRoot)
+        ) {
+          matchedWorkspaceRef = fileWorkspaceRef;
+        }
+      }
+      const maxLines = boundedWindowScan
         ? MAX_INCREMENTAL_LINES_PER_FILE
         : MAX_LINES_PER_FILE;
       const reader = createInterface({
@@ -1178,22 +1478,41 @@ export class LocalToolTelemetryService {
           if (!line) {
             continue;
           }
+          const parsed = this.parseLine(line);
+          if (parsed && isSyntheticSubagentSessionRecord(parsed)) {
+            ignoredSyntheticSessionFiles += 1;
+            break;
+          }
+          if (!fileAccepted) {
+            fileAccepted = true;
+            acceptedFiles += 1;
+            readableFiles += 1;
+          }
           if (SENSITIVE_PATTERNS.some((pattern) => pattern.test(line))) {
             sensitiveFieldCount += 1;
           }
-
-          const parsed = this.parseLine(line);
           const text = parsed ? collectPrimitiveText(parsed).join("\n") : line;
+          const evidenceText = stripSyntheticMessageBlocks(text);
           const record = parsed ?? { line: text };
           fileSessionRef = this.readSessionRef(record) ?? fileSessionRef;
-          if (isUserMessageRecord(record)) {
+          const explicitTurnRef = this.readExplicitTurnRef(record);
+          if (explicitTurnRef) {
+            fileTurnRef = explicitTurnRef;
+            fileHasExplicitTurnBoundary = true;
+          }
+          const syntheticUserMessage = isSyntheticUserMessageRecord(record);
+          if (isUserMessageRecord(record) && !syntheticUserMessage) {
             fileTurnSequence += 1;
             fileTurnRef =
-              this.readExplicitTurnRef(record) ??
-              this.readMessageRef(record) ??
-              `message-${fileTurnSequence}-${hashId(`${file.path}:${lineCount}`)}`;
+              explicitTurnRef ??
+              (fileHasExplicitTurnBoundary
+                ? fileTurnRef
+                : this.readMessageRef(record) ??
+                  `message-${fileTurnSequence}-${hashId(`${file.path}:${lineCount}`)}`);
             fileTurnMessageHash = createHash("sha256").update(text).digest("hex");
-            fileTurnMessageSummary = `第 ${fileTurnSequence} 条用户消息（原文未保存）`;
+            fileTurnMessageSummary = allowMessageSummary
+              ? sanitizeUserMessageSummaryForStorage(record, fileTurnSequence)
+              : `第 ${fileTurnSequence} 条用户消息（摘要保存未开启）`;
           }
           const workspaceRef = readDeepString(record, [
             "cwd",
@@ -1214,6 +1533,9 @@ export class LocalToolTelemetryService {
               matchedWorkspaceRef = fileWorkspaceRef;
             }
           }
+          if (syntheticUserMessage) {
+            continue;
+          }
           const effectiveWorkspaceRef = workspaceRef ?? fileWorkspaceRef;
           const tokenFields = detectTokenFields(record);
           const lineHasTokenFields =
@@ -1224,8 +1546,9 @@ export class LocalToolTelemetryService {
             tokenFieldsDetected ||
             lineHasTokenFields;
 
-          const skillNames = detectSkillNames(text, skills);
-          const toolNames = detectToolNames(record, text);
+          const skillEvidenceText = collectSkillEvidenceText(record);
+          const skillNames = detectSkillNames(skillEvidenceText, skills);
+          const toolNames = detectToolNames(record, evidenceText);
           const modelName = readDeepString(record, ["model", "model_name", "modelName"]);
           for (const skillName of skillNames) {
             detectedSkillNames.add(skillName);
@@ -1271,7 +1594,7 @@ export class LocalToolTelemetryService {
                   isSameOrDescendantPath(effectiveWorkspaceRef, options.projectRoot)
                 )
             } satisfies RunDraft);
-          updateRunDraft(draft, record, text, file, skills, options);
+          updateRunDraft(draft, record, evidenceText, skillEvidenceText, file, skills, options);
           runs.set(runKey, draft);
         }
       } finally {
@@ -1283,7 +1606,12 @@ export class LocalToolTelemetryService {
     const events = build.events;
     if (build.inferredRuns > 0) {
       warnings.push(
-        `${build.inferredRuns} project run(s) were attributed from project path and tool-call evidence because no explicit Skill invocation name was present in the local session log.`
+        `${build.inferredRuns} project turn(s) were observed from project path and tool evidence without attributing any Skill invocation.`
+      );
+    }
+    if (ignoredSyntheticSessionFiles > 0) {
+      warnings.push(
+        `Ignored ${ignoredSyntheticSessionFiles} internal subagent session file(s); project traces only use direct user-session evidence.`
       );
     }
     if (
@@ -1366,12 +1694,136 @@ export class LocalToolTelemetryService {
     };
   }
 
+  private async readIncrementalTurnPrelude(
+    filePath: string,
+    incrementalStart: number,
+    allowMessageSummary: boolean
+  ): Promise<IncrementalTurnPrelude> {
+    const result: IncrementalTurnPrelude = {
+      workspaceRef: null,
+      sessionRef: null,
+      turnRef: null,
+      messageHash: null,
+      messageSummary: null,
+      messageSequence: 0,
+      hasExplicitTurnBoundary: false
+    };
+    if (incrementalStart <= 0) {
+      return result;
+    }
+
+    const contextStart = Math.max(0, incrementalStart - MAX_INCREMENTAL_PRELUDE_BYTES);
+    const input = createReadStream(filePath, {
+      encoding: "utf8",
+      start: contextStart,
+      end: incrementalStart - 1
+    });
+    const reader = createInterface({ input, crlfDelay: Infinity });
+    let lineCount = 0;
+    try {
+      for await (const rawLine of reader) {
+        lineCount += 1;
+        if (contextStart > 0 && lineCount === 1) {
+          continue;
+        }
+        const line = rawLine.trim();
+        if (!line) {
+          continue;
+        }
+        const record = this.parseLine(line);
+        if (!record) {
+          continue;
+        }
+        result.sessionRef = this.readSessionRef(record) ?? result.sessionRef;
+        const workspaceRef = readDeepString(record, [
+          "cwd",
+          "workdir",
+          "workspace",
+          "workspace_ref",
+          "workspaceRef"
+        ]);
+        if (workspaceRef) {
+          result.workspaceRef = normalizeProjectPath(workspaceRef);
+        }
+        const explicitTurnRef = this.readExplicitTurnRef(record);
+        if (explicitTurnRef) {
+          result.turnRef = explicitTurnRef;
+          result.hasExplicitTurnBoundary = true;
+        }
+        if (!isUserMessageRecord(record) || isSyntheticUserMessageRecord(record)) {
+          continue;
+        }
+        result.messageSequence += 1;
+        result.turnRef =
+          explicitTurnRef ??
+          (result.hasExplicitTurnBoundary
+            ? result.turnRef
+            : this.readMessageRef(record) ??
+              `message-${result.messageSequence}-${hashId(`${filePath}:${lineCount}`)}`);
+        const text = collectPrimitiveText(record).join("\n");
+        result.messageHash = createHash("sha256").update(text).digest("hex");
+        result.messageSummary = allowMessageSummary
+          ? sanitizeUserMessageSummaryForStorage(record, result.messageSequence)
+          : `第 ${result.messageSequence} 条用户消息（摘要保存未开启）`;
+      }
+      return result;
+    } finally {
+      reader.close();
+      input.close();
+    }
+  }
+
   private parseLine(line: string): JsonRecord | null {
     try {
       const parsed = JSON.parse(line) as unknown;
       return isRecord(parsed) ? parsed : null;
     } catch {
       return null;
+    }
+  }
+
+  private async readSourceFileHeader(filePath: string): Promise<SourceFileHeader> {
+    const input = createReadStream(filePath, {
+      encoding: "utf8",
+      start: 0,
+      end: 1024 * 1024 - 1
+    });
+    const reader = createInterface({ input, crlfDelay: Infinity });
+    try {
+      for await (const rawLine of reader) {
+        const line = rawLine.trim();
+        if (!line) {
+          continue;
+        }
+        const parsed = this.parseLine(line);
+        if (!parsed) {
+          return {
+            workspaceRef: null,
+            sessionRef: null,
+            isSyntheticSubagent: line.includes('"thread_source":"subagent"') || line.includes('"source":{"subagent"')
+          };
+        }
+        const workspaceRef = readDeepString(parsed, [
+          "cwd",
+          "workdir",
+          "workspace",
+          "workspace_ref",
+          "workspaceRef"
+        ]);
+        return {
+          workspaceRef: workspaceRef ? normalizeProjectPath(workspaceRef) : null,
+          sessionRef: this.readSessionRef(parsed),
+          isSyntheticSubagent: isSyntheticSubagentSessionRecord(parsed)
+        };
+      }
+      return {
+        workspaceRef: null,
+        sessionRef: null,
+        isSyntheticSubagent: false
+      };
+    } finally {
+      reader.close();
+      input.close();
     }
   }
 
@@ -1420,18 +1872,47 @@ export class LocalToolTelemetryService {
       if (options.projectRoot && !draft.projectMatched) {
         continue;
       }
-      const inferredNames = inferProjectWorkflowSkillNames(draft, skills, options);
-      if (inferredNames.size > 0) {
-        inferredRuns += 1;
-        for (const skillName of inferredNames) {
-          inferredSkillNames.add(skillName);
-        }
+      const inferredWorkflowSkillNames =
+        draft.skillNames.size === 0
+          ? inferProjectWorkflowSkillNames(draft, skills, options.projectRoot)
+          : new Set<string>();
+      const skillNames = Array.from(
+        draft.skillNames.size > 0 ? draft.skillNames : inferredWorkflowSkillNames
+      );
+      const inferredAttribution = draft.skillNames.size === 0 && skillNames.length > 0;
+      for (const skillName of inferredWorkflowSkillNames) {
+        inferredSkillNames.add(skillName);
       }
-      const resolvedSkillNames = draft.skillNames.size > 0 ? draft.skillNames : inferredNames;
-      if (resolvedSkillNames.size === 0) {
+      if (skillNames.length === 0) {
+        inferredRuns += 1;
+        const observedAt = draft.finishedAt ?? draft.startedAt ?? nowIso();
+        events.push({
+          event_id: `event-${hashId(`${draft.runId}:turn-observed`)}`,
+          event_type: "turn.observed",
+          event_order: 1,
+          occurred_at: observedAt,
+          run_id: draft.runId,
+          turn_ref: draft.turnRef,
+          source_type: sourceType,
+          capture_mode: "estimated",
+          confidence_score: Math.min(this.confidenceScoreForDraft(draft), 0.55),
+          model_name: draft.modelName,
+          prompt_tokens: draft.promptTokens ?? undefined,
+          completion_tokens: draft.completionTokens ?? undefined,
+          total_tokens: draft.totalTokens ?? undefined,
+          tool_call_count: draft.toolNames.size,
+          tool_names: Array.from(draft.toolNames).sort((left, right) => left.localeCompare(right)),
+          workflow_signals: Array.from(draft.workflowSignals).sort((left, right) => left.localeCompare(right)),
+          message_hash: draft.messageHash,
+          user_message_summary: draft.messageSummary,
+          workspace_ref: draft.workspaceRef,
+          session_ref: draft.sessionRef,
+          source_ref: draft.sourceRef,
+          evidence_boundary: "project_path_and_tool_observation",
+          skill_attribution: "none"
+        });
         continue;
       }
-      const skillNames = Array.from(resolvedSkillNames);
       const splitCount = Math.max(skillNames.length, 1);
       const startedAt = draft.startedAt ?? draft.finishedAt ?? nowIso();
       const finishedAt = draft.finishedAt ?? startedAt;
@@ -1439,16 +1920,30 @@ export class LocalToolTelemetryService {
         draft.durationMs ??
         Math.max(new Date(finishedAt).getTime() - new Date(startedAt).getTime(), 0);
       const toolCallCount = Math.max(draft.toolNames.size, 0);
+      const confidenceScore = inferredAttribution
+        ? this.confidenceScoreForDraft(draft, true)
+        : this.confidenceScoreForDraft(draft);
 
       for (const skillName of skillNames) {
+        const resolvedSkill =
+          (options.projectRoot
+            ? skills.find(
+                (skill) =>
+                  skill.displayName === skillName &&
+                  isSameOrDescendantPath(skill.sourcePath, options.projectRoot!)
+              )
+            : undefined) ??
+          skills.find((skill) => skill.displayName === skillName);
         const runId = `${draft.runId}-${hashId(skillName)}`;
         const base = {
           run_id: runId,
           turn_ref: draft.turnRef,
+          skill_id: resolvedSkill?.id,
           skill_name: skillName,
+          skill_path: resolvedSkill?.sourcePath,
           source_type: sourceType,
-          capture_mode: "estimated",
-          confidence_score: this.confidenceScoreForDraft(draft, inferredNames.has(skillName)),
+          capture_mode: inferredAttribution ? "inferred" : "estimated",
+          confidence_score: confidenceScore,
           model_name: draft.modelName,
           prompt_tokens:
             draft.promptTokens != null ? Math.max(Math.round(draft.promptTokens / splitCount), 0) : undefined,
@@ -1464,13 +1959,16 @@ export class LocalToolTelemetryService {
           skill_hit_state: "inferred",
           hit_index: Math.min(
             89,
-            Math.round(this.confidenceScoreForDraft(draft, inferredNames.has(skillName)) * 100)
+            Math.round(confidenceScore * 100)
           ),
           message_hash: draft.messageHash,
           user_message_summary: draft.messageSummary,
           workspace_ref: draft.workspaceRef,
           session_ref: draft.sessionRef,
-          source_ref: draft.sourceRef
+          source_ref: draft.sourceRef,
+          evidence_boundary: inferredAttribution
+            ? "project_path_user_turn_tool_and_workflow_signal"
+            : "project_skill_name_reference"
         };
         events.push({
           ...base,

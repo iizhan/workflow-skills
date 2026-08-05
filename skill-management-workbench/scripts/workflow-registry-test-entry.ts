@@ -22,8 +22,43 @@ export async function runWorkflowRegistryIntegration(options: IntegrationOptions
 
   try {
     const templates = registry.listTemplates();
-    assert.equal(templates.length, 6);
+    assert.ok(templates.length > 0, "The local Workflow registry must contain at least one template.");
     assert.ok(templates.every((template) => template.validation.valid));
+
+    const duplicate = database.db
+      .prepare(`SELECT * FROM workflow_template_registry LIMIT 1`)
+      .get() as Record<string, unknown>;
+    database.db.prepare(`
+      INSERT INTO workflow_template_registry (
+        template_key, template_id, template_version, name, kind, status, schema_version,
+        source_path, manifest_fingerprint, dependencies_json, skill_refs_json, validation_json,
+        manifest_json, indexed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "stale-duplicate",
+      duplicate.template_id,
+      duplicate.template_version,
+      duplicate.name,
+      duplicate.kind,
+      duplicate.status,
+      duplicate.schema_version,
+      "/stale/development/workflow.yaml",
+      duplicate.manifest_fingerprint,
+      duplicate.dependencies_json,
+      duplicate.skill_refs_json,
+      duplicate.validation_json,
+      duplicate.manifest_json,
+      "2026-01-01T00:00:00.000Z"
+    );
+    assert.equal(registry.listTemplates().length, templates.length);
+    assert.equal(
+      (
+        database.db
+          .prepare(`SELECT COUNT(*) AS count FROM workflow_template_registry WHERE template_key = ?`)
+          .get("stale-duplicate") as { count: number }
+      ).count,
+      0
+    );
 
     const emptyProject = join(options.sandboxRoot, "empty-project");
     mkdirSync(emptyProject, { recursive: true });
@@ -46,7 +81,12 @@ export async function runWorkflowRegistryIntegration(options: IntegrationOptions
     assert.equal(existsSync(join(projectRoot, ".skill-os/workflow-bindings.yaml")), false);
 
     const declarations = registry.listProjectBindings(projectRoot);
-    assert.equal(declarations.length, 6);
+    assert.equal(declarations.length, templates.length);
+    assert.deepEqual(
+      declarations.map((binding) => binding.templateId).sort(),
+      templates.map((template) => template.templateId).sort(),
+      "The starter must install a declaration for every registered Workflow template."
+    );
     assert.ok(declarations.every((binding) => binding.status === "legacy_read_only"));
     assert.ok(declarations.every((binding) => binding.readOnly));
 

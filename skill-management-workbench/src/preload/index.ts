@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AuthorizationInput,
+  AuthorizationPreferenceInput,
+  EvidencePurgeInput,
+  EvidencePurgePreviewInput,
   LocalToolTelemetrySource,
   ProjectAdapterReadiness,
   ProjectRuntimeEvidenceRefreshOptions,
@@ -29,6 +32,8 @@ const api: WorkbenchApi = {
   pickBundleManifest: () => ipcRenderer.invoke("workbench:pick-bundle-manifest"),
   grantAuthorization: (input: AuthorizationInput) =>
     ipcRenderer.invoke("workbench:grant-authorization", input),
+  updateAuthorizationPreferences: (input: AuthorizationPreferenceInput) =>
+    ipcRenderer.invoke("workbench:update-authorization-preferences", input),
   listAuditEvents: (limit?: number) => ipcRenderer.invoke("workbench:list-audit-events", limit),
   createBackup: () => ipcRenderer.invoke("workbench:create-backup"),
   listBackups: (limit?: number) => ipcRenderer.invoke("workbench:list-backups", limit),
@@ -36,7 +41,6 @@ const api: WorkbenchApi = {
     ipcRenderer.invoke("workbench:validate-backup-manifest", manifestPath),
   previewBackupRestoreImpact: (manifestPath: string) =>
     ipcRenderer.invoke("workbench:preview-backup-restore-impact", manifestPath),
-  scanSkills: () => ipcRenderer.invoke("workbench:scan-skills"),
   scanProjectSkills: (projectRoot: string) =>
     ipcRenderer.invoke("workbench:scan-project-skills", projectRoot),
   previewRecommendedWorkflowStarter: (projectRoot: string) =>
@@ -58,6 +62,8 @@ const api: WorkbenchApi = {
     ipcRenderer.invoke("workbench:doctor-project-workflow", projectRoot),
   listProjectScenarioLoopRuns: (projectRoot: string) =>
     ipcRenderer.invoke("workbench:list-project-scenario-loop-runs", projectRoot),
+  getProjectWorkflowEvidence: (projectRoot: string) =>
+    ipcRenderer.invoke("workbench:get-project-workflow-evidence", projectRoot),
   getScenarioLoopRun: (runId: string) => ipcRenderer.invoke("workbench:get-scenario-loop-run", runId),
   listSkills: () => ipcRenderer.invoke("workbench:list-skills"),
   generateSkillAnalysis: (skillId: string) =>
@@ -111,6 +117,10 @@ const api: WorkbenchApi = {
   listRecentRuns: (limit?: number) => ipcRenderer.invoke("workbench:list-recent-runs", limit),
   listProjectRuntimeSummaries: (projectPaths: string[]): Promise<ProjectRuntimeSummary[]> =>
     ipcRenderer.invoke("workbench:list-project-runtime-summaries", projectPaths),
+  getEvidenceStorageStats: () => ipcRenderer.invoke("workbench:get-evidence-storage-stats"),
+  previewEvidencePurge: (input: EvidencePurgePreviewInput) =>
+    ipcRenderer.invoke("workbench:preview-evidence-purge", input),
+  purgeEvidence: (input: EvidencePurgeInput) => ipcRenderer.invoke("workbench:purge-evidence", input),
   listSkillRuns: (skillId: string, limit?: number) =>
     ipcRenderer.invoke("workbench:list-skill-runs", skillId, limit),
   listSessionTraces: (query) => ipcRenderer.invoke("workbench:list-session-traces", query),

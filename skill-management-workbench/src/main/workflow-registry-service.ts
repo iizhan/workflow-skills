@@ -985,6 +985,18 @@ export class WorkflowRegistryService {
           summary.indexedAt
         );
       }
+      this.database.db.prepare(`
+        DELETE FROM workflow_template_registry
+        WHERE source_path NOT LIKE ?
+          AND EXISTS (
+            SELECT 1
+            FROM workflow_template_registry AS current_template
+            WHERE current_template.source_path LIKE ?
+              AND current_template.template_id = workflow_template_registry.template_id
+              AND current_template.template_version = workflow_template_registry.template_version
+              AND current_template.manifest_fingerprint = workflow_template_registry.manifest_fingerprint
+          )
+      `).run(`${root}%`, `${root}%`);
     });
     transaction();
   }

@@ -250,6 +250,11 @@ async function runSelfTest() {
     return;
   }
 
+  if (process.env.SKILL_OS_SELF_TEST_RUNTIME === "chrome") {
+    await runChromeDebugSelfTest();
+    return;
+  }
+
   if (process.versions.electron) {
     await runElectronSelfTestInProcess();
     return;
@@ -261,6 +266,7 @@ async function runSelfTest() {
 async function runElectronSelfTestLauncher() {
   accessSync(appIndexPath, constants.R_OK);
   accessSync(electronCliPath, constants.R_OK);
+  const launcherStartedAt = Date.now();
 
   const child = spawn(process.execPath, [electronCliPath, new URL(import.meta.url).pathname], {
     cwd: root,
@@ -308,7 +314,13 @@ async function runElectronSelfTestLauncher() {
       const childReport = JSON.parse(
         readFileSync(join(reportDir, "self-test-report.json"), "utf8")
       );
-      if (childReport.mode === "electron-click" && childReport.issues?.length > 0) {
+      const reportGeneratedAt = Date.parse(childReport.generatedAt ?? "");
+      if (
+        childReport.mode === "electron-click" &&
+        childReport.issues?.length > 0 &&
+        Number.isFinite(reportGeneratedAt) &&
+        reportGeneratedAt >= launcherStartedAt
+      ) {
         process.stderr.write(stderr || stdout);
         process.exitCode = 1;
         return;
@@ -316,7 +328,18 @@ async function runElectronSelfTestLauncher() {
     } catch {
       // No usable runtime report was produced; use the source fallback below.
     }
-    await runSourceContractFallback(stderr.trim() || stdout.trim() || `Electron exited with code ${exitCode}`);
+    try {
+      await runChromeDebugSelfTest();
+      return;
+    } catch (chromeError) {
+      const chromeReason = chromeError instanceof Error ? chromeError.stack ?? chromeError.message : String(chromeError);
+      await runSourceContractFallback(
+        [
+          stderr.trim() || stdout.trim() || `Electron exited with code ${exitCode}`,
+          `Chrome fallback failed: ${chromeReason}`
+        ].join("\n")
+      );
+    }
     return;
   }
 
@@ -468,7 +491,14 @@ function runSourceInteractionContractChecks() {
     ["AI-assisted Test Design", "Evaluation exposes the AI candidate test-design workspace"],
     ["Clear saved key", "Settings exposes encrypted API key removal"],
     ["scenario.feature-delivery", "Workflow Library indexes the generic Feature delivery workflow"],
-    ["No conversation-observed Scenario Loop evidence", "Workflow Library distinguishes imported conversation evidence"]
+    ["workflow-state files or local observations", "Workflow Library distinguishes conversation state from local observations"],
+    ["evidenceSource", "Workflow Library renders Scenario Loop provenance"],
+    ["projectRoot: normalizedProjectRoot, limit: 80", "Workflow Console requests project-scoped Trace pages"],
+    ["workflowConsoleRequestRef", "Workflow Console guards stale cross-project requests"],
+    ["workflowBinding", "Workflow Console renders current binding correlation without assuming causality"],
+    ["minimumBackgroundMonitorDelayMs", "Background project monitoring uses a delayed scheduler"],
+    ["getProjectWorkflowEvidence(projectPath)", "Project detail reads standard workflow-state evidence as well as Loop evidence"],
+    ["Workflow-state verification", "Workflow visual distinguishes verified workflow-state evidence"]
   ];
 
   for (const [needle, label] of requiredAppContracts) {
@@ -1281,7 +1311,7 @@ async function runChecks(tab) {
     await expect(
       tab,
       "Empty Loop evidence is described as conversation-observed",
-      `document.querySelector("#workflows .workflow-loop-section")?.textContent.includes("由会话产生") || document.querySelector("#workflows .workflow-loop-section")?.textContent.includes("conversation-observed")`
+      `document.querySelector("#workflows .workflow-loop-section")?.textContent.includes("会话状态") || document.querySelector("#workflows .workflow-loop-section")?.textContent.includes("workflow-state") || document.querySelector("#workflows .workflow-loop-section")?.textContent.includes("local observations")`
     );
     await takeScreenshot(tab, "scenario-loop-conversation-evidence");
   });
@@ -1424,6 +1454,22 @@ async function runChecks(tab) {
     await takeScreenshot(tab, "session-trace-legacy-aggregate");
     await clickSelector(tab, '#session-trace .trace-turn-row:first-child', "select trace message");
     await waitFor(tab, "Session Trace timeline renders spans", `document.querySelectorAll("#session-trace .trace-span-row").length >= 5`);
+    await evaluate(tab, `(() => {
+      const api = window.workbench;
+      window.__skillOsOriginalGetSessionTrace = api.getSessionTrace;
+      api.getSessionTrace = async (traceId) => {
+        const detail = await window.__skillOsOriginalGetSessionTrace(traceId);
+        return detail ? { ...detail, turn: { ...detail.turn, totalTokens: 998877 } } : detail;
+      };
+      return true;
+    })()`);
+    await clickSelector(tab, '#session-trace .trace-icon-button', "refresh selected trace detail");
+    await waitFor(tab, "Refreshing the same Trace ID reloads its detail", `document.querySelector("#session-trace .trace-detail-metrics")?.getAttribute("data-trace-total-tokens") === "998877"`);
+    await evaluate(tab, `(() => {
+      window.workbench.getSessionTrace = window.__skillOsOriginalGetSessionTrace;
+      delete window.__skillOsOriginalGetSessionTrace;
+      return true;
+    })()`);
     await expect(tab, "Session Trace marks inferred evidence", `document.querySelector("#session-trace .trace-capture-pill")?.textContent.includes("推断") || document.querySelector("#session-trace .trace-capture-pill")?.textContent.includes("Inferred")`);
     await clickSelector(tab, '#session-trace .trace-view-switch button:nth-child(2)', "switch to trace tree");
     await expect(tab, "Session Trace tree view becomes active", `document.querySelector("#session-trace .trace-span-list")?.getAttribute("data-trace-view") === "tree"`);

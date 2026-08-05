@@ -1,7 +1,9 @@
 import type {
   AuthorizationInput,
+  AuthorizationPreferenceInput,
   BootstrapState,
   DailyMetricsSummary,
+  EvidencePurgePreview,
   GraphEdgeSummary,
   GraphNeighborhood,
   GraphNodeSummary,
@@ -262,11 +264,11 @@ let previewModelEvaluationConfig: ModelEvaluationConfig = {
 };
 let previewRemoteCandidates: RemoteSkillCandidateSummary[] = [];
 const previewDirectoryChoices = [
-  "/Users/demo/projects/skill-playground/skills",
-  "/Users/demo/projects/codex-skills/node_modules",
-  "/Users/demo/projects/skill-os-lab/skills",
-  "/Users/demo/projects/codex-skills/dist",
-  "/Users/demo/.codex/skills/archive"
+  "/Users/demo/projects/skill-os-preview",
+  "/Users/demo/projects/commerce-portal",
+  "/Users/demo/projects/analytics-console",
+  "/Users/demo/projects/codex-skills",
+  "/Users/demo/projects/legacy-console"
 ] as const;
 let previewDirectoryChoiceIndex = 0;
 
@@ -275,6 +277,19 @@ function nextPreviewDirectory() {
     previewDirectoryChoices[previewDirectoryChoiceIndex % previewDirectoryChoices.length];
   previewDirectoryChoiceIndex += 1;
   return nextPath;
+}
+
+function isPreviewWorkspaceInProject(workspaceRef: string | null, projectRoot: string) {
+  if (!workspaceRef || !projectRoot.trim()) {
+    return false;
+  }
+  const normalize = (value: string) => value.replace(/\/+$/, "");
+  const normalizedWorkspace = normalize(workspaceRef);
+  const normalizedProjectRoot = normalize(projectRoot);
+  return (
+    normalizedWorkspace === normalizedProjectRoot ||
+    normalizedWorkspace.startsWith(`${normalizedProjectRoot}/`)
+  );
 }
 
 function previewHealth(
@@ -580,6 +595,7 @@ const boot: BootstrapState = {
     status: "active",
     telemetryMode: "estimated",
     allowRawContent: false,
+    allowMessageSummary: true,
     allowBackgroundWatch: false,
     storageRoot,
     createdAt: now,
@@ -849,7 +865,7 @@ const previewSessionTraces: SessionTraceListItem[] = [
     harnessId: "codex",
     adapterId: "codex_jsonl_v1",
     evidenceKind: "message_turn",
-    messageSummary: "第 6 条用户消息（原文未保存）",
+    messageSummary: "请把会话链路的路由、工作流命中依据和 Skill 调用证据展示清楚。",
     receivedAt: "2026-06-05T09:02:00+08:00",
     completedAt: "2026-06-05T09:02:03+08:00",
     status: "completed",
@@ -873,7 +889,7 @@ const previewSessionTraces: SessionTraceListItem[] = [
     harnessId: "codex",
     adapterId: "codex_jsonl_v1",
     evidenceKind: "message_turn",
-    messageSummary: "第 5 条用户消息（原文未保存）",
+    messageSummary: "检查当前项目的工作流配置，并输出验证结果。",
     receivedAt: "2026-06-05T08:55:00+08:00",
     completedAt: "2026-06-05T08:55:02+08:00",
     status: "completed",
@@ -935,6 +951,7 @@ function makePreviewTraceDetail(turn: SessionTraceListItem): SessionTraceDetail 
       skillVersionId: null,
       workflowId: null,
       workflowNodeId: null,
+      workflowBinding: null,
       tokenCount: turn.totalTokens,
       toolCallCount: 0,
       metadata: { rawContentStored: false }
@@ -958,9 +975,15 @@ function makePreviewTraceDetail(turn: SessionTraceListItem): SessionTraceDetail 
       skillVersionId: null,
       workflowId: null,
       workflowNodeId: null,
+      workflowBinding: null,
       tokenCount: 0,
       toolCallCount: 0,
-      metadata: { evidenceBoundary: "preview inference" }
+      metadata: {
+        skillTargets: turn.skillHits.map((hit) => hit.skillName),
+        signals: ["code_generation", "verification_loop"],
+        sourceEventTypes: ["skill_run.started", "skill_run.completed"],
+        evidenceBoundary: "log_inference"
+      }
     },
     {
       id: workflowSpanId,
@@ -981,9 +1004,10 @@ function makePreviewTraceDetail(turn: SessionTraceListItem): SessionTraceDetail 
       skillVersionId: null,
       workflowId: null,
       workflowNodeId: null,
+      workflowBinding: null,
       tokenCount: 0,
       toolCallCount: 0,
-      metadata: { signals: ["code_generation", "verification_loop"] }
+      metadata: { signals: ["code_generation", "verification_loop"], evidenceBoundary: "log_inference" }
     },
     ...turn.skillHits.map((hit, index): TraceSpanSummary => ({
       id: hit.spanId,
@@ -1004,6 +1028,7 @@ function makePreviewTraceDetail(turn: SessionTraceListItem): SessionTraceDetail 
       skillVersionId: hit.skillVersionId,
       workflowId: null,
       workflowNodeId: null,
+      workflowBinding: null,
       tokenCount: Math.round(turn.totalTokens / Math.max(turn.skillHits.length, 1)),
       toolCallCount: 2,
       metadata: { hitState: hit.hitState, hitIndex: hit.hitIndex }
@@ -1027,6 +1052,7 @@ function makePreviewTraceDetail(turn: SessionTraceListItem): SessionTraceDetail 
       skillVersionId: null,
       workflowId: null,
       workflowNodeId: null,
+      workflowBinding: null,
       tokenCount: 0,
       toolCallCount: 0,
       metadata: {}
@@ -1050,6 +1076,7 @@ function makePreviewTraceDetail(turn: SessionTraceListItem): SessionTraceDetail 
       skillVersionId: null,
       workflowId: null,
       workflowNodeId: null,
+      workflowBinding: null,
       tokenCount: 0,
       toolCallCount: 0,
       metadata: { rawResponseStored: false }
@@ -2300,11 +2327,60 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
       return delay(undefined);
     },
     getProjectProfile: (projectRoot: string) => delay(makeProjectProfile(projectRoot)),
+    getEvidenceStorageStats: () =>
+      delay({
+        databasePath: "preview/skill-management-workbench.sqlite",
+        databaseBytes: 0,
+        traceSessions: previewSessionTraces.length,
+        traceTurns: previewSessionTraces.length,
+        traceSpans: previewSessionTraces.reduce((total, trace) => total + trace.skillHits.length, 0),
+        traceEvents: previewSessionTraces.length,
+        skillHitEvidence: previewSessionTraces.reduce((total, trace) => total + trace.skillHits.length, 0),
+        skillRuns: recentRuns.length,
+        oldestEvidenceAt: previewSessionTraces[previewSessionTraces.length - 1]?.receivedAt ?? null,
+        newestEvidenceAt: previewSessionTraces[0]?.receivedAt ?? null
+      }),
+    previewEvidencePurge: async (input): Promise<EvidencePurgePreview> => ({
+      projectRoot: input.projectRoot ?? null,
+      before: input.before,
+      traceSessions: 0,
+      traceTurns: 0,
+      traceSpans: 0,
+      traceEvents: 0,
+      skillHitEvidence: 0,
+      skillRuns: 0,
+      affectedSkillCount: 0
+    }),
+    purgeEvidence: async (input) => {
+      if (!input.confirm) {
+        throw new Error("Evidence cleanup requires explicit confirmation.");
+      }
+      return {
+        projectRoot: input.projectRoot ?? null,
+        before: input.before,
+        completedAt: new Date().toISOString(),
+        deletedTraceSessions: 0,
+        deletedTraceTurns: 0,
+        deletedTraceSpans: 0,
+        deletedTraceEvents: 0,
+        deletedSkillHitEvidence: 0,
+        deletedSkillRuns: 0,
+        rebuiltMetricSkills: 0,
+        databaseBytes: 0
+      };
+    },
     pickDirectory: () => delay(nextPreviewDirectory()),
     pickTelemetryFile: () => delay("/Users/demo/Downloads/sample-telemetry.jsonl"),
     pickBackupManifest: () => delay(backups[0].manifestPath),
     pickBundleManifest: () => delay(`${storageRoot}/preview/bundle.manifest.json`),
     grantAuthorization: (_input: AuthorizationInput) => delay(boot),
+    updateAuthorizationPreferences: (input: AuthorizationPreferenceInput) => {
+      if (boot.policy) {
+        boot.policy.allowMessageSummary = input.allowMessageSummary;
+        boot.policy.updatedAt = new Date().toISOString();
+      }
+      return delay(boot);
+    },
     listAuditEvents: (limit = 12) => delay(auditEvents.slice(0, limit)),
     createBackup: () => delay(backups[0]),
     listBackups: (limit = 8) => delay(backups.slice(0, limit)),
@@ -2378,23 +2454,6 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
       };
       return delay(impact);
     },
-    scanSkills: () =>
-      delay({
-        scanRunId: "scan-preview",
-        scanScope: "approved_roots",
-        rootPaths: boot.roots.map((root) => root.path),
-        filesSeen: 3,
-        skillsFound: 3,
-        skillsChanged: 1,
-        errorCount: 0,
-        excludedPathCount: 1,
-        skippedEntryCount: 4,
-        workflowDetected: true,
-        workflowVersion: "preview",
-        workflowMarkers: ["AGENTS.md", ".agents/skills", ".specify/workflow-version.txt"],
-        completedAt: now,
-        skills
-      }),
     scanProjectSkills: (projectRoot: string) =>
       delay({
         scanRunId: "scan-project-preview",
@@ -2533,6 +2592,22 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
         summary: "attention"
       }),
     listProjectScenarioLoopRuns: () => delay([]),
+    getProjectWorkflowEvidence: (projectRoot) => delay({
+      projectRoot,
+      sourceRefs: [],
+      updatedAt: null,
+      artifactVersions: {
+        requirementVersion: null,
+        designVersion: null,
+        impactVersion: null,
+        taskBreakdownVersion: null,
+        verificationPlanVersion: null
+      },
+      confirmation: null,
+      verificationStatus: null,
+      verificationEvidenceRefs: [],
+      userAcceptanceRecorded: false
+    }),
     getScenarioLoopRun: () => delay(null),
     listSkills: () => delay(skills),
     generateSkillAnalysis: (skillId: string) => delay(makeSkillAnalysis(skillId)),
@@ -2710,8 +2785,10 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
           return {
             projectPath,
             totalRuns: matchingRuns.length,
-            explicitSkillRuns: matchingRuns.filter((run) => run.confidenceScore > 0.68).length,
-            qualifiedSkillRuns: matchingRuns.filter((run) => run.confidenceScore >= 0.68).length,
+            explicitSkillRuns: matchingRuns.filter((run) => run.captureMode === "precise").length,
+            qualifiedSkillRuns: matchingRuns.filter(
+              (run) => ["precise", "estimated", "inferred"].includes(run.captureMode) && run.confidenceScore >= 0.68
+            ).length,
             totalTokens: matchingRuns.reduce((total, run) => total + run.totalTokens, 0),
             latestRunAt: matchingRuns[0]?.startedAt ?? null
           };
@@ -2748,6 +2825,10 @@ export function createPreviewWorkbenchApi(): WorkbenchApi {
       const normalizedQuery = query.query?.trim().toLowerCase() ?? "";
       const filtered = previewSessionTraces
         .filter((item) => !query.projectId || item.projectId === query.projectId)
+        .filter(
+          (item) =>
+            !query.projectRoot || isPreviewWorkspaceInProject(item.workspaceRef, query.projectRoot)
+        )
         .filter((item) => !query.harnessId || item.harnessId === query.harnessId)
         .filter((item) => !query.skillId || item.skillHits.some((hit) => hit.skillId === query.skillId))
         .filter((item) => !query.status || query.status === "all" || item.status === query.status)

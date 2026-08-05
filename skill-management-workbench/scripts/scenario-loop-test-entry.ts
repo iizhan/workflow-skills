@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
   ScenarioLoopBudgetSummary,
@@ -124,6 +124,105 @@ export async function runScenarioLoopIntegration(options: IntegrationOptions) {
       templateId: "scenario.design-to-frontend"
     });
     const binding = registry.applyBinding({ previewId: bindingPreview.previewId }).binding;
+
+    const conversationFeatureRoot = join(projectRoot, "specs", "conversation-loop");
+    mkdirSync(conversationFeatureRoot, { recursive: true });
+    writeFileSync(
+      join(conversationFeatureRoot, "workflow-state.yaml"),
+      `feature:
+  slug: conversation-loop
+  name: Conversation loop evidence
+  created_at: "2026-07-23T09:00:00.000Z"
+artifact_versions:
+  requirement: v1
+  design: v2
+  impact: v1
+  task_breakdown: v2
+  verification: v1
+scenario_loop_runs:
+  - run_id: loop-conversation-001
+    initiation_source: conversation
+    session_ref: session-019f
+    primary_workflow: scenario.design-to-frontend
+    template_version: 1.0.0
+    formal_package:
+      requirement: v1
+      design: v2
+      impact: v1
+      task_breakdown: v2
+      verification: v1
+      confirmation_ref: feature/conversation-loop/confirmation-v2
+      confirmed_at: "2026-07-23T09:10:00.000Z"
+    status: verified
+    current_iteration: 1
+    iterations:
+      - iteration: 1
+        status: verified
+        workflow_run_ref: turn-019f-01
+        quality:
+          score: 94
+          evidence_refs: [verification:conversation-loop]
+          checks:
+            - id: visual_or_interaction_evidence
+              passed: true
+              evidence_refs: [screenshot:conversation-loop]
+        budget:
+          state: available
+          observed_tokens: 680
+          evidence_refs: [usage:conversation-loop]
+        created_at: "2026-07-23T09:11:00.000Z"
+        completed_at: "2026-07-23T09:12:00.000Z"
+    created_at: "2026-07-23T09:10:00.000Z"
+    updated_at: "2026-07-23T09:12:00.000Z"
+    closed_at: "2026-07-23T09:12:00.000Z"
+`,
+      "utf8"
+    );
+    const conversationRun = loopService
+      .listProjectRuns(projectRoot)
+      .find((run) => run.externalRunId === "loop-conversation-001");
+    assert.equal(conversationRun?.evidenceSource, "conversation_state");
+    assert.equal(conversationRun?.sessionRef, "session-019f");
+    assert.equal(conversationRun?.template.templateId, "scenario.design-to-frontend");
+    assert.equal(conversationRun?.latestQuality?.score, 94);
+    assert.equal(conversationRun?.iterations[0]?.budget.observedTokens, 680);
+    assert.equal(conversationRun?.sourceRef, "specs/conversation-loop/workflow-state.yaml");
+
+    const standardFeatureRoot = join(projectRoot, "specs", "standard-delivery");
+    mkdirSync(standardFeatureRoot, { recursive: true });
+    writeFileSync(
+      join(standardFeatureRoot, "workflow-state.yaml"),
+      `feature:
+  slug: standard-delivery
+  name: Standard delivery evidence
+  created_at: "2026-07-24T09:00:00.000Z"
+  updated_at: "2026-07-24T09:20:00.000Z"
+artifact_versions:
+  requirement: v3
+  design: v4
+  impact: v2
+  task_breakdown: v4
+  verification: v2
+confirmation_history:
+  - id: standard-delivery/confirmation-v4
+    confirmed_at: "2026-07-24T09:10:00.000Z"
+confirmation_gates:
+  user_acceptance:
+    status: accepted
+verification_evidence:
+  - ref: report:standard-delivery
+validation_status: verified
+scenario_loop_runs: []
+`,
+      "utf8"
+    );
+    const standardEvidence = loopService.getProjectWorkflowEvidence(projectRoot);
+    assert.equal(standardEvidence.artifactVersions.designVersion, "v4");
+    assert.equal(standardEvidence.confirmation?.confirmationRef, "standard-delivery/confirmation-v4");
+    assert.equal(standardEvidence.verificationStatus, "verified");
+    assert.deepEqual(standardEvidence.verificationEvidenceRefs, ["report:standard-delivery"]);
+    assert.equal(standardEvidence.userAcceptanceRecorded, true);
+    assert.equal(standardEvidence.sourceRefs[0], "specs/standard-delivery/workflow-state.yaml");
 
     assert.throws(
       () =>

@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS authorization_policies (
   status TEXT NOT NULL,
   telemetry_mode TEXT NOT NULL,
   allow_raw_content INTEGER NOT NULL,
+  allow_message_summary INTEGER NOT NULL DEFAULT 0,
   allow_background_watch INTEGER NOT NULL,
   storage_root TEXT NOT NULL,
   created_at TEXT NOT NULL,
@@ -26,6 +27,12 @@ CREATE TABLE IF NOT EXISTS authorization_events (
   actor_type TEXT NOT NULL,
   created_at TEXT NOT NULL,
   metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_migrations (
+  id TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL,
+  summary_json TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS managed_projects (
@@ -520,6 +527,9 @@ CREATE INDEX IF NOT EXISTS idx_skill_versions_skill_current
 CREATE INDEX IF NOT EXISTS idx_skill_runs_skill_started
   ON skill_runs(skill_id, started_at);
 
+CREATE INDEX IF NOT EXISTS idx_skill_runs_started
+  ON skill_runs(started_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_trace_sessions_observed
   ON trace_sessions(last_observed_at DESC);
 
@@ -532,11 +542,17 @@ CREATE INDEX IF NOT EXISTS idx_trace_turns_session_received
 CREATE INDEX IF NOT EXISTS idx_trace_turns_trace
   ON trace_turns(trace_id);
 
+CREATE INDEX IF NOT EXISTS idx_trace_turns_received
+  ON trace_turns(received_at DESC, trace_id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_trace_spans_trace_sequence
   ON trace_spans(trace_id, sequence);
 
 CREATE INDEX IF NOT EXISTS idx_trace_events_trace_sequence
   ON trace_events(trace_id, sequence);
+
+CREATE INDEX IF NOT EXISTS idx_trace_events_occurred
+  ON trace_events(occurred_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_skill_hit_trace
   ON skill_hit_evidence(trace_id, hit_index DESC);
@@ -635,6 +651,7 @@ export class WorkbenchDatabase {
   }
 
   private ensureSchemaMigrations() {
+    this.ensureColumn("authorization_policies", "allow_message_summary", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("workflow_bundles", "source_bundle_id", "TEXT");
     this.ensureColumn("workflow_bundles", "lineage_key", "TEXT");
     this.ensureColumn("workflow_bundles", "lifecycle_state", "TEXT");
