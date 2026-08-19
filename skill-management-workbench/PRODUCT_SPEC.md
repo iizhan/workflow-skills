@@ -94,13 +94,17 @@ Skill OS
 +-- 04 Registry
 +-- 05 Skill Library
 +-- 06 Marketplace
-+-- 07 Graph
-+-- 08 Analysis
-+-- 09 Optimization
-+-- 10 Apply Center
-+-- 11 Bundles
-+-- 12 Audit
-+-- 13 Settings
++-- 07 Project Management
++-- 08 Workflow Library
++-- 09 Session Trace
++-- 10 Graph
++-- 11 Analysis
++-- 12 Optimization
++-- 13 Apply Center
++-- 14 Bundles
++-- 15 Update Center
++-- 16 Audit
++-- 17 Settings
 ```
 
 ## Figma File Structure
@@ -115,13 +119,17 @@ Skill OS
 +-- 04 Registry
 +-- 05 Skill Library
 +-- 06 Marketplace
-+-- 07 Graph
-+-- 08 Analysis
-+-- 09 Optimization
-+-- 10 Apply Center
-+-- 11 Bundles
-+-- 12 Audit
-+-- 13 Settings
++-- 07 Project Management
++-- 08 Workflow Library
++-- 09 Session Trace
++-- 10 Graph
++-- 11 Analysis
++-- 12 Optimization
++-- 13 Apply Center
++-- 14 Bundles
++-- 15 Update Center
++-- 16 Audit
++-- 17 Settings
 ```
 
 ## Killer Features
@@ -209,6 +217,32 @@ Node types:
 - Marketplace
 - GitHub Repo
 - MCP Server
+
+### 6. Project Skill & Workflow Update Center
+
+Skill OS should treat a project as a real user-selected directory, not only as a configuration snapshot.
+
+Project Management should support:
+
+- Bind Project
+- Scan Project
+- Rename Project
+- View Project Skills
+- View Project Workflows
+- View Session Trace evidence
+- Detect workflow version drift
+- Preview update impact
+- Apply with backup
+- Run doctor validation
+- Roll back when needed
+
+The Update Center should cover three layers:
+
+- App updates
+- Skill / Workflow source updates
+- Bound project workflow upgrades
+
+Every project write requires preview, confirmation, backup, serial execution, and a result report.
 
 ## Marketplace 2.0
 

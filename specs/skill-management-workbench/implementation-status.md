@@ -1,6 +1,6 @@
 # Skill OS v1 Implementation Status
 
-Last updated: 2026-06-30
+Last updated: 2026-08-14
 
 ## Scope
 
@@ -28,6 +28,9 @@ Current implementation preserves these boundaries:
 - Apply safety: applying a Skill requires scope and target preview before write operations.
 - Bundle safety: export copies source Skills into app-local bundle storage; import uses manifest validation, diff preview, and explicit strategy.
 - Restore safety: backup restore remains preview-first and does not overwrite app state during validation.
+- Project safety: project management remains single-directory first; the app must not fall back to whole-machine scanning as a default behavior.
+- Project workflow safety: applying or upgrading a project workflow requires impact preview, backup, serial write execution, doctor/validation result, and a recovery report.
+- Library separation: Skill Library is the asset store for local scans, imported candidates, remote candidates, installed assets, and update state; Project Management is the project binding and evidence surface.
 
 ## Implemented Areas
 
@@ -614,10 +617,12 @@ Results:
 - Apply Center now requests `previewSkillApply({ remoteCandidateId, scope })` for remote handoffs and shows the preview source as `Remote Candidate / 远程候选`. The visible target and impact values now come from the service-backed preview result while preserving the no-write/no-execute boundary.
 - Browser preview parity was added for remote candidate apply preview, and static guards now require `sourceKind`, `remoteCandidateId`, the remote apply service branch, and the renderer request path.
 - Verification passed after the remote Apply Preview service pass: `npm run self-test:ui`, `npm run typecheck`, `npm run smoke`, `npm run layout:check`, and `npm run build`. Latest self-test report is `skill-management-workbench/tmp/self-test/self-test-report.json`, mode remains `source-contract`, with zero issues and one environment warning: `Electron exited with signal SIGABRT`.
+
 ## Next Highest-Value Tasks
 
-1. Keep expanding `npm run self-test:ui` with any new UI feature before marking frontend work complete.
-2. Add advanced Health Score custom sliders after the preset behavior is stable.
-3. Add richer manifest/diff validators for remote candidates once local bundle/manifest metadata is available.
-4. Expand smoke checks into runtime UI automation if the project later adopts a browser/Electron test runner.
-5. Prepare a release checklist covering branch, build, package, tag, and merge gates once the user asks for release work.
+1. Implement `TASK-14 Project Skill & Workflow Update Center` in phases: product contract, project detail modal, Skill Library tabs/sort/filter, workflow update preview, backup/apply/doctor, runtime evidence bridge, and Update Center.
+2. Keep expanding `npm run self-test:ui` with any new UI feature before marking frontend work complete.
+3. Add advanced Health Score custom sliders after the preset behavior is stable.
+4. Add richer manifest/diff validators for remote candidates once local bundle/manifest metadata is available.
+5. Expand smoke checks into runtime UI automation if the project later adopts a browser/Electron test runner.
+6. Prepare a release checklist covering branch, build, package, tag, and merge gates once the user asks for release work.

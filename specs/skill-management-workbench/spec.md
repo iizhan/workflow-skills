@@ -122,7 +122,7 @@ If the user does not approve, the app must remain in a safe limited mode.
 
 ## 3. Product Modules
 
-The product should be split into six major modules.
+The product should be split into seven major modules.
 
 ### 3.1 Skill Registry
 
@@ -278,6 +278,37 @@ Initial scope:
 Do not start with a full general-purpose prompt canvas.
 Start with Skill-centric orchestration.
 
+### 3.7 Project Skill & Workflow Update Center
+
+Purpose:
+
+- bind real user-selected project directories
+- discover project-local Skills and workflow state
+- recommend compatible `skills-workflow` templates
+- preview project impact before applying any Skill or Workflow
+- detect project workflow version drift
+- create backups, apply updates serially, run doctor checks, and store result reports
+
+Important distinction:
+
+- a Skill OS project is a real filesystem project binding with telemetry, workflow bindings,
+  adapter readiness, and evidence state
+- it is not only a provider/MCP/Skill configuration snapshot
+
+Recommended project loop:
+
+1. Bind Project
+2. Scan Project
+3. Recommend Workflow
+4. Preview Impact
+5. Apply With Backup
+6. Observe Runtime Evidence
+7. Detect Update Drift
+8. Upgrade Or Roll Back
+
+The app must not use this module to reintroduce whole-machine scanning. Every project action must
+start from a user-selected directory or an already authorized root.
+
 ## 4. Recommended Local Architecture
 
 ### 4.1 Data Storage
@@ -358,6 +389,12 @@ Minimum tables or entities:
 - `scan_exclusions`
 - `authorization_policies`
 - `authorization_events`
+- `managed_projects`
+- `project_skill_bindings`
+- `project_workflow_versions`
+- `project_update_plans`
+- `project_update_results`
+- `project_projection_backups`
 
 Important Skill entity fields beyond the file system snapshot:
 
